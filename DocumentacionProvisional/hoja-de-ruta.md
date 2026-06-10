@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** Fase 1 · **M1 (Esqueleto)** — cimientos de build ✅; siguiente: primera librería + primer test (sub-paso 2).
+**Estado actual:** Fase 1 · **M1 (Esqueleto)** — cimientos ✅ · primera librería + test verde ✅; siguiente: `.clang-format`/`.clang-tidy`, bench vacío y CI (sub-paso 3).
 
 ---
 
@@ -43,9 +43,9 @@ Estructura de build y herramientas:
 - [x] `.gitignore` (excluir `build/`, `vcpkg_installed/`, `data/`). *(`.dockerignore` llega en Fase 3 con `deploy/`.)*
 
 Primer componente de dominio (vertical mínima, TDD rojo→verde):
-- [ ] `src/common/` → target `nexus-common` (lib) con un primer `.hpp`/`.cpp` trivial (p.ej. `version.hpp`/`.cpp` con `nexus_version() -> std::string_view`), Doxygen en español.
-- [ ] Test trivial GoogleTest en `tests/unit/` (target `nexus-tests`) que verifica ese componente; nombre `Metodo_Escenario_ResultadoEsperado`.
-- [ ] Integración con CTest (`enable_testing()` + `gtest_discover_tests`).
+- [x] `src/common/` → target `nexus-common` (lib) con `version.hpp`/`.cpp` (`nexus::version() -> std::string_view`); versión inyectada por CMake (`NEXUSMQ_VERSION`, DRY); Doxygen en español.
+- [x] Test GoogleTest en `tests/unit/common/version_test.cpp` (target `nexus-tests`); nombre `Metodo_Escenario_ResultadoEsperado`.
+- [x] Integración con CTest (`enable_testing()` + `gtest_discover_tests`); GoogleTest vía vcpkg-o-FetchContent (`cmake/Dependencies.cmake`).
 
 Harness de benchmark vacío y CI:
 - [ ] `tools/bench/` → target `nexus-bench` (exe): `main.cpp` mínimo que enlaza Google Benchmark y corre un *benchmark* trivial (esqueleto del generador open-loop).
