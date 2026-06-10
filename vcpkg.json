@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg/master/scripts/vcpkg.schema.json",
+  "name": "nexusmq",
+  "version": "0.1.0",
+  "description": "Broker de mensajería distribuido de alto rendimiento (C++20).",
+  "homepage": "https://github.com/AOjeda006/NexusMQ",
+  "license": "LicenseRef-PolyForm-Noncommercial-1.0.0",
+  "dependencies": [
+    "fmt",
+    "gtest",
+    "benchmark"
+  ]
+}

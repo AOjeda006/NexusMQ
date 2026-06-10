@@ -1,0 +1,63 @@
+# NexusMQ — árbol de build raíz (una sola "solución" CMake, multiplataforma).
+# Diseño: anteproyecto §5.2 · desglose §5. Fasing: Fase 1 = monohilo + I/O bloqueante.
+
+cmake_minimum_required(VERSION 3.25)
+
+# Integración OPCIONAL con vcpkg (modo manifest). Si VCPKG_ROOT está definido y no
+# se ha fijado ya un toolchain, usamos el de vcpkg (manifiesto canónico, ADR-0001);
+# si no existe, los targets que necesiten dependencias caen a un fallback FetchContent
+# (ver tests/, tools/bench/). Así el árbol configura igual con vcpkg (máquina del autor,
+# VS+WSL2) que sin él (este contenedor, CI). Debe ir ANTES de project().
+if(DEFINED ENV{VCPKG_ROOT} AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+  set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+      CACHE STRING "Toolchain de vcpkg (modo manifest)")
+endif()
+
+project(NexusMQ
+  VERSION 0.1.0
+  DESCRIPTION "Broker de mensajería distribuido de alto rendimiento (C++20)"
+  LANGUAGES CXX)
+
+# Prohíbe la build in-source: ensucia el árbol y mezcla artefactos con el código.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
+  message(FATAL_ERROR "Build in-source prohibida. Usa un preset: cmake --preset linux-gcc")
+endif()
+
+option(NEXUS_SANITIZERS "Compila con AddressSanitizer + UBSan (build de pruebas)" OFF)
+
+# Exporta compile_commands.json (lo consumen clang-tidy, clangd y los editores).
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Requisitos comunes de compilación, propagados a TODOS los targets vía un target
+# INTERFACE (CMake moderno basado en targets). C++20 estándar mínimo del proyecto y
+# "avisos como errores": un aviso es un bug en potencia (convenciones/cpp).
+add_library(nexus_options INTERFACE)
+add_library(nexus::options ALIAS nexus_options)
+target_compile_features(nexus_options INTERFACE cxx_std_20)
+
+if(MSVC)
+  target_compile_options(nexus_options INTERFACE /W4 /WX /permissive-)
+else()
+  target_compile_options(nexus_options INTERFACE -Wall -Wextra -Wpedantic -Werror)
+endif()
+
+# Sanitizers (ASan/UBSan) bajo demanda para la build de pruebas. TSan se añadirá con la
+# concurrencia (Fase 1b); es incompatible con ASan, por eso no se combinan aquí.
+if(NEXUS_SANITIZERS AND NOT MSVC)
+  target_compile_options(nexus_options INTERFACE
+    -fsanitize=address,undefined -fno-omit-frame-pointer)
+  target_link_options(nexus_options INTERFACE -fsanitize=address,undefined)
+endif()
+
+enable_testing()
+
+# Los subdirectorios se incorporan a medida que existen: el árbol crece por hito
+# (M1 cimientos → M2 common/storage → … ). Mientras una carpeta no tenga su
+# CMakeLists, se omite sin romper la configuración.
+foreach(_dir IN ITEMS src tools/bench tests)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_dir}/CMakeLists.txt")
+    add_subdirectory(${_dir})
+  endif()
+endforeach()
+
+message(STATUS "NexusMQ ${PROJECT_VERSION} · C++20 · sanitizers=${NEXUS_SANITIZERS}")

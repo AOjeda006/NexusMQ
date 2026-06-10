@@ -1,0 +1,17 @@
+# Build out-of-source (presets escriben en build/<preset>/)
+/build/
+/out/
+cmake-build-*/
+
+# Artefactos de vcpkg en modo manifest
+/vcpkg_installed/
+
+# Caché de herramientas / editores
+compile_commands.json
+.cache/
+.vscode/
+.vs/
+*.user
+
+# Datos de ejecución del broker (logs de partición, etc.)
+/data/
