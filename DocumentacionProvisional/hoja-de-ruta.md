@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** Fase 1 · **M1 (Esqueleto)** — cimientos ✅ · primera librería + test verde ✅; siguiente: `.clang-format`/`.clang-tidy`, bench vacío y CI (sub-paso 3).
+**Estado actual:** Fase 1 · **M1 (Esqueleto) cerrado ✅** (build+test, sanitizers, formato, clang-tidy, CI). Siguiente: **M2 — Record + CRC32C**.
 
 ---
 
@@ -38,8 +38,8 @@ Estructura de build y herramientas:
 - [x] Flags de calidad: `-Wall -Wextra -Wpedantic -Werror` (GCC/Clang) / `/W4 /WX` (MSVC); opción `NEXUS_SANITIZERS` (ASan/UBSan). *(TSan llega con la concurrencia en 1b; es incompatible con ASan.)*
 - [x] `CMakePresets.json`: `linux-gcc`, `linux-clang`, `linux-gcc-asan` (windows-msvc se añade en su momento).
 - [x] `vcpkg.json` (manifest): `gtest`, `benchmark`, `fmt`. Integración vcpkg opcional (toolchain solo si `VCPKG_ROOT`); sin vcpkg → `FetchContent`.
-- [ ] `.clang-format` versionado (estilo del proyecto; naming lo refuerza el formateador).
-- [ ] `.clang-tidy` versionado (chequeos Core Guidelines).
+- [x] `.clang-format` versionado (Google base, 100 col, 4 espacios, `InsertNewlineAtEOF`).
+- [x] `.clang-tidy` versionado (bugprone/cppcoreguidelines/modernize/performance/readability + `readability-identifier-naming` con el naming del proyecto).
 - [x] `.gitignore` (excluir `build/`, `vcpkg_installed/`, `data/`). *(`.dockerignore` llega en Fase 3 con `deploy/`.)*
 
 Primer componente de dominio (vertical mínima, TDD rojo→verde):
@@ -48,10 +48,10 @@ Primer componente de dominio (vertical mínima, TDD rojo→verde):
 - [x] Integración con CTest (`enable_testing()` + `gtest_discover_tests`); GoogleTest vía vcpkg-o-FetchContent (`cmake/Dependencies.cmake`).
 
 Harness de benchmark vacío y CI:
-- [ ] `tools/bench/` → target `nexus-bench` (exe): `main.cpp` mínimo que enlaza Google Benchmark y corre un *benchmark* trivial (esqueleto del generador open-loop).
-- [ ] CI (GitHub Actions, `.github/workflows/ci.yml`): compila en Linux (GCC/Clang) con `-Werror`, corre `clang-format --dry-run`, `clang-tidy`, los tests y los sanitizers.
+- [x] `tools/bench/` → target `nexus-bench` (exe): `main.cpp` mínimo que enlaza Google Benchmark (vía vcpkg-o-FetchContent) y corre un *benchmark* trivial.
+- [x] CI (GitHub Actions, `.github/workflows/ci.yml`): build+test en GCC y Clang con `-Werror`, job de sanitizers (ASan/UBSan), job de lint (`clang-format --dry-run --Werror` + `clang-tidy` sobre `src/`).
 
-**Verificación de cierre de M1:** `cmake --preset linux-gcc && cmake --build --preset linux-gcc && ctest --preset linux-gcc` compila y pasa el test trivial; CI en verde.
+**Verificación de cierre de M1:** ✅ `cmake --preset linux-gcc && cmake --build … && ctest …` compila y pasa 2/2; ASan/UBSan verde; formato y clang-tidy limpios. **M1 cerrado** (pendiente solo confirmar el primer run de CI verde en GitHub).
 
 ### M2 — Record + CRC32C
 - [ ] `nexus-common`: `types.hpp` (aliases de ancho fijo, `Codec`, helpers little-endian `load_le`/`store_le`).

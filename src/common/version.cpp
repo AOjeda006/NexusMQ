@@ -6,4 +6,4 @@ std::string_view version() noexcept {
     return NEXUSMQ_VERSION;
 }
 
-} // namespace nexus
+}  // namespace nexus

@@ -40,4 +40,4 @@ namespace nexus {
  */
 [[nodiscard]] std::string_view version() noexcept;
 
-} // namespace nexus
+}  // namespace nexus

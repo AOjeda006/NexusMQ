@@ -26,3 +26,27 @@ function(nexus_require_googletest)
     GIT_SHALLOW    TRUE)
   FetchContent_MakeAvailable(googletest)
 endfunction()
+
+# Garantiza Google Benchmark como target benchmark::benchmark. Misma estrategia.
+function(nexus_require_benchmark)
+  if(TARGET benchmark::benchmark)
+    return()
+  endif()
+
+  find_package(benchmark CONFIG QUIET)
+  if(benchmark_FOUND)
+    message(STATUS "Google Benchmark: resuelto vía find_package (vcpkg/sistema).")
+    return()
+  endif()
+
+  message(STATUS "Google Benchmark: no encontrado; descargando con FetchContent.")
+  include(FetchContent)
+  # No construir las pruebas internas de benchmark (arrastrarían su propio gtest).
+  set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+  set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(benchmark
+    GIT_REPOSITORY https://github.com/google/benchmark.git
+    GIT_TAG        v1.9.0
+    GIT_SHALLOW    TRUE)
+  FetchContent_MakeAvailable(benchmark)
+endfunction()

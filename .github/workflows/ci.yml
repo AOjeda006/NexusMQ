@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancela ejecuciones antiguas de la misma rama si llega un push nuevo.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: build & test (${{ matrix.preset }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [linux-gcc, linux-clang]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar toolchain
+        run: sudo apt-get update && sudo apt-get install -y ninja-build cmake g++ clang
+
+      - name: Configurar
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Compilar (avisos como errores)
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Tests
+        run: ctest --preset ${{ matrix.preset }}
+
+  sanitizers:
+    name: sanitizers (ASan/UBSan)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar toolchain
+        run: sudo apt-get update && sudo apt-get install -y ninja-build cmake g++
+
+      - name: Configurar (NEXUS_SANITIZERS=ON)
+        run: cmake --preset linux-gcc-asan
+
+      - name: Compilar
+        run: cmake --build --preset linux-gcc-asan
+
+      - name: Tests bajo sanitizers
+        run: ctest --preset linux-gcc-asan
+
+  lint:
+    name: formato & análisis estático
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar herramientas
+        run: sudo apt-get update && sudo apt-get install -y ninja-build cmake g++ clang-format clang-tidy
+
+      - name: clang-format (--dry-run --Werror)
+        run: |
+          files=$(git ls-files '*.hpp' '*.cpp')
+          echo "$files"
+          clang-format --dry-run --Werror $files
+
+      - name: Configurar (para compile_commands.json)
+        run: cmake --preset linux-gcc
+
+      # Análisis estático del código de dominio (src/). El arnés de bench y los
+      # tests usan macros de terceros (BENCHMARK_MAIN, TEST) que el linter atribuye
+      # a nuestro fichero; no se analizan para no pelear con código ajeno.
+      - name: clang-tidy (código de dominio)
+        run: |
+          files=$(git ls-files 'src/*.cpp')
+          echo "$files"
+          clang-tidy -p build/linux-gcc $files
