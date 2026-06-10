@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** Fase 1 · **M1 (Esqueleto)** — arrancando.
+**Estado actual:** Fase 1 · **M1 (Esqueleto)** — cimientos de build ✅; siguiente: primera librería + primer test (sub-paso 2).
 
 ---
 
@@ -34,13 +34,13 @@
 **Objetivo:** árbol `nexusmq/` que **compila y pasa un test trivial desde el minuto cero**.
 
 Estructura de build y herramientas:
-- [ ] `CMakeLists.txt` raíz: `cmake_minimum_required(VERSION 3.25)`, `project(NexusMQ CXX)`, `cxx_std_20`.
-- [ ] Flags de calidad: `-Wall -Wextra -Wpedantic -Werror` (GCC/Clang) / `/W4 /WX` (MSVC); opción `NEXUS_SANITIZERS` (ASan/UBSan/TSan) para la build de pruebas.
-- [ ] `CMakePresets.json`: presets `linux-gcc`, `linux-clang` (windows-msvc se añade en su momento).
-- [ ] `vcpkg.json` (manifest): `gtest`, `benchmark`, `fmt` para M1 (resto de deps al usarse).
+- [x] `CMakeLists.txt` raíz: `cmake_minimum_required(VERSION 3.25)`, `project(NexusMQ CXX)`, `cxx_std_20` (vía target INTERFACE `nexus_options`).
+- [x] Flags de calidad: `-Wall -Wextra -Wpedantic -Werror` (GCC/Clang) / `/W4 /WX` (MSVC); opción `NEXUS_SANITIZERS` (ASan/UBSan). *(TSan llega con la concurrencia en 1b; es incompatible con ASan.)*
+- [x] `CMakePresets.json`: `linux-gcc`, `linux-clang`, `linux-gcc-asan` (windows-msvc se añade en su momento).
+- [x] `vcpkg.json` (manifest): `gtest`, `benchmark`, `fmt`. Integración vcpkg opcional (toolchain solo si `VCPKG_ROOT`); sin vcpkg → `FetchContent`.
 - [ ] `.clang-format` versionado (estilo del proyecto; naming lo refuerza el formateador).
 - [ ] `.clang-tidy` versionado (chequeos Core Guidelines).
-- [ ] `.dockerignore` y `.gitignore` (excluir `build/`, artefactos).
+- [x] `.gitignore` (excluir `build/`, `vcpkg_installed/`, `data/`). *(`.dockerignore` llega en Fase 3 con `deploy/`.)*
 
 Primer componente de dominio (vertical mínima, TDD rojo→verde):
 - [ ] `src/common/` → target `nexus-common` (lib) con un primer `.hpp`/`.cpp` trivial (p.ej. `version.hpp`/`.cpp` con `nexus_version() -> std::string_view`), Doxygen en español.
