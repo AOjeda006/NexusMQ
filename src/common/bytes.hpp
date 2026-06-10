@@ -9,9 +9,9 @@
 
 namespace nexus {
 
-	/// Vista de solo lectura sobre bytes contiguos (zero-copy). Afinidad INMUTABLE.
-	using ByteSpan = std::span<const std::byte>;
+/// Vista de solo lectura sobre bytes contiguos (zero-copy). Afinidad INMUTABLE.
+using ByteSpan = std::span<const std::byte>;
 
-	/// Vista mutable sobre byes contiguos (zero-copy).
-	using MutByteSpan = std::span<std::byte>;
-} // namespace nexus
+/// Vista mutable sobre bytes contiguos (zero-copy).
+using MutByteSpan = std::span<std::byte>;
+}  // namespace nexus
