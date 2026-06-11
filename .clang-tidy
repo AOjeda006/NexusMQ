@@ -21,6 +21,7 @@ Checks: >
   -cppcoreguidelines-pro-bounds-pointer-arithmetic,
   -cppcoreguidelines-pro-bounds-constant-array-index,
   -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
+  -cppcoreguidelines-pro-type-vararg,
   -portability-avoid-pragma-once
 
 WarningsAsErrors: '*'
