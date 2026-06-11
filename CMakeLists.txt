@@ -15,7 +15,7 @@ endif()
 
 project(NexusMQ
   VERSION 0.1.0
-  DESCRIPTION "Broker de mensajería distribuido de alto rendimiento (C++20)"
+  DESCRIPTION "Broker de mensajería distribuido de alto rendimiento (C++23)"
   LANGUAGES CXX)
 
 # Prohíbe la build in-source: ensucia el árbol y mezcla artefactos con el código.
@@ -29,11 +29,11 @@ option(NEXUS_SANITIZERS "Compila con AddressSanitizer + UBSan (build de pruebas)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Requisitos comunes de compilación, propagados a TODOS los targets vía un target
-# INTERFACE (CMake moderno basado en targets). C++20 estándar mínimo del proyecto y
-# "avisos como errores": un aviso es un bug en potencia (convenciones/cpp).
+# INTERFACE (CMake moderno basado en targets). C++23 (necesario para std::expected,
+# modelo de errores del núcleo, ADR-0009) y "avisos como errores".
 add_library(nexus_options INTERFACE)
 add_library(nexus::options ALIAS nexus_options)
-target_compile_features(nexus_options INTERFACE cxx_std_20)
+target_compile_features(nexus_options INTERFACE cxx_std_23)
 
 if(MSVC)
   target_compile_options(nexus_options INTERFACE /W4 /WX /permissive-)
@@ -60,4 +60,4 @@ foreach(_dir IN ITEMS src tools/bench tests)
   endif()
 endforeach()
 
-message(STATUS "NexusMQ ${PROJECT_VERSION} · C++20 · sanitizers=${NEXUS_SANITIZERS}")
+message(STATUS "NexusMQ ${PROJECT_VERSION} · C++23 · sanitizers=${NEXUS_SANITIZERS}")

@@ -11,7 +11,7 @@
     {
       "name": "linux-gcc",
       "inherits": "linux-base",
-      "displayName": "Linux GCC (C++20, Debug)",
+      "displayName": "Linux GCC (C++23, Debug)",
       "cacheVariables": {
         "CMAKE_CXX_COMPILER": "g++",
         "CMAKE_BUILD_TYPE": "Debug"
@@ -20,10 +20,14 @@
     {
       "name": "linux-clang",
       "inherits": "linux-base",
-      "displayName": "Linux Clang (C++20, Debug)",
+      "displayName": "Linux Clang + libc++ (C++23, Debug)",
       "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "_comment_libcxx": "Clang necesita libc++ para std::expected (libstdc++ lo bloquea por __cpp_concepts). Global, para que también las deps de FetchContent usen libc++ (mismo ABI). Se usa clang también como compilador C porque -stdlib=libc++ llega al enlace de C.",
+        "CMAKE_CXX_FLAGS": "-stdlib=libc++",
+        "CMAKE_EXE_LINKER_FLAGS": "-stdlib=libc++"
       }
     },
     {
