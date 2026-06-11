@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** Fase 1 · **M1 (Esqueleto) cerrado ✅** (build+test, sanitizers, formato, clang-tidy, CI). Siguiente: **M2 — Record + CRC32C**.
+**Estado actual:** Fase 1 · **M1 ✅ · M2 (Record + CRC32C) cerrado ✅** (types/bytes/crc32c/error/record en `nexus-common`, 19 tests verdes en GCC+Clang). Siguiente: **M3 — Segment** (`.log` + `.index`; entra la E/S de fichero).
 
 ---
 
@@ -53,14 +53,17 @@ Harness de benchmark vacío y CI:
 
 **Verificación de cierre de M1:** ✅ `cmake --preset linux-gcc && cmake --build … && ctest …` compila y pasa 2/2; ASan/UBSan verde; formato y clang-tidy limpios. **M1 cerrado** (pendiente solo confirmar el primer run de CI verde en GitHub).
 
-### M2 — Record + CRC32C
-- [ ] `nexus-common`: `types.hpp` (aliases de ancho fijo, `Codec`, helpers little-endian `load_le`/`store_le`).
-- [ ] `nexus-common`: `bytes.hpp/.cpp` (`Buffer` RAII, `ByteSpan`/`MutByteSpan`).
-- [ ] `nexus-common`: `crc32c.hpp/.cpp` — CRC32C SSE4.2 (`_mm_crc32_u64`) con detección de CPU en runtime y **fallback** software por tabla.
-- [ ] `nexus-common`: `error.hpp` (`Error`, `ErrorCode`, `expected<T>`, `NEXUS_TRY`); `clock.hpp` (`MonotonicClock`/`WallClock`); `config.hpp/.cpp`; `logging.hpp/.cpp`.
-- [ ] `nexus-storage`: `record.hpp/.cpp` (`RecordBatch` §5.4 `encode`/`decode`/`verify_crc`/`last_offset`; `Record`).
-- [ ] `nexus-storage`: `record_batch_builder.hpp/.cpp` (varint/zigzag, deltas, CRC).
-- [ ] Tests: **property-based** round-trip `decode(encode(x)) == x`; CRC32C hw vs sw coinciden.
+### M2 — Record + CRC32C ✅
+- [x] `nexus-common`: `types.hpp` (aliases de ancho fijo, `Codec`, helpers little-endian `load_le`/`store_le`).
+- [x] `nexus-common`: `bytes.hpp/.cpp` (`Buffer` RAII **sobre `std::vector`** —ajuste del desglose, ver más abajo—, `ByteSpan`/`MutByteSpan`).
+- [x] `nexus-common`: `crc32c.hpp/.cpp` — CRC32C SSE4.2 (`_mm_crc32_u64`) con detección de CPU en runtime y **fallback** software por tabla; *property test* hw==sw.
+- [x] `nexus-common`: `error.hpp` (`Error`, `ErrorCode`, `expected<T>` = `std::expected`, ADR-0009/0011). *(Diferido: `NEXUS_TRY` → se usan los monádicos `and_then`/`or_else`; `clock.hpp`, `config.hpp`, `logging.hpp` → cuando se necesiten.)*
+- [x] `nexus-common`: `record.hpp/.cpp` (`RecordBatch` §5.4: `encode`/`decode`/`last_offset`; CRC32C + `decode` defensivo con `expected`). *(Diferido: `Record` individual con varint/zigzag y `record_batch_builder` → al construir records reales; el payload se trata como bytes opacos.)*
+- [x] Tests: **property-based** round-trip `decode(encode(x)) == x`; detección de corrupción (truncado + bit volteado); CRC32C hw vs sw.
+
+**Ajustes de diseño respecto al desglose (M2):**
+- `Buffer` se respalda con `std::vector<std::byte>` (no `unique_ptr<std::byte[]>`): convención "prefiere `vector`" + Regla de Cero, sin footguns. Misma interfaz; `std::pmr::vector` daría allocators por núcleo más adelante.
+- **C++23 + libc++ en Clang** (ADR-0011): `std::expected` lo exige; se subió `cxx_std_23` y el preset/CI de Clang usan `-stdlib=libc++`.
 
 ### M3 — Segment (`.log` + `.index`)
 - [ ] `nexus-io`: `file.hpp/.cpp` — `File` RAII (Fase 1 **bloqueante**: `pread`/`pwrite`/`fsync`; `open`).
