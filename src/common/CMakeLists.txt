@@ -4,7 +4,8 @@
 add_library(nexus-common
   version.cpp
   crc32c.cpp
-  bytes.cpp)
+  bytes.cpp
+  record.cpp)
 add_library(nexus::common ALIAS nexus-common)
 
 # La raíz de inclusión es src/, de modo que se incluye como "common/version.hpp".
