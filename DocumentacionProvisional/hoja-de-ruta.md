@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** Fase 1 · **M1 ✅ · M2 (Record + CRC32C) cerrado ✅** (types/bytes/crc32c/error/record en `nexus-common`, 19 tests verdes en GCC+Clang). Siguiente: **M3 — Segment** (`.log` + `.index`; entra la E/S de fichero).
+**Estado actual:** Fase 1 · **M1 ✅ · M2 ✅ · M3.1 (File) ✅ · M3.2 (SparseIndex) ✅** (`nexus-common` + `nexus-io` + `nexus-storage`; **28 tests** verdes en GCC/libstdc++, Clang/libc++ y ASan/UBSan). Siguiente: **M3.3 — Segment** (`.log` + `.index`; une File + RecordBatch + SparseIndex).
 
 ---
 
@@ -66,10 +66,17 @@ Harness de benchmark vacío y CI:
 - **C++23 + libc++ en Clang** (ADR-0011): `std::expected` lo exige; se subió `cxx_std_23` y el preset/CI de Clang usan `-stdlib=libc++`.
 
 ### M3 — Segment (`.log` + `.index`)
-- [ ] `nexus-io`: `file.hpp/.cpp` — `File` RAII (Fase 1 **bloqueante**: `pread`/`pwrite`/`fsync`; `open`).
-- [ ] `nexus-storage`: `index.hpp/.cpp` (`IndexEntry`, `SparseIndex` con `floor` por búsqueda binaria, `load`).
-- [ ] `nexus-storage`: `segment.hpp/.cpp` (`append`, `read`, `seal`, `recover`).
+- [x] **M3.1** `nexus-io`: `file.hpp/.cpp` — `File` RAII (Fase 1 **bloqueante**: `pread`/`pwrite`/`fsync`; `open`).
+- [x] **M3.2** `nexus-storage`: `index.hpp/.cpp` (`IndexEntry`, `SparseIndex` con `floor` por búsqueda binaria, `open`/`maybe_append`/`flush`). Nuevo target `nexus-storage`.
+- [ ] **M3.3** `nexus-storage`: `segment.hpp/.cpp` (`create`/`open`, `append`, `read`, `seal`, `recover`).
 - [ ] Tests: append/read; índice disperso localiza el batch; *seek* correcto.
+
+**Ajustes de diseño respecto al desglose (M3.2):**
+- `SparseIndex` mantiene las entradas en un `std::vector<IndexEntry>` **propietario** (no `std::span` sobre `mmap`): Fase 1 es E/S bloqueante y RAII estricto; el `mmap` de lectura queda como optimización medida de M6 ("lectura mmap"). Misma interfaz pública.
+- `SparseIndex` **posee el `File`** del `.index` (RAII), casando con las firmas `open(path, base)` / `flush()` del desglose detallado.
+- `floor(offset)` devuelve la entrada centinela `{0,0}` cuando no hay ancla `≤ offset` (índice vacío o offset previo a la primera ancla): significa «barre desde el inicio del segmento», simplificando al consumidor (`Segment`).
+- `index_interval_bytes` parametriza la densidad (0 = índice denso). El `.index` se reconstruye en la recuperación (M4), por lo que `open` ignora una cola parcial y solo rechaza (`Corrupt`) entradas no estrictamente crecientes.
+- **clang-tidy:** desactivado `bugprone-easily-swappable-parameters` (`chore(tidy)`): choca con las firmas del motor de log (`maybe_append(offset, file_pos, batch_len)`, futuras `read(offset, max_bytes)`…), todas enteros distintos por contrato. El resto de avisos (designated-initializers, use-ranges) se **arreglaron en código**.
 
 ### M4 — Log de partición (rolling + recuperación)
 - [ ] `nexus-storage`: `partition_log.hpp/.cpp` (`append` con rotación de segmento, `read` cruzando segmentos vía índice §7.11 #3).
