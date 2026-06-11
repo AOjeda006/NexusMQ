@@ -34,7 +34,7 @@ C++/sistemas implicado → (3) lo **implementamos** (lo teclea el autor; el agen
 
 ## Hechos del proyecto (vinculantes)
 
-- **Lenguaje/estándar:** C++20 (C++23 selectivo si el toolchain lo permite).
+- **Lenguaje/estándar:** **C++23** (`cxx_std_23`). Lo exige `std::expected` (modelo de errores del núcleo, ADR-0009). **Clang requiere libc++** (`-stdlib=libc++`, en el preset `linux-clang` y el CI); GCC usa libstdc++. Motivo: el `<expected>` de libstdc++ se bloquea con Clang por `__cpp_concepts`.
 - **Build/deps:** **CMake** (con `CMakePresets.json`) + **vcpkg** (modo *manifest*). Un único árbol CMake (una "solución").
 - **Rama:** **`main` única**. Se commitea/pushea directamente a `main`. **No** se crean ramas de feature ni PRs (anula el flujo por defecto). *(Decisión del autor para este repo; el resto de su normativa git aplica.)*
 - **Commits:** **Conventional Commits** (`feat:`/`fix:`/`docs:`/`test:`/`refactor:`/`chore:`); **atómicos**; cada ADR con `docs:`. Se commitea al cerrar cada paso (o cuando el autor lo diga).
