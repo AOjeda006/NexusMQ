@@ -23,6 +23,7 @@ tags: [nexusmq, message-broker, sistemas-distribuidos, cpp20, anteproyecto, raft
 | 0.3.0   | 2026-06-07  | borrador | **10 mejoras de profundidad** (ver §0.2), inspiradas en la metodología de documentación de proyectos previos: §3.7 (reloj y tiempo, *fija* la referencia colgante de R8), §3.8 (convenciones Doxygen + afinidad de reactor), §4.3 reescrito con **RNF cuantificados** (dev vs producción), §4.9 (objetivo de producción vs entorno de desarrollo), §5.8 (**modelo de datos interno** con campos), §5.9 (**máquinas de estado y ciclos de vida**), §7.2 ampliado (**catálogo de operaciones** + **taxonomía de errores** del protocolo), §7.6 ampliado (**REST admin** + *health/readiness*), §7.9 ampliado (*hardening*), §7.10 (**catálogo de configuración**), §7.11 (**pseudocódigo crítico**), §8.1 (**matriz de testing**), §8.5 (**runbook**). |
 | 0.3.1   | 2026-06-07  | borrador | Nota aclaratoria: la **solución única** (árbol CMake) es **multiplataforma** y **no** bloquea el *target* Windows posterior — el mismo árbol cambia de *preset* a MSVC y solo añade el adaptador IOCP en `src/io/` (ampliado en §5.2 y en las consecuencias de ADR-0001). |
 | 0.4.0   | 2026-06-10  | borrador | **Conformidad con la normativa de referencia de C++/sistemas:** REST admin a **`/api/v1`** + **RFC 7807** + paginación + OpenAPI + **JWT** (§7.6); convenciones **Docker** (multi-stage→distroless, no-root, *healthcheck*, *scan*) (§5.3); build con **`-Werror`** + `clang-tidy`/`clang-format`/`cppcheck` (§3.2); **Conventional Commits** + ramas + *build-once-promote* (§8.4); **`alignas` (false sharing)** + manejo de **ABA** en colas lock-free (§6.3); **apagado limpio** `SIGTERM`/`SIGINT` (§7.4); **TDD** + naming de tests (§8.1). **Nuevo ADR-0009** (política de manejo de errores por capa). Estado de ADR-0003/0005 saneado a `aceptado` (la nota "provisional revisable" pasa al cuerpo). |
+| 0.5.0   | 2026-06-11  | borrador | **Nuevo ADR-0010** (entorno de desarrollo: migración del IDE de **Visual Studio a VS Code sobre WSL** —*Remote-WSL* + *CMake Tools*—; reemplaza la elección de IDE de ADR-0001, que por lo demás sigue vigente). Actualiza §3.2 (*toolchain*), la tabla de decisiones y el índice de ADRs (§6.7). Presets **estandarizados en `linux-*` (Ninja)**; se descartan los `wsl-ubuntu*` y los *vendor maps* de Visual Studio. |
 
 > **Naturaleza del documento.** Es un documento **vivo** en estado `borrador`. Las secciones de diseño detallado por subsistema (§7) y la estrategia de calidad (§8) se profundizarán por fases. Una vez `aceptado`, un ADR no se edita: se reemplaza por otro nuevo. La decisión de arquitectura central (ADR-0005) se fija como **provisional revisable**: se reconsiderará a la luz de los *benchmarks* de la Fase 1.
 
@@ -186,9 +187,9 @@ C++ es la elección natural para un sistema donde el control sobre **memoria, co
 
 ### 3.2 Plataforma y *toolchain*
 
-- **Entorno de desarrollo:** Visual Studio (preferencia del autor) con el *workload* **"Linux development with C++"** sobre **WSL2**, de modo que se programa en VS pero el binario es Linux. Ver **ADR-0001**.
-- **Sistema de construcción:** **CMake** (con *presets*) como fuente de verdad — lo abre VS de forma nativa y compila con MSVC, GCC y Clang sin reescribir nada.
-- **Gestión de dependencias:** **vcpkg** (modo *manifest*), del ecosistema Microsoft e integrado con VS, pero multiplataforma.
+- **Entorno de desarrollo:** **VS Code** conectado a **WSL2** (extensiones *Remote-WSL* + *CMake Tools*), de modo que se programa y compila directamente sobre Linux. Ver **ADR-0010** (reemplaza la elección de IDE de **ADR-0001**).
+- **Sistema de construcción:** **CMake** (con *presets*) como fuente de verdad — lo consumen CMake Tools, el CI y la línea de comandos sin reescribir nada; compila con GCC y Clang (MSVC en el *target* Windows posterior).
+- **Gestión de dependencias:** **vcpkg** (modo *manifest*), multiplataforma; se integra vía el *toolchain* de CMake.
 - **Objetivo primario:** Linux x86-64, desplegable como imagen **Docker**. Objetivo secundario posterior: Windows nativo (ver ADR-0001/0002).
 - **Coste:** todo el *toolchain* y todas las dependencias son **gratuitos y open source**; el desarrollo, testing, *chaos* y *benchmarking* se realizan **íntegramente sin coste** en una máquina de desarrollo. Ver **§4.8** y **ADR-0008**.
 - **Calidad de compilación:** avisos como errores (**`-Wall -Wextra -Wpedantic -Werror`** en GCC/Clang, `/W4 /WX` en MSVC); análisis estático **`clang-tidy`** (chequeos de las Core Guidelines) + **`cppcheck`**; formato con **`clang-format`** (`.clang-format` versionado); *sanitizers* (ASan/UBSan/TSan) en la build de pruebas (§8.4).
@@ -246,7 +247,7 @@ Criterio rector: **"medido, no *checklist*"**. Cada técnica se introduce donde 
 | Dimensión             | Decisión                                                | ADR        |
 | --------------------- | ------------------------------------------------------- | ---------- |
 | Lenguaje              | C++20 (C++23 selectivo)                                 | —          |
-| Plataforma/IDE        | Linux primero vía VS + WSL2; Windows después            | ADR-0001   |
+| Plataforma/IDE        | Linux primero (WSL2); IDE **VS Code**; Windows después  | ADR-0001/0010 |
 | Build/deps            | CMake + vcpkg                                            | ADR-0001   |
 | I/O asíncrona         | Proactor; io_uring → IOCP                                | ADR-0002   |
 | **Replicación**       | **Raft por partición** (un grupo Raft por partición)    | **ADR-0003** |
@@ -643,7 +644,7 @@ Resumen de las estructuras nucleares con sus campos; alimenta directamente el de
 
 ### 6.7 Catálogo de ADRs
 
-Ver §9. Índice rápido: ADR-0001 (plataforma), ADR-0002 (I/O), ADR-0003 (replicación: **Raft por partición**, *aceptado*), ADR-0004 (protocolo: **binario propio + REST**, *aceptado*), ADR-0005 (concurrencia: ***shared-nothing thread-per-core***, *aceptado*), ADR-0006 (*ingress* dos modos, *aceptado*), ADR-0007 (consistencia CP/PACELC, *aceptado*), ADR-0008 (coste cero, *aceptado*), ADR-0009 (manejo de errores por capa, *aceptado*).
+Ver §9. Índice rápido: ADR-0001 (plataforma), ADR-0002 (I/O), ADR-0003 (replicación: **Raft por partición**, *aceptado*), ADR-0004 (protocolo: **binario propio + REST**, *aceptado*), ADR-0005 (concurrencia: ***shared-nothing thread-per-core***, *aceptado*), ADR-0006 (*ingress* dos modos, *aceptado*), ADR-0007 (consistencia CP/PACELC, *aceptado*), ADR-0008 (coste cero, *aceptado*), ADR-0009 (manejo de errores por capa, *aceptado*), ADR-0010 (IDE: migración a **VS Code** sobre WSL, *aceptado*).
 
 ---
 
@@ -1085,6 +1086,24 @@ Procedimientos de operación que el diseño debe soportar (se concretan en Fase 
 **Alternativas consideradas.**
 - **Excepciones en todo (incluido el *hot path*):** contradice la baja latencia (*unwinding* no determinista) y la guía de sistemas de `stacks/cpp`; descartada para el núcleo.
 - **Códigos de error en todo (incluida la aplicación):** contradice `manejo-errores.md` para la lógica de aplicación; descartada fuera del núcleo/contrato.
+
+### ADR-0010: Entorno de desarrollo (VS Code sobre WSL; reemplaza el IDE de ADR-0001)
+
+- **Estado:** aceptado
+- **Fecha:** 2026-06-11
+
+> **Reemplaza la elección de IDE de ADR-0001.** El resto de ADR-0001 (*target* Linux primero, WSL2, CMake + vcpkg, Windows después) **sigue vigente**; ADR-0001 no se edita (un ADR aceptado se reemplaza, no se modifica).
+
+**Contexto.** ADR-0001 fijó desarrollar **desde Visual Studio** (workload "Linux development with C++") sobre WSL2. El código del proyecto vive **dentro del sistema de ficheros de WSL** (`/home/…`, visible desde Windows como `\\wsl.localhost\…`). El modelo CMake+WSL de Visual Studio **asume que el código reside en el FS de Windows** y lo sincroniza a WSL con `rsync`; al abrir una carpeta que ya vive en WSL sobre el *share* `\\wsl.localhost`, VS **no activa la integración CMake** (no genera caché, no aparecen *targets* ni "Elemento de inicio"), con cuelgues al cerrar. Se verificó con **VS 2026 (18.7)**: presets válidos (`cmake --list-presets` OK), `enableCMake: true` y componentes Linux/WSL instalados — el bloqueo es de **diseño de VS**, no de configuración.
+
+**Decisión.** Migrar el IDE a **VS Code conectado a WSL** (extensiones **Remote-WSL** + **CMake Tools** + **C/C++**), abriendo el proyecto en su ruta Linux real (`code .` desde WSL). CMake Tools consume el **mismo `CMakePresets.json`** y permite configurar/compilar/ejecutar/**depurar (gdb)** *nativo* en WSL, sin copias ni `rsync`. El código permanece en WSL (mejor I/O que `/mnt/c`). Se **estandariza** en los presets `linux-gcc/clang/asan` (Ninja, los mismos que el CI) y se eliminan los presets `wsl-ubuntu*` (Makefiles) y los *vendor maps* `microsoft.com/VisualStudioSettings` introducidos para VS.
+
+**Consecuencias.** (+) El IDE trabaja donde vive el código: sin `rsync`, sin cuelgues, **un único `CMakePresets.json`** para IDE, CI y terminal, con idéntico *toolchain* (gcc/gdb/cmake). (+) Experiencia gráfica equivalente (configurar/compilar/ejecutar/depurar). (+) Menos superficie de configuración (un solo conjunto de presets). (−) Se renuncia a Visual Studio como IDE (preferencia previa del autor) para este proyecto. (−) Recuperar VS exigiría mover el repo al FS de Windows — descartado por el flujo *Linux-first*.
+
+**Alternativas consideradas.**
+- **Mover el repo a `C:\` y seguir en Visual Studio (modelo `rsync` de VS):** funcional, pero el origen pasa a Windows, con peor rendimiento de I/O en WSL2 y fricción de *line endings*/permisos; contradice *Linux-first*. Descartado.
+- **Forzar VS sobre `\\wsl.localhost`:** no es flujo soportado; es la causa de la no-activación y de los cuelgues. Descartado.
+- **VS Code + Remote-WSL:** elegido (ver Decisión).
 
 ---
 
