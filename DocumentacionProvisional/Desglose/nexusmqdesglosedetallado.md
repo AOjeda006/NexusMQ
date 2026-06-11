@@ -861,7 +861,7 @@ CMakeLists.txt (raíz)
   - I/O por plataforma:  if(WIN32) target_sources(nexus-io PRIVATE io/iocp_backend.cpp)
                          else()    target_sources(nexus-io PRIVATE io/io_uring_backend.cpp)
   - add_subdirectory por target (capas con target_link_libraries PUBLIC/PRIVATE)
-  - set_target_properties(... FOLDER "nucleo|exe|cliente|pruebas")   # carpetas en VS
+  - set_target_properties(... FOLDER "nucleo|exe|cliente|pruebas")   # carpetas en el IDE
 CMakePresets.json   — presets: linux-gcc · linux-clang · windows-msvc (cada uno con su toolchain).
 vcpkg.json          — dependencies: liburing ("platform":"linux"), openssl, lz4, zstd, fmt,
                       gtest, benchmark, pybind11 (feature opcional "python").

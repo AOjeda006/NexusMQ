@@ -386,7 +386,7 @@ Para acotar el proyecto y evitar la dispersión, **quedan fuera** (al menos hast
 
 | Actividad                       | Cómo se hace gratis                                                                                 |
 | ------------------------------- | -------------------------------------------------------------------------------------------------- |
-| **Toolchain**                   | WSL2 (incluido en Windows), Visual Studio **Community**, GCC/Clang, CMake, Ninja, vcpkg — todos gratuitos. |
+| **Toolchain**                   | WSL2 (incluido en Windows), **VS Code** (Remote-WSL), GCC/Clang, CMake, Ninja, vcpkg — todos gratuitos. |
 | **Dependencias**                | liburing, OpenSSL, LZ4, Zstd, fmt, GoogleTest, Google Benchmark — todas open source.               |
 | **io_uring**                    | El kernel de WSL2 reciente lo soporta; si faltara, el *fallback* bloqueante de Fase 1 cubre el desarrollo. |
 | **Cluster multi-nodo**          | **Docker Compose** levanta 3 nodos en una sola máquina (suficiente para probar Raft y *failover*). |
@@ -483,7 +483,7 @@ nexusmq/
 └── deploy/docker/         # Dockerfile + docker-compose (cluster de 3 nodos)
 ```
 
-> **Una sola solución, multiplataforma (no bloquea Windows).** Todo el árbol es **un único proyecto CMake** —el equivalente a "una solución" en Visual Studio; con CMake no hay `.sln` tradicional—. Esto **no** condiciona el soporte de plataforma: "nº de soluciones" y "nº de plataformas" son ejes **independientes**. El mismo árbol compila a **Linux** (GCC/Clang) y, más adelante, a **Windows nativo** (MSVC) seleccionando *preset* en `CMakePresets.json`, **sin reestructurar**. El soporte Windows vive **solo** en `src/io/` (un adaptador **IOCP** junto al de io_uring, tras el mismo puerto *proactor*; ver ADR-0002); el resto (`reactor`, `storage`, `protocol`, `consensus`, `broker`) es **agnóstico de plataforma**. Las dependencias *platform-specific* (p.ej. `liburing`, solo Linux) se condicionan en `vcpkg.json`/CMake. *Separar* en varias soluciones **dificultaría** la portabilidad (duplicaría la costura de plataforma); por eso la **solución única es la opción correcta también para el objetivo Windows**.
+> **Una sola solución, multiplataforma (no bloquea Windows).** Todo el árbol es **un único proyecto CMake** —con CMake no hay `.sln` ni "solución" tradicional—. Esto **no** condiciona el soporte de plataforma: "nº de soluciones" y "nº de plataformas" son ejes **independientes**. El mismo árbol compila a **Linux** (GCC/Clang) y, más adelante, a **Windows nativo** (MSVC) seleccionando *preset* en `CMakePresets.json`, **sin reestructurar**. El soporte Windows vive **solo** en `src/io/` (un adaptador **IOCP** junto al de io_uring, tras el mismo puerto *proactor*; ver ADR-0002); el resto (`reactor`, `storage`, `protocol`, `consensus`, `broker`) es **agnóstico de plataforma**. Las dependencias *platform-specific* (p.ej. `liburing`, solo Linux) se condicionan en `vcpkg.json`/CMake. *Separar* en varias soluciones **dificultaría** la portabilidad (duplicaría la costura de plataforma); por eso la **solución única es la opción correcta también para el objetivo Windows**.
 
 ### 5.3 Vista de despliegue
 

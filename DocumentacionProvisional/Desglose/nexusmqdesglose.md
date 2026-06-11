@@ -11,9 +11,9 @@ intención de diseño coherente con el anteproyecto; se concretará por fases.
 ================================================================================
 0. CONVENCIONES DEL DESGLOSE
 ================================================================================
-- **Una sola solución de Visual Studio = un único árbol CMake.** Los "proyectos"
-  son *targets* CMake (`add_library`/`add_executable`). No hay `.sln` salvo que se
-  genere con el *generator* de VS; con *Open Folder* + CMakePresets no hace falta.
+- **Un único árbol CMake (no una "solución" tradicional).** Los "proyectos"
+  son *targets* CMake (`add_library`/`add_executable`). No hay `.sln`: VS Code
+  (CMake Tools) consume `CMakePresets.json` directamente (ADR-0010).
 - **Visibilidad:** `+` público · `#` protegido · `-` privado.
 - **Afinidad de concurrencia** (anotada por tipo, base del diseño *shared-nothing*):
     [REACTOR-LOCAL] pertenece a un reactor; NO es thread-safe; cross-core solo por mensaje.
@@ -614,7 +614,7 @@ CMakeLists.txt (raíz)
     `target_compile_features(... cxx_std_20)`.
   - Flags: `-Wall -Wextra -Wpedantic -Werror` (GCC/Clang) / `/W4 /WX` (MSVC);
     opción `NEXUS_SANITIZERS` (ASan/UBSan/TSan) para la build de pruebas.
-  - `add_subdirectory(src/...)` por target; agrupa en *folders* de VS
+  - `add_subdirectory(src/...)` por target; agrupa en *carpetas* del IDE
     (`set_target_properties(... FOLDER "nucleo|exe|cliente|pruebas")`).
   - I/O por plataforma: `if(WIN32) → iocp_backend` `else() → io_uring_backend`.
 CMakePresets.json — `linux-gcc`, `linux-clang`, `windows-msvc`.
