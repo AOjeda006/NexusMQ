@@ -24,6 +24,7 @@ tags: [nexusmq, message-broker, sistemas-distribuidos, cpp20, anteproyecto, raft
 | 0.3.1   | 2026-06-07  | borrador | Nota aclaratoria: la **solución única** (árbol CMake) es **multiplataforma** y **no** bloquea el *target* Windows posterior — el mismo árbol cambia de *preset* a MSVC y solo añade el adaptador IOCP en `src/io/` (ampliado en §5.2 y en las consecuencias de ADR-0001). |
 | 0.4.0   | 2026-06-10  | borrador | **Conformidad con la normativa de referencia de C++/sistemas:** REST admin a **`/api/v1`** + **RFC 7807** + paginación + OpenAPI + **JWT** (§7.6); convenciones **Docker** (multi-stage→distroless, no-root, *healthcheck*, *scan*) (§5.3); build con **`-Werror`** + `clang-tidy`/`clang-format`/`cppcheck` (§3.2); **Conventional Commits** + ramas + *build-once-promote* (§8.4); **`alignas` (false sharing)** + manejo de **ABA** en colas lock-free (§6.3); **apagado limpio** `SIGTERM`/`SIGINT` (§7.4); **TDD** + naming de tests (§8.1). **Nuevo ADR-0009** (política de manejo de errores por capa). Estado de ADR-0003/0005 saneado a `aceptado` (la nota "provisional revisable" pasa al cuerpo). |
 | 0.5.0   | 2026-06-11  | borrador | **Nuevo ADR-0010** (entorno de desarrollo: migración del IDE de **Visual Studio a VS Code sobre WSL** —*Remote-WSL* + *CMake Tools*—; reemplaza la elección de IDE de ADR-0001, que por lo demás sigue vigente). Actualiza §3.2 (*toolchain*), la tabla de decisiones y el índice de ADRs (§6.7). Presets **estandarizados en `linux-*` (Ninja)**; se descartan los `wsl-ubuntu*` y los *vendor maps* de Visual Studio. |
+| 0.6.0   | 2026-06-11  | borrador | **Nuevo ADR-0011** (estándar **C++23** + **libc++ en Clang** para `std::expected`, mecanismo del modelo de errores de ADR-0009). Sube `cxx_std_23`; GCC con libstdc++, Clang con `-stdlib=libc++` (preset `linux-clang` y CI, incluido clang-tidy). Actualiza §3.1/§3.2 y la tabla de decisiones. |
 
 > **Naturaleza del documento.** Es un documento **vivo** en estado `borrador`. Las secciones de diseño detallado por subsistema (§7) y la estrategia de calidad (§8) se profundizarán por fases. Una vez `aceptado`, un ADR no se edita: se reemplaza por otro nuevo. La decisión de arquitectura central (ADR-0005) se fija como **provisional revisable**: se reconsiderará a la luz de los *benchmarks* de la Fase 1.
 
@@ -174,7 +175,7 @@ NexusMQ no pretende competir con Kafka en producción, sino **demostrar**, en un
 
 ### 3.1 Lenguaje: C++20/23
 
-C++ es la elección natural para un sistema donde el control sobre **memoria, concurrencia e I/O** es el factor dominante de rendimiento. Se adopta el estándar **C++20** (con uso selectivo de utilidades de C++23 si el *toolchain* lo permite). Características que el proyecto explota:
+C++ es la elección natural para un sistema donde el control sobre **memoria, concurrencia e I/O** es el factor dominante de rendimiento. Se adopta el estándar **C++23** (`std::expected` del modelo de errores lo exige; ver **ADR-0011**). Características que el proyecto explota:
 
 | Característica C++20            | Uso en NexusMQ                                                            |
 | ------------------------------ | ------------------------------------------------------------------------ |
@@ -246,7 +247,7 @@ Criterio rector: **"medido, no *checklist*"**. Cada técnica se introduce donde 
 
 | Dimensión             | Decisión                                                | ADR        |
 | --------------------- | ------------------------------------------------------- | ---------- |
-| Lenguaje              | C++20 (C++23 selectivo)                                 | —          |
+| Lenguaje              | **C++23** (libc++ en Clang)                             | ADR-0011   |
 | Plataforma/IDE        | Linux primero (WSL2); IDE **VS Code**; Windows después  | ADR-0001/0010 |
 | Build/deps            | CMake + vcpkg                                            | ADR-0001   |
 | I/O asíncrona         | Proactor; io_uring → IOCP                                | ADR-0002   |
@@ -644,7 +645,7 @@ Resumen de las estructuras nucleares con sus campos; alimenta directamente el de
 
 ### 6.7 Catálogo de ADRs
 
-Ver §9. Índice rápido: ADR-0001 (plataforma), ADR-0002 (I/O), ADR-0003 (replicación: **Raft por partición**, *aceptado*), ADR-0004 (protocolo: **binario propio + REST**, *aceptado*), ADR-0005 (concurrencia: ***shared-nothing thread-per-core***, *aceptado*), ADR-0006 (*ingress* dos modos, *aceptado*), ADR-0007 (consistencia CP/PACELC, *aceptado*), ADR-0008 (coste cero, *aceptado*), ADR-0009 (manejo de errores por capa, *aceptado*), ADR-0010 (IDE: migración a **VS Code** sobre WSL, *aceptado*).
+Ver §9. Índice rápido: ADR-0001 (plataforma), ADR-0002 (I/O), ADR-0003 (replicación: **Raft por partición**, *aceptado*), ADR-0004 (protocolo: **binario propio + REST**, *aceptado*), ADR-0005 (concurrencia: ***shared-nothing thread-per-core***, *aceptado*), ADR-0006 (*ingress* dos modos, *aceptado*), ADR-0007 (consistencia CP/PACELC, *aceptado*), ADR-0008 (coste cero, *aceptado*), ADR-0009 (manejo de errores por capa, *aceptado*), ADR-0010 (IDE: migración a **VS Code** sobre WSL, *aceptado*), ADR-0011 (estándar **C++23** + libc++ en Clang, *aceptado*).
 
 ---
 
@@ -1104,6 +1105,23 @@ Procedimientos de operación que el diseño debe soportar (se concretan en Fase 
 - **Mover el repo a `C:\` y seguir en Visual Studio (modelo `rsync` de VS):** funcional, pero el origen pasa a Windows, con peor rendimiento de I/O en WSL2 y fricción de *line endings*/permisos; contradice *Linux-first*. Descartado.
 - **Forzar VS sobre `\\wsl.localhost`:** no es flujo soportado; es la causa de la no-activación y de los cuelgues. Descartado.
 - **VS Code + Remote-WSL:** elegido (ver Decisión).
+
+### ADR-0011: Estándar C++23 + libc++ en Clang (para `std::expected`)
+
+- **Estado:** aceptado
+- **Fecha:** 2026-06-11
+
+> **Refina el mecanismo de ADR-0009** (no lo reemplaza). ADR-0009 fija `expected<T>` = `std::expected<T, Error>` en el núcleo; este ADR registra las **consecuencias de toolchain** de esa decisión, descubiertas al implementar el modelo de errores en M2.
+
+**Contexto.** `std::expected` es **C++23**, pero el proyecto se fijó en C++20 (`cxx_std_20`). Al implementar `error.hpp` se constató, además, que **Clang 18 + libstdc++ no compila `<expected>`** ni en C++23: el `<expected>` de libstdc++ exige `__cpp_concepts >= 202002L` y Clang 18 reporta `201907L`. GCC (libstdc++) sí lo compila (`__cpp_concepts = 202002L`). Sin solución, el *lane* de Clang del CI —y **clang-tidy**, que parsea con el frontend de Clang— quedarían rotos en todo fichero que use el modelo de errores.
+
+**Decisión.** Subir el estándar a **`cxx_std_23`**. **GCC** compila con **libstdc++** (por defecto). **Clang** compila con **libc++** (`-stdlib=libc++`), fijado **globalmente** en el preset `linux-clang` y en el CI (build + lint), de modo que también las dependencias traídas por FetchContent (GoogleTest/Benchmark) usen libc++ y no haya choque de ABI. `clang-tidy` consume el `compile_commands.json` de ese preset, así que parsea con libc++. Se documenta en `CLAUDE.md` (hechos del proyecto) y se requiere `libc++-dev`/`libc++abi-dev` donde se use Clang.
+
+**Consecuencias.** (+) `std::expected` disponible y **probado en ambos compiladores** (GCC/libstdc++ y Clang/libc++); se conserva la cobertura de Clang y de clang-tidy. (+) Modelo de error de cara al cliente estándar (sin coste de excepciones en el camino caliente, ADR-0009). (−) Conviven **dos** librerías estándar (libstdc++ con GCC, libc++ con Clang): hay que instalar libc++ donde se compile con Clang; algo más de superficie de toolchain. (−) El estándar mínimo sube de C++20 a C++23 (el toolchain objetivo lo soporta de sobra).
+
+**Alternativas consideradas.**
+- **`expected` propio (C++20) sobre `std::variant`:** portable sin libc++ y sin subir de estándar, pero se aparta del mecanismo elegido en ADR-0009 (`std::expected`); descartado por preferencia explícita de mantener el tipo estándar.
+- **`std::expected` solo con GCC (sin lane Clang):** simple, pero pierde la cobertura de Clang y deja **clang-tidy** sin poder parsear el modelo de errores; descartado.
 
 ---
 
