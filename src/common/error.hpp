@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <expected>
 #include <string>
 #include <string_view>
@@ -14,7 +15,7 @@ namespace nexus {
 /// @brief Categoría de error del núcleo.
 /// @details Espeja los códigos de wire y añade errores internos. Se traduce al modelo externo
 /// (binario/REST) en el borde, no se propaga crudo.
-enum class ErrorCode {
+enum class ErrorCode : std::uint8_t {
     Corrupt,          ///< Datos corruptos (p. ej. CRC32C no cuadra).
     IoError,          ///< Fallo de E/S.
     OutOfSpace,       ///< Sin espacio en disco.
@@ -46,8 +47,9 @@ private:
 };
 
 /// Resultado de una operación del núcleo: un valor T o un Error.
+/// Nombre en minúscula a propósito: refleja `std::expected` (NOLINT de naming).
 template <class T>
-using expected = std::expected<T, Error>;
+using expected = std::expected<T, Error>;  // NOLINT(readability-identifier-naming)
 
 /// Azúcar para devolver un error desde una función que devuelve 'expected<T>'
 [[nodiscard]] inline std::unexpected<Error> make_error(ErrorCode code, std::string message) {
