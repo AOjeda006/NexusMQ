@@ -3,16 +3,24 @@
   "cmake.useCMakePresets": "always",
   "cmake.configureOnOpen": true,
 
-  // IntelliSense se alimenta de la info de CMake (no de una config manual).
+  // IntelliSense se alimenta de la info de CMake; los default.* son el respaldo
+  // si el proveedor aún no ha configurado. Fijados a C++20 + GCC para que la
+  // librería estándar de GCC 15 (std::span, std::integral, _Float32...) se
+  // parsee bien y no aparezcan errores falsos.
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+  "C_Cpp.default.compilerPath": "/usr/bin/g++",
+  "C_Cpp.default.cppStandard": "c++20",
+  "C_Cpp.default.cStandard": "c17",
+  "C_Cpp.default.intelliSenseMode": "linux-gcc-x64",
   "C_Cpp.intelliSenseEngine": "default",
 
-  // Formato y análisis estático con NUESTRA configuración versionada.
-  "C_Cpp.clang_format_style": "file",
-  "C_Cpp.codeAnalysis.clangTidy.enabled": true,
-  "C_Cpp.codeAnalysis.runAutomatically": true,
+  // clang-tidy es AUTORIDAD DEL CI (versión fijada, sobre src/). En el editor lo
+  // desactivamos: el clang-tidy que trae la extensión es de otra versión y crea
+  // falsos positivos (checks nuevos, ficheros de test con macros de GoogleTest).
+  "C_Cpp.codeAnalysis.clangTidy.enabled": false,
 
-  // Higiene de fichero coherente con .clang-format (-Werror, EOF newline).
+  // Formato con NUESTRA configuración versionada, al guardar.
+  "C_Cpp.clang_format_style": "file",
   "editor.formatOnSave": true,
   "files.insertFinalNewline": true,
   "files.trimTrailingWhitespace": true,
