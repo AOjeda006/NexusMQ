@@ -19,18 +19,40 @@ al implementar, se propone y se decide; un **ADR aceptado no se edita**, se reem
 
 ## Modo de trabajo (REGLA DE ORO)
 
-**Tutor + par de programación, no implementador automático.** El autor escribe el
-código C++ guiado paso a paso; el agente explica el *para qué* (idiomas de C++ moderno,
-conceptos de sistemas: RAII, corutinas, io_uring, lock-free, Raft…) a nivel didáctico.
+**Implementador autónomo.** El agente (Claude Code) **escribe, prueba y commitea el código C++ él
+mismo**, de forma autónoma y continua, avanzando hito a hito hasta completar el proyecto. El autor
+revisa, no teclea. *(Sustituye al modo tutor previo de las fases iniciales — decisión del autor.)*
 
-Cada paso: (1) **qué** vamos a hacer y por qué encaja en el diseño → (2) el **concepto**
-C++/sistemas implicado → (3) lo **implementamos** (lo teclea el autor; el agente revisa)
-→ (4) **verificamos** (compila/test) → (5) se **actualiza la hoja de ruta**.
+Cada incremento: (1) **qué** y por qué encaja en el diseño → (2) lo **implementas** (código + tests,
+TDD rojo→verde→refactor) → (3) **pasas la puerta de calidad** (abajo) → (4) **commit + push** →
+(5) **actualizas la hoja de ruta**. Incrementos **pequeños y siempre compilables**; nunca dejes el
+árbol roto entre commits.
 
-- Pasos **pequeños**; guiar, no adelantarse. Conciso pero didáctico: prioriza que el autor entienda.
-- Si el autor dice **"hazlo tú"** para un trozo repetitivo o sin valor de aprendizaje, lo hace el agente.
-- **Excepción al modo tutor:** el **andamiaje y la documentación** (hoja de ruta, README, LICENSE,
-  este CLAUDE.md, ficheros de build, CI) los crea el agente directamente. El modo tutor aplica al **código C++**.
+- **No te detengas a preguntar** salvo decisiones de **producto** genuinas e irreversibles. Las
+  técnicas: elige la opción más alineada con la normativa, impleméntala y, si es de arquitectura,
+  regístrala como **ADR nuevo** (un ADR aceptado no se edita: se reemplaza). Documenta supuestos.
+- Si al implementar hay que **ajustar el desglose**, hazlo y anótalo (hoja de ruta; ADR si procede).
+- El **andamiaje y la documentación** (hoja de ruta, README, LICENSE, este CLAUDE.md, ficheros de
+  build, CI, ADRs) los gestiona el agente directamente.
+
+## Puerta de calidad (OBLIGATORIA antes de CADA push — nunca pushees en rojo)
+
+Verifica **en local** y deja TODO verde antes de commitear/pushear; el CI (GitHub Actions) debe
+quedar verde tras el push (si rompe, arréglalo de inmediato):
+
+1. **Compila y testea en LOS DOS compiladores** (GCC/libstdc++ y Clang/libc++ **divergen** —p. ej.
+   `std::expected`, versiones de clang-tidy—; verifica ambos):
+   - `cmake --preset linux-gcc && cmake --build --preset linux-gcc && ctest --preset linux-gcc`
+   - `cmake --preset linux-clang && cmake --build --preset linux-clang && ctest --preset linux-clang`
+2. **Sanitizers:** `cmake --preset linux-gcc-asan && cmake --build --preset linux-gcc-asan && ctest --preset linux-gcc-asan`
+3. **Formato:** `clang-format --dry-run --Werror $(git ls-files '*.hpp' '*.cpp')` (sin salida = ok; aplica con `clang-format -i`).
+4. **clang-tidy** (autoridad; sobre `src/`, con el preset Clang/libc++):
+   `clang-tidy -p build/linux-clang $(git ls-files 'src/*.cpp')` → exit 0. El `.clang-tidy`
+   versionado manda; sus checks desactivados son **decisiones de proyecto** (pragma-once; `pro-bounds-*`
+   y `pro-type-vararg` para búferes de bytes y POSIX variádico; magic-numbers…). Si una versión más
+   nueva añade un check que choca legítimamente con una convención nuestra, desactívalo con commit
+   `chore(tidy):` justificado; si no, **arregla el código**. (clang-tidy solo sobre `src/`: tests y
+   bench usan macros de terceros.)
 
 ## Hechos del proyecto (vinculantes)
 
