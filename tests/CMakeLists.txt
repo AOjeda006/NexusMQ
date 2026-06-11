@@ -8,7 +8,8 @@ include(GoogleTest)  # provee gtest_discover_tests()
 add_executable(nexus-tests
   unit/common/version_test.cpp
   unit/common/types_test.cpp
-  unit/common/crc32c_test.cpp)
+  unit/common/crc32c_test.cpp
+  unit/common/bytes_test.cpp)
 
 # nexus::common aporta C++20, los avisos-como-errores (vía nexus_options, PUBLIC)
 # y la cabecera; gtest_main aporta un main() que corre todos los TEST(...).
