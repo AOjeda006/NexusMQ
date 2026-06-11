@@ -99,7 +99,7 @@ expected<void> File::sync() const {
 }
 
 expected<std::uint64_t> File::size() const {
-    struct stat st{};
+    struct stat st = {};
     if (::fstat(fd_, &st) < 0) {
         return io_error("fstat");
     }
