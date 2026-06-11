@@ -1,0 +1,24 @@
+{
+  // CMake Tools consume nuestros CMakePresets.json (los mismos que el CI).
+  "cmake.useCMakePresets": "always",
+  "cmake.configureOnOpen": true,
+
+  // IntelliSense se alimenta de la info de CMake (no de una config manual).
+  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+  "C_Cpp.intelliSenseEngine": "default",
+
+  // Formato y análisis estático con NUESTRA configuración versionada.
+  "C_Cpp.clang_format_style": "file",
+  "C_Cpp.codeAnalysis.clangTidy.enabled": true,
+  "C_Cpp.codeAnalysis.runAutomatically": true,
+
+  // Higiene de fichero coherente con .clang-format (-Werror, EOF newline).
+  "editor.formatOnSave": true,
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+
+  "[cpp]": {
+    "editor.defaultFormatter": "ms-vscode.cpptools",
+    "editor.rulers": [100]
+  }
+}

@@ -9,9 +9,14 @@ cmake-build-*/
 # Caché de herramientas / editores
 compile_commands.json
 .cache/
-.vscode/
 .vs/
 *.user
+
+# VS Code: versiona solo la config compartida del proyecto; ignora lo personal.
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
 
 # Datos de ejecución del broker (logs de partición, etc.)
 /data/
