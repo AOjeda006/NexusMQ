@@ -19,6 +19,7 @@ add_executable(nexus-tests
   unit/storage/partition_log_test.cpp
   unit/bench/latency_histogram_test.cpp
   unit/protocol/codec_test.cpp
+  unit/protocol/error_code_test.cpp
   crash/partition_crash_test.cpp)
 
 # LatencyHistogram es header-only en tools/bench; el test lo incluye directamente.
