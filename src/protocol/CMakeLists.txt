@@ -3,7 +3,9 @@
 add_library(nexus-protocol
   codec.cpp
   error_code.cpp
-  frame.cpp)
+  frame.cpp
+  versioning.cpp
+  messages.cpp)
 add_library(nexus::protocol ALIAS nexus-protocol)
 
 target_include_directories(nexus-protocol PUBLIC ${PROJECT_SOURCE_DIR}/src)
