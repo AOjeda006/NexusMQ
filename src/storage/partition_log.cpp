@@ -2,6 +2,10 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cstddef>
+#include <functional>
+#include <iterator>
+#include <memory>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -111,6 +115,45 @@ expected<Offset> PartitionLog::append(const RecordBatch& batch) {
     }
     log_end_offset_ = *last + 1;
     return *last;
+}
+
+const Segment* PartitionLog::segment_for(Offset offset) const noexcept {
+    // Primer segmento con base_offset > offset; el anterior es el que contiene el offset.
+    const auto it = std::ranges::upper_bound(
+        segments_, offset, std::ranges::less{},
+        [](const std::unique_ptr<Segment>& seg) { return seg->base_offset(); });
+    if (it == segments_.begin()) {
+        return nullptr;  // offset por debajo del primer segmento.
+    }
+    return std::prev(it)->get();
+}
+
+expected<FetchResult> PartitionLog::read(Offset offset, std::size_t max_bytes) const {
+    if (offset < log_start_offset_) {
+        return make_error(ErrorCode::OutOfRange, "offset por debajo de log_start_offset");
+    }
+    FetchResult result;
+    result.next_offset = offset;
+
+    Offset cursor = offset;
+    while (cursor < log_end_offset_ && result.batches.size() < max_bytes) {
+        const Segment* seg = segment_for(cursor);
+        if (seg == nullptr) {
+            break;
+        }
+        const std::size_t remaining = max_bytes - result.batches.size();
+        auto fragment = seg->read(cursor, remaining);
+        if (!fragment) {
+            return std::unexpected(fragment.error());
+        }
+        if (fragment->batches.empty()) {
+            break;  // nada más legible en este segmento desde el cursor.
+        }
+        result.batches.append(fragment->batches.as_span());
+        result.next_offset = fragment->next_offset;
+        cursor = fragment->next_offset;
+    }
+    return result;
 }
 
 expected<void> PartitionLog::roll_segment() {

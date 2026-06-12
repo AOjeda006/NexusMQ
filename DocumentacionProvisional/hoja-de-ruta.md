@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** Fase 1 · **M1 ✅ · M2 ✅ · M3 (Segment) cerrado ✅** (`nexus-common` + `nexus-io` + `nexus-storage`: File RAII, RecordBatch, SparseIndex, Segment con append/read/seal/recover; **43 tests** verdes en GCC/libstdc++, Clang/libc++ y ASan/UBSan). Siguiente: **M4 — Log de partición** (rolling de segmentos + recuperación cruzando segmentos).
+**Estado actual:** Fase 1 · **M1 ✅ · M2 ✅ · M3 ✅ · M4 (PartitionLog) cerrado ✅** (`nexus-common` + `nexus-io` + `nexus-storage`: File RAII, RecordBatch, SparseIndex, Segment, PartitionLog con rotación + lectura cruzando segmentos + recuperación; **53 tests** verdes en GCC/libstdc++, Clang/libc++ y ASan/UBSan). Siguiente: **M5 — Durabilidad** (política de `fsync`, `recovery_point`, tests de *crash*).
 
 ---
 
@@ -82,11 +82,11 @@ Harness de benchmark vacío y CI:
 - **clang-tidy:** desactivado `bugprone-easily-swappable-parameters` (`chore(tidy)`): choca con las firmas del motor de log (`maybe_append(offset, file_pos, batch_len)`, futuras `read(offset, max_bytes)`…), todas enteros distintos por contrato. El resto de avisos (designated-initializers, use-ranges) se **arreglaron en código**.
 
 ### M4 — Log de partición (rolling + recuperación)
-- [~] `nexus-storage`: `partition_log.hpp/.cpp` (`LogConfig`, secuencia de segmentos).
+- [x] `nexus-storage`: `partition_log.hpp/.cpp` (`LogConfig`, secuencia de segmentos).
   - [x] **M4a** `open` (descubre/abre segmentos + recupera el activo) + `append` con **rotación** al superar `segment_bytes` + `log_start/end_offset` + `segment_count`. El log **asigna** el offset base autoritativo.
-  - [ ] **M4b** `read(offset, max_bytes)` **cruzando segmentos** (seek por índice; §7.11 #3) + `segment_for` (binaria).
-  - [ ] **M4c** recuperación a nivel partición: reabrir tras *crash* en el activo (cola *torn*/corrupta).
-- [ ] `nexus-storage`: `recovery.hpp/.cpp` (`recover_partition`) — **plegado en `PartitionLog::open`** por ahora (un orquestador aparte llegará si el server recupera varias particiones al arrancar).
+  - [x] **M4b** `read(offset, max_bytes)` **cruzando segmentos** (seek por índice; §7.11 #3) + `segment_for` (binaria); `OutOfRange` bajo `log_start`.
+  - [x] **M4c** recuperación a nivel partición: reabrir tras *crash* en el activo (cola *torn*/CRC corrupto) trunca sin perder confirmados.
+- [x] `nexus-storage`: `recovery` — **plegado en `PartitionLog::open`** por ahora (un orquestador `recover_partition` aparte llegará si el server recupera varias particiones al arrancar).
 
 **Ajustes de diseño respecto al desglose (M4):**
 - El **log asigna** el offset base (`append` reasigna `base_offset = log_end_offset`; el CRC no lo cubre). Revisable en la capa Partition/Raft (el líder asignará antes de replicar; sería un ADR si cambia).

@@ -40,6 +40,14 @@ public:
     /// @return El último offset asignado al batch.
     [[nodiscard]] expected<Offset> append(const RecordBatch& batch);
 
+    /// @brief Lee batches desde @p offset hasta ~@p max_bytes, **cruzando segmentos** (§7.11 #3).
+    /// @details Localiza el segmento por offset (búsqueda binaria) y delega en `Segment::read`;
+    ///   si no se llena @p max_bytes y quedan datos, continúa en el segmento siguiente. Lee
+    ///   hasta `log_end_offset()` (todo lo escrito en este motor monohilo).
+    /// @return `FetchResult` (vacío si @p offset alcanza el final), `OutOfRange` si @p offset
+    ///   es anterior a `log_start_offset()`, o error de E/S.
+    [[nodiscard]] expected<FetchResult> read(Offset offset, std::size_t max_bytes) const;
+
     /// Primer offset disponible en el log (base del primer segmento).
     [[nodiscard]] Offset log_start_offset() const noexcept { return log_start_offset_; }
     /// Offset que se asignará al próximo record (uno más que el último escrito).
@@ -53,6 +61,8 @@ private:
 
     [[nodiscard]] Segment* active() noexcept { return segments_.back().get(); }
     [[nodiscard]] expected<void> roll_segment();
+    /// Segmento cuyo rango contiene @p offset (mayor base ≤ offset); nullptr si es menor que todos.
+    [[nodiscard]] const Segment* segment_for(Offset offset) const noexcept;
 
     std::filesystem::path dir_;                       ///< Directorio de la partición.
     LogConfig cfg_;                                   ///< Configuración (por valor).

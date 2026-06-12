@@ -2,14 +2,19 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <string>
 #include <vector>
 
+#include "common/bytes.hpp"
+#include "common/error.hpp"
 #include "common/record.hpp"
 #include "common/types.hpp"
+#include "io/file.hpp"
 #include "storage/log_config.hpp"
 
 namespace {
@@ -47,6 +52,11 @@ nexus::LogConfig small_segments() {
     cfg.segment_bytes = 100;  // rota tras superar 100 bytes
     cfg.index_interval_bytes = 64;
     return cfg;
+}
+
+// Ruta del .log del segmento de offset base dado dentro de @p dir.
+std::string seg_log_path(const std::filesystem::path& dir, nexus::Offset base) {
+    return (dir / std::format("{:020d}.log", base)).string();
 }
 
 TEST(PartitionLog, Open_DirectorioVacio_CreaPrimerSegmento) {
@@ -104,6 +114,121 @@ TEST(PartitionLog, Reopen_TrasRotacion_PreservaOffsetsYSegmentos) {
     EXPECT_EQ(reopened->segment_count(), segments);
     EXPECT_EQ(reopened->log_start_offset(), 0);
     EXPECT_EQ(reopened->log_end_offset(), 4);
+}
+
+TEST(PartitionLog, Read_DentroDeUnSegmento_DevuelveDesdeElOffset) {
+    const TempDir dir("read_uno");
+    auto plog = nexus::PartitionLog::open(dir.path(), nexus::LogConfig{});  // segmento grande
+    ASSERT_TRUE(plog.has_value());
+    ASSERT_TRUE(plog->append(make_batch(3, 10)).has_value());  // 0..2
+    ASSERT_TRUE(plog->append(make_batch(2, 10)).has_value());  // 3..4
+    ASSERT_TRUE(plog->append(make_batch(5, 10)).has_value());  // 5..9
+
+    const auto fr = plog->read(3, 100000);
+    ASSERT_TRUE(fr.has_value());
+    const auto first = nexus::RecordBatch::decode(fr->batches.as_span());
+    ASSERT_TRUE(first.has_value());
+    EXPECT_EQ(first->header().base_offset, 3);
+    EXPECT_EQ(fr->next_offset, 10);
+}
+
+TEST(PartitionLog, Read_CruzaSegmentos_DevuelveBatchesDeVariosSegmentos) {
+    const TempDir dir("read_cruza");
+    auto plog = nexus::PartitionLog::open(dir.path(), small_segments());
+    ASSERT_TRUE(plog.has_value());
+    // 4 batches de 1 record y payload 40 (encoded_size 76): caben 2 por segmento (152 > 100).
+    for (int i = 0; i < 4; ++i) {
+        ASSERT_TRUE(plog->append(make_batch(1, 40)).has_value());
+    }
+    ASSERT_GT(plog->segment_count(), 1U);
+
+    const auto fr = plog->read(0, 100000);
+    ASSERT_TRUE(fr.has_value());
+    EXPECT_EQ(fr->batches.size(), 4U * 76U);  // los 4 batches, de ambos segmentos
+    EXPECT_EQ(fr->next_offset, 4);
+    const auto first = nexus::RecordBatch::decode(fr->batches.as_span());
+    ASSERT_TRUE(first.has_value());
+    EXPECT_EQ(first->header().base_offset, 0);
+}
+
+TEST(PartitionLog, Read_OffsetMasAllaDelFinal_DevuelveVacio) {
+    const TempDir dir("read_fin");
+    auto plog = nexus::PartitionLog::open(dir.path(), nexus::LogConfig{});
+    ASSERT_TRUE(plog.has_value());
+    ASSERT_TRUE(plog->append(make_batch(3, 10)).has_value());  // 0..2, log_end 3
+
+    const auto fr = plog->read(3, 100000);
+    ASSERT_TRUE(fr.has_value());
+    EXPECT_TRUE(fr->batches.empty());
+    EXPECT_EQ(fr->next_offset, 3);
+}
+
+TEST(PartitionLog, Read_OffsetBajoLogStart_DevuelveOutOfRange) {
+    const TempDir dir("read_bajo");
+    auto plog = nexus::PartitionLog::open(dir.path(), nexus::LogConfig{});
+    ASSERT_TRUE(plog.has_value());
+    const auto fr = plog->read(-1, 100000);
+    ASSERT_FALSE(fr.has_value());
+    EXPECT_EQ(fr.error().code(), nexus::ErrorCode::OutOfRange);
+}
+
+TEST(PartitionLog, Reopen_ColaTornEnActivo_TruncaSinPerderConfirmados) {
+    const TempDir dir("crash_torn");
+    {
+        auto plog = nexus::PartitionLog::open(dir.path(), small_segments());
+        ASSERT_TRUE(plog.has_value());
+        for (int i = 0; i < 4; ++i) {  // offsets 0..3, segmentos en base 0 y base 2
+            ASSERT_TRUE(plog->append(make_batch(1, 40)).has_value());
+        }
+        ASSERT_GT(plog->segment_count(), 1U);
+    }
+    // Crash a mitad de escritura: basura tras los batches válidos del segmento activo (base 2).
+    {
+        auto log = nexus::File::open(seg_log_path(dir.path(), 2), nexus::File::Mode::ReadWrite);
+        ASSERT_TRUE(log.has_value());
+        const auto size = log->size();
+        ASSERT_TRUE(size.has_value());
+        const std::vector<std::byte> garbage(15, std::byte{0x5A});
+        ASSERT_TRUE(log->write_at(garbage, *size).has_value());
+        ASSERT_TRUE(log->sync().has_value());
+    }
+    auto reopened = nexus::PartitionLog::open(dir.path(), small_segments());
+    ASSERT_TRUE(reopened.has_value());
+    EXPECT_EQ(reopened->log_end_offset(), 4);  // los 4 confirmados se conservan
+    const auto fr = reopened->read(0, 100000);
+    ASSERT_TRUE(fr.has_value());
+    EXPECT_EQ(fr->batches.size(), 4U * 76U);
+    EXPECT_EQ(fr->next_offset, 4);
+}
+
+TEST(PartitionLog, Reopen_BatchCorruptoEnActivo_TruncaDesdeElDanado) {
+    const TempDir dir("crash_crc");
+    {
+        auto plog = nexus::PartitionLog::open(dir.path(), small_segments());
+        ASSERT_TRUE(plog.has_value());
+        for (int i = 0; i < 4; ++i) {  // offsets 0..3
+            ASSERT_TRUE(plog->append(make_batch(1, 40)).has_value());
+        }
+        ASSERT_GT(plog->segment_count(), 1U);
+    }
+    // Corrompe el último batch del segmento activo (base 2, offset 3): voltea su último byte.
+    {
+        auto log = nexus::File::open(seg_log_path(dir.path(), 2), nexus::File::Mode::ReadWrite);
+        ASSERT_TRUE(log.has_value());
+        const auto size = log->size();
+        ASSERT_TRUE(size.has_value());
+        std::array<std::byte, 1> last{};
+        ASSERT_TRUE(log->read_at(last, *size - 1).has_value());
+        last[0] ^= std::byte{0xFF};
+        ASSERT_TRUE(log->write_at(last, *size - 1).has_value());
+        ASSERT_TRUE(log->sync().has_value());
+    }
+    auto reopened = nexus::PartitionLog::open(dir.path(), small_segments());
+    ASSERT_TRUE(reopened.has_value());
+    EXPECT_EQ(reopened->log_end_offset(), 3);  // el offset 3 corrupto se trunca
+    const auto fr = reopened->read(0, 100000);
+    ASSERT_TRUE(fr.has_value());
+    EXPECT_EQ(fr->next_offset, 3);
 }
 
 }  // namespace
