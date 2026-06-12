@@ -238,4 +238,139 @@ expected<MetadataResponse> MetadataResponse::decode(Decoder& dec) {
     return response;
 }
 
+void ProduceRequest::encode(Encoder& enc) const {
+    enc.put_string(topic);
+    enc.put_i32(partition);
+    enc.put_u8(static_cast<std::uint8_t>(acks));
+    enc.put_bytes(batch);
+}
+
+expected<ProduceRequest> ProduceRequest::decode(Decoder& dec) {
+    auto topic = dec.get_string();
+    if (!topic) {
+        return std::unexpected(topic.error());
+    }
+    auto partition = dec.get_i32();
+    if (!partition) {
+        return std::unexpected(partition.error());
+    }
+    auto acks = dec.get_u8();
+    if (!acks) {
+        return std::unexpected(acks.error());
+    }
+    if (*acks > static_cast<std::uint8_t>(Acks::Quorum)) {
+        return make_error(ErrorCode::InvalidArgument, "valor de acks inválido");
+    }
+    auto batch = dec.get_bytes();
+    if (!batch) {
+        return std::unexpected(batch.error());
+    }
+    ProduceRequest request;
+    request.topic = std::string{*topic};
+    request.partition = *partition;
+    request.acks = static_cast<Acks>(*acks);
+    request.batch = *batch;
+    return request;
+}
+
+void ProduceResponse::encode(Encoder& enc) const {
+    enc.put_i64(base_offset);
+    enc.put_i16(static_cast<std::int16_t>(error_code));
+    enc.put_i32(throttle_ms);
+}
+
+expected<ProduceResponse> ProduceResponse::decode(Decoder& dec) {
+    auto base_offset = dec.get_i64();
+    if (!base_offset) {
+        return std::unexpected(base_offset.error());
+    }
+    auto error_code = dec.get_i16();
+    if (!error_code) {
+        return std::unexpected(error_code.error());
+    }
+    auto throttle_ms = dec.get_i32();
+    if (!throttle_ms) {
+        return std::unexpected(throttle_ms.error());
+    }
+    return ProduceResponse{.base_offset = *base_offset,
+                           .error_code = static_cast<WireError>(*error_code),
+                           .throttle_ms = *throttle_ms};
+}
+
+void FetchRequest::encode(Encoder& enc) const {
+    enc.put_string(topic);
+    enc.put_i32(partition);
+    enc.put_i64(fetch_offset);
+    enc.put_i32(max_bytes);
+    enc.put_i32(min_bytes);
+    enc.put_i32(max_wait_ms);
+}
+
+expected<FetchRequest> FetchRequest::decode(Decoder& dec) {
+    auto topic = dec.get_string();
+    if (!topic) {
+        return std::unexpected(topic.error());
+    }
+    auto partition = dec.get_i32();
+    if (!partition) {
+        return std::unexpected(partition.error());
+    }
+    auto fetch_offset = dec.get_i64();
+    if (!fetch_offset) {
+        return std::unexpected(fetch_offset.error());
+    }
+    auto max_bytes = dec.get_i32();
+    if (!max_bytes) {
+        return std::unexpected(max_bytes.error());
+    }
+    auto min_bytes = dec.get_i32();
+    if (!min_bytes) {
+        return std::unexpected(min_bytes.error());
+    }
+    auto max_wait_ms = dec.get_i32();
+    if (!max_wait_ms) {
+        return std::unexpected(max_wait_ms.error());
+    }
+    FetchRequest request;
+    request.topic = std::string{*topic};
+    request.partition = *partition;
+    request.fetch_offset = *fetch_offset;
+    request.max_bytes = *max_bytes;
+    request.min_bytes = *min_bytes;
+    request.max_wait_ms = *max_wait_ms;
+    return request;
+}
+
+void FetchResponse::encode(Encoder& enc) const {
+    enc.put_bytes(batches);
+    enc.put_i64(high_watermark);
+    enc.put_i64(log_start_offset);
+    enc.put_i16(static_cast<std::int16_t>(error_code));
+}
+
+expected<FetchResponse> FetchResponse::decode(Decoder& dec) {
+    auto batches = dec.get_bytes();
+    if (!batches) {
+        return std::unexpected(batches.error());
+    }
+    auto high_watermark = dec.get_i64();
+    if (!high_watermark) {
+        return std::unexpected(high_watermark.error());
+    }
+    auto log_start_offset = dec.get_i64();
+    if (!log_start_offset) {
+        return std::unexpected(log_start_offset.error());
+    }
+    auto error_code = dec.get_i16();
+    if (!error_code) {
+        return std::unexpected(error_code.error());
+    }
+    FetchResponse response;
+    response.batches = *batches;
+    response.high_watermark = *high_watermark;
+    response.log_start_offset = *log_start_offset;
+    response.error_code = static_cast<WireError>(*error_code);
+    return response;
+}
+
 }  // namespace nexus

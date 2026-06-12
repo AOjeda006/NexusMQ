@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "common/bytes.hpp"
 #include "common/error.hpp"
 #include "common/types.hpp"
 #include "protocol/error_code.hpp"
@@ -87,6 +88,57 @@ struct MetadataResponse {
     void encode(Encoder& enc) const;
     [[nodiscard]] static expected<MetadataResponse> decode(Decoder& dec);
     bool operator==(const MetadataResponse&) const = default;
+};
+
+/// @brief Producción a una partición; `batch` son los bytes del RecordBatch (opacos aquí).
+/// @details `batch` es una vista no propietaria: al decodificar apunta dentro del búfer de
+///   entrada (debe vivir mientras se use). Sin `operator==` por defecto (compararía punteros).
+struct ProduceRequest {
+    std::string topic;
+    PartitionId partition = 0;
+    Acks acks = Acks::Leader;
+    ByteSpan batch;
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<ProduceRequest> decode(Decoder& dec);
+};
+
+/// @brief Resultado de una producción: offset base asignado, error y throttling.
+struct ProduceResponse {
+    Offset base_offset = -1;
+    WireError error_code = WireError::None;
+    std::int32_t throttle_ms = 0;
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<ProduceResponse> decode(Decoder& dec);
+    bool operator==(const ProduceResponse&) const = default;
+};
+
+/// @brief Lectura desde una partición a partir de `fetch_offset`.
+struct FetchRequest {
+    std::string topic;
+    PartitionId partition = 0;
+    Offset fetch_offset = 0;
+    std::int32_t max_bytes = 0;
+    std::int32_t min_bytes = 0;
+    std::int32_t max_wait_ms = 0;
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<FetchRequest> decode(Decoder& dec);
+    bool operator==(const FetchRequest&) const = default;
+};
+
+/// @brief Resultado de una lectura: batches (bytes opacos), high-watermark y error.
+/// @details `batches` es una vista no propietaria al búfer de entrada (zero-copy). Sin
+///   `operator==` por defecto (compararía punteros, no contenido).
+struct FetchResponse {
+    ByteSpan batches;
+    Offset high_watermark = 0;
+    Offset log_start_offset = 0;
+    WireError error_code = WireError::None;
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<FetchResponse> decode(Decoder& dec);
 };
 
 }  // namespace nexus
