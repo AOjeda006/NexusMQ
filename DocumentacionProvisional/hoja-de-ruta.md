@@ -82,9 +82,17 @@ Harness de benchmark vacío y CI:
 - **clang-tidy:** desactivado `bugprone-easily-swappable-parameters` (`chore(tidy)`): choca con las firmas del motor de log (`maybe_append(offset, file_pos, batch_len)`, futuras `read(offset, max_bytes)`…), todas enteros distintos por contrato. El resto de avisos (designated-initializers, use-ranges) se **arreglaron en código**.
 
 ### M4 — Log de partición (rolling + recuperación)
-- [ ] `nexus-storage`: `partition_log.hpp/.cpp` (`append` con rotación de segmento, `read` cruzando segmentos vía índice §7.11 #3).
-- [ ] `nexus-storage`: `recovery.hpp/.cpp` (`recover_partition`) — valida CRC y **trunca cola *torn*** (§7.11 #2).
-- [ ] Tests: lectura cruzando segmentos; recuperación tras cola incompleta/corrupta.
+- [~] `nexus-storage`: `partition_log.hpp/.cpp` (`LogConfig`, secuencia de segmentos).
+  - [x] **M4a** `open` (descubre/abre segmentos + recupera el activo) + `append` con **rotación** al superar `segment_bytes` + `log_start/end_offset` + `segment_count`. El log **asigna** el offset base autoritativo.
+  - [ ] **M4b** `read(offset, max_bytes)` **cruzando segmentos** (seek por índice; §7.11 #3) + `segment_for` (binaria).
+  - [ ] **M4c** recuperación a nivel partición: reabrir tras *crash* en el activo (cola *torn*/corrupta).
+- [ ] `nexus-storage`: `recovery.hpp/.cpp` (`recover_partition`) — **plegado en `PartitionLog::open`** por ahora (un orquestador aparte llegará si el server recupera varias particiones al arrancar).
+
+**Ajustes de diseño respecto al desglose (M4):**
+- El **log asigna** el offset base (`append` reasigna `base_offset = log_end_offset`; el CRC no lo cubre). Revisable en la capa Partition/Raft (el líder asignará antes de replicar; sería un ADR si cambia).
+- `cfg_` se guarda **por valor** (no `const LogConfig&`): evita una referencia colgante; `LogConfig` es un POD pequeño.
+- `LogConfig` por ahora: `segment_bytes`, `index_interval_bytes`. `segment_ms` (rotación por tiempo), `fsync_policy`/`recovery_point` (M5) y retención (M6) se añadirán en su hito.
+- Recuperación **plegada en `open`** (recupera solo el segmento activo; los sellados se confían).
 
 ### M5 — Durabilidad
 - [ ] `nexus-common`/`nexus-storage`: política de `fsync` (`none`/`interval`/`commit`); `recovery_point`.

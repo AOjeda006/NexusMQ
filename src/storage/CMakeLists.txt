@@ -2,7 +2,8 @@
 # recuperación). Fase 1: E/S bloqueante (sobre nexus::io). Núcleo de aprendizaje del proyecto.
 add_library(nexus-storage
   index.cpp
-  segment.cpp)
+  segment.cpp
+  partition_log.cpp)
 add_library(nexus::storage ALIAS nexus-storage)
 
 target_include_directories(nexus-storage PUBLIC ${PROJECT_SOURCE_DIR}/src)
