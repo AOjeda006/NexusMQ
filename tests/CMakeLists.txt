@@ -12,6 +12,7 @@ add_executable(nexus-tests
   unit/common/bytes_test.cpp
   unit/common/error_test.cpp
   unit/common/record_test.cpp
+  unit/common/varint_test.cpp
   unit/io/file_test.cpp
   unit/storage/index_test.cpp
   unit/storage/segment_test.cpp

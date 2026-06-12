@@ -120,7 +120,13 @@ Harness de benchmark vacío y CI:
 
 - [ ] `nexus-io`: puerto `Proactor` + backend **io_uring** (un anillo por reactor); `awaitable`s; `File`/`Socket` async; `Listener`.
 - [ ] `nexus-reactor`: `Reactor`, `CoroScheduler`, `task<T>`, `SpscQueue` (alignas anti *false sharing*), `MpmcQueue` (ABA), `CrossCoreMailbox`, `ArenaAllocator`, `ReactorPool` (afinidad).
-- [ ] `nexus-protocol`: `FrameHeader`/`FrameReader`/`FrameWriter`, `codec` (varint/zigzag, decodificador defensivo), `messages` (ApiVersions/Metadata/Produce/Fetch/OffsetCommit…), `error_code` (`WireError`), `versioning`, `compression`, `credits`.
+- [~] `nexus-protocol`: framing, codec, mensajes, errores. *(El reactor async se intercala; el protocolo es puro encode/decode, sin async, y va primero por ser TDD-puro.)*
+  - [x] **P1** `nexus-common`: `varint.hpp/.cpp` (LEB128 + zigzag, decodificador defensivo). *(Primitiva, junto a `load_le`/`store_le`; wire en **little-endian**, consistente con el almacenamiento.)*
+  - [ ] **P2** `protocol/codec.hpp` — `Encoder`/`Decoder` (cursor con chequeo de límites; u8/u16/u32/i32/i64, varint, bytes/string longitud-prefijo).
+  - [ ] **P3** `protocol/error_code.hpp` — `WireError` + `is_retryable` + `from_error` (traducción núcleo→wire en el borde).
+  - [ ] **P4** `protocol/frame.hpp/.cpp` — `FrameHeader` (`length|api_key|api_version|correlation_id|flags`) + `ApiKey`.
+  - [ ] **P5** `protocol/messages.hpp/.cpp` — request/response por operación (ApiVersions/Metadata/Produce/Fetch…); `versioning`. *(compression/credits → cuando entren LZ4/Zstd y el control de flujo.)*
+  - [ ] **P6** `FrameReader`/`FrameWriter` async (requieren el proactor; van tras el reactor).
 - [ ] `nexus-broker` (mono-nodo): `Topic`/`Partition` (produce/fetch hot-path), `producer_session` (idempotencia), `offset_manager`, `topic_manager`, backpressure.
 - [ ] `nexus-client`: `Client`, `MetadataCache`, `ConnectionPool`, `Producer`, `Consumer`.
 - [ ] `nexus-server`: `main.cpp` (bootstrap + señales SIGTERM/SIGINT vía eventfd), `Server`, `Connection`, `RequestRouter`.
