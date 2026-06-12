@@ -68,7 +68,10 @@ Harness de benchmark vacío y CI:
 ### M3 — Segment (`.log` + `.index`)
 - [x] **M3.1** `nexus-io`: `file.hpp/.cpp` — `File` RAII (Fase 1 **bloqueante**: `pread`/`pwrite`/`fsync`; `open`).
 - [x] **M3.2** `nexus-storage`: `index.hpp/.cpp` (`IndexEntry`, `SparseIndex` con `floor` por búsqueda binaria, `open`/`maybe_append`/`flush`). Nuevo target `nexus-storage`.
-- [ ] **M3.3** `nexus-storage`: `segment.hpp/.cpp` (`create`/`open`, `append`, `read`, `seal`, `recover`).
+- [~] **M3.3** `nexus-storage`: `segment.hpp/.cpp` — un tramo del log (`.log` + `.index`).
+  - [x] **M3.3a** `create`/`open` + `append` (escribe `.log` e indexa) + `seal` + `is_full`. Ficheros `<base:020>.log`/`.index`.
+  - [ ] **M3.3b** `read(offset, max_bytes) -> FetchResult` (seek por `floor` + barrido hacia delante; §7.11 #3).
+  - [ ] **M3.3c** `recover()` (valida CRC + trunca cola *torn*; §7.11 #2) — base de M4.
 - [ ] Tests: append/read; índice disperso localiza el batch; *seek* correcto.
 
 **Ajustes de diseño respecto al desglose (M3.2):**
