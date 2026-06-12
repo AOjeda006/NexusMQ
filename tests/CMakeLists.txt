@@ -16,6 +16,7 @@ add_executable(nexus-tests
   unit/io/file_test.cpp
   unit/io/fake_proactor_test.cpp
   unit/io/awaitable_test.cpp
+  unit/io/io_uring_backend_test.cpp
   unit/storage/index_test.cpp
   unit/storage/segment_test.cpp
   unit/storage/partition_log_test.cpp
