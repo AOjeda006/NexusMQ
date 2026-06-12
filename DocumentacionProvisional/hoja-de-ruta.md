@@ -121,7 +121,7 @@ Harness de benchmark vacío y CI:
 - [ ] `nexus-io`: puerto `Proactor` + backend **io_uring** (un anillo por reactor); `awaitable`s; `File`/`Socket` async; `Listener`.
 - [~] `nexus-reactor`: corrutinas, scheduler, colas, allocator, reactor, pool.
   - [x] **R1** `reactor/task.hpp` — `task<T>` (corrutina perezosa, transferencia simétrica, solo-movible) + `sync_wait`. Target `nexus-reactor` (INTERFACE por ahora). *(`task` en minúscula = vocabulario estilo std, como `expected`.)*
-  - [ ] **R2** `CoroScheduler` + awaitable de cesión (`schedule`/`run_ready`).
+  - [x] **R2** `reactor/scheduler.hpp` — `CoroScheduler` (`schedule`/`run_ready`) + `yield_to` (cesión cooperativa, intercala corrutinas en el hilo).
   - [ ] **R3** `SpscQueue` (alignas anti *false sharing*) + `MpmcQueue` (ABA).
   - [ ] **R4** `Proactor` (puerto) + `FakeProactor` (doble de test) + awaitables.
   - [ ] **R5** backend **io_uring** (liburing) con smoke-test que se omite si no está disponible.
