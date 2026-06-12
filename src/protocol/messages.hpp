@@ -141,4 +141,81 @@ struct FetchResponse {
     [[nodiscard]] static expected<FetchResponse> decode(Decoder& dec);
 };
 
+/// @brief Crea un topic con @p partition_count particiones y factor de réplica dado.
+struct CreateTopicRequest {
+    std::string name;
+    std::int32_t partition_count = 1;
+    std::int16_t replication_factor = 1;
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<CreateTopicRequest> decode(Decoder& dec);
+    bool operator==(const CreateTopicRequest&) const = default;
+};
+
+struct CreateTopicResponse {
+    WireError error_code = WireError::None;
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<CreateTopicResponse> decode(Decoder& dec);
+    bool operator==(const CreateTopicResponse&) const = default;
+};
+
+/// @brief Borra un topic por nombre.
+struct DeleteTopicRequest {
+    std::string name;
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<DeleteTopicRequest> decode(Decoder& dec);
+    bool operator==(const DeleteTopicRequest&) const = default;
+};
+
+struct DeleteTopicResponse {
+    WireError error_code = WireError::None;
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<DeleteTopicResponse> decode(Decoder& dec);
+    bool operator==(const DeleteTopicResponse&) const = default;
+};
+
+/// @brief Confirma el offset consumido de un grupo en una partición (con metadatos opcionales).
+struct OffsetCommitRequest {
+    std::string group;
+    std::string topic;
+    PartitionId partition = 0;
+    Offset offset = 0;
+    std::string metadata;
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<OffsetCommitRequest> decode(Decoder& dec);
+    bool operator==(const OffsetCommitRequest&) const = default;
+};
+
+struct OffsetCommitResponse {
+    WireError error_code = WireError::None;
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<OffsetCommitResponse> decode(Decoder& dec);
+    bool operator==(const OffsetCommitResponse&) const = default;
+};
+
+/// @brief Consulta el offset confirmado de un grupo en una partición.
+struct OffsetFetchRequest {
+    std::string group;
+    std::string topic;
+    PartitionId partition = 0;
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<OffsetFetchRequest> decode(Decoder& dec);
+    bool operator==(const OffsetFetchRequest&) const = default;
+};
+
+struct OffsetFetchResponse {
+    Offset offset = -1;
+    WireError error_code = WireError::None;
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<OffsetFetchResponse> decode(Decoder& dec);
+    bool operator==(const OffsetFetchResponse&) const = default;
+};
+
 }  // namespace nexus

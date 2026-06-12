@@ -125,10 +125,10 @@ Harness de benchmark vacío y CI:
   - [x] **P2** `protocol/codec.hpp/.cpp` — `Encoder`/`Decoder` (cursor con chequeo de límites; u8/u16/u32/i16/i32/i64, varint, bytes/string longitud-prefijo, zero-copy). Nuevo target `nexus-protocol`.
   - [x] **P3** `protocol/error_code.hpp/.cpp` — `WireError` (i16, tamaño de wire) + `is_retryable` + `from_error` (traducción núcleo→wire en el borde).
   - [x] **P4** `protocol/frame.hpp/.cpp` — `FrameHeader` (`length|api_key|api_version|correlation_id|flags`, encode/decode defensivo) + `ApiKey` + `length_for`/`has_credit_update`.
-  - [~] **P5** `protocol/messages.hpp/.cpp` — request/response por operación; `versioning`. *(compression/credits → cuando entren LZ4/Zstd y el control de flujo; mensajes de grupo de consumidores → con el broker.)*
+  - [x] **P5** `protocol/messages.hpp/.cpp` — request/response por operación; `versioning`. *(compression/credits → cuando entren LZ4/Zstd y el control de flujo; mensajes de grupo de consumidores → con el broker.)*
     - [x] **P5a** `versioning` (`ApiVersionRange` + `negotiate`) + ApiVersions + Metadata (sub-structs `BrokerMeta`/`PartitionMeta`/`TopicMeta`). Vectores con contador acotado (anti-DoS).
     - [x] **P5b** Produce + Fetch (batch/batches como bytes opacos zero-copy) + `Acks` en `nexus-common`.
-    - [ ] **P5c** CreateTopic/DeleteTopic + OffsetCommit/OffsetFetch.
+    - [x] **P5c** CreateTopic/DeleteTopic + OffsetCommit/OffsetFetch.
   - [ ] **P6** `FrameReader`/`FrameWriter` async (requieren el proactor; van tras el reactor).
 - [ ] `nexus-broker` (mono-nodo): `Topic`/`Partition` (produce/fetch hot-path), `producer_session` (idempotencia), `offset_manager`, `topic_manager`, backpressure.
 - [ ] `nexus-client`: `Client`, `MetadataCache`, `ConnectionPool`, `Producer`, `Consumer`.

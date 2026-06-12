@@ -176,4 +176,54 @@ TEST(Messages, FetchResponse_RoundTrip_PreservaBatches) {
                            batches.end()));
 }
 
+TEST(Messages, CreateTopic_RoundTrip) {
+    const nexus::CreateTopicRequest req{
+        .name = "events", .partition_count = 12, .replication_factor = 3};
+    const auto decoded = round_trip(req);
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(*decoded, req);
+
+    const nexus::CreateTopicResponse resp{.error_code = nexus::WireError::None};
+    EXPECT_EQ(round_trip(resp).value_or(
+                  nexus::CreateTopicResponse{.error_code = nexus::WireError::InvalidRequest}),
+              resp);
+}
+
+TEST(Messages, DeleteTopic_RoundTrip) {
+    const nexus::DeleteTopicRequest req{.name = "events"};
+    const auto decoded = round_trip(req);
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(*decoded, req);
+
+    const nexus::DeleteTopicResponse resp{.error_code = nexus::WireError::UnknownTopicOrPartition};
+    const auto decoded_resp = round_trip(resp);
+    ASSERT_TRUE(decoded_resp.has_value());
+    EXPECT_EQ(*decoded_resp, resp);
+}
+
+TEST(Messages, OffsetCommit_RoundTrip) {
+    const nexus::OffsetCommitRequest req{
+        .group = "g1", .topic = "events", .partition = 3, .offset = 1000, .metadata = "meta"};
+    const auto decoded = round_trip(req);
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(*decoded, req);
+
+    const nexus::OffsetCommitResponse resp{.error_code = nexus::WireError::None};
+    EXPECT_EQ(round_trip(resp).value_or(
+                  nexus::OffsetCommitResponse{.error_code = nexus::WireError::InvalidRequest}),
+              resp);
+}
+
+TEST(Messages, OffsetFetch_RoundTrip) {
+    const nexus::OffsetFetchRequest req{.group = "g1", .topic = "events", .partition = 3};
+    const auto decoded = round_trip(req);
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(*decoded, req);
+
+    const nexus::OffsetFetchResponse resp{.offset = 500, .error_code = nexus::WireError::None};
+    const auto decoded_resp = round_trip(resp);
+    ASSERT_TRUE(decoded_resp.has_value());
+    EXPECT_EQ(*decoded_resp, resp);
+}
+
 }  // namespace

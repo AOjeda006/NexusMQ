@@ -373,4 +373,160 @@ expected<FetchResponse> FetchResponse::decode(Decoder& dec) {
     return response;
 }
 
+void CreateTopicRequest::encode(Encoder& enc) const {
+    enc.put_string(name);
+    enc.put_i32(partition_count);
+    enc.put_i16(replication_factor);
+}
+
+expected<CreateTopicRequest> CreateTopicRequest::decode(Decoder& dec) {
+    auto name = dec.get_string();
+    if (!name) {
+        return std::unexpected(name.error());
+    }
+    auto partition_count = dec.get_i32();
+    if (!partition_count) {
+        return std::unexpected(partition_count.error());
+    }
+    auto replication_factor = dec.get_i16();
+    if (!replication_factor) {
+        return std::unexpected(replication_factor.error());
+    }
+    CreateTopicRequest request;
+    request.name = std::string{*name};
+    request.partition_count = *partition_count;
+    request.replication_factor = *replication_factor;
+    return request;
+}
+
+void CreateTopicResponse::encode(Encoder& enc) const {
+    enc.put_i16(static_cast<std::int16_t>(error_code));
+}
+
+expected<CreateTopicResponse> CreateTopicResponse::decode(Decoder& dec) {
+    auto error_code = dec.get_i16();
+    if (!error_code) {
+        return std::unexpected(error_code.error());
+    }
+    return CreateTopicResponse{.error_code = static_cast<WireError>(*error_code)};
+}
+
+void DeleteTopicRequest::encode(Encoder& enc) const {
+    enc.put_string(name);
+}
+
+expected<DeleteTopicRequest> DeleteTopicRequest::decode(Decoder& dec) {
+    auto name = dec.get_string();
+    if (!name) {
+        return std::unexpected(name.error());
+    }
+    return DeleteTopicRequest{.name = std::string{*name}};
+}
+
+void DeleteTopicResponse::encode(Encoder& enc) const {
+    enc.put_i16(static_cast<std::int16_t>(error_code));
+}
+
+expected<DeleteTopicResponse> DeleteTopicResponse::decode(Decoder& dec) {
+    auto error_code = dec.get_i16();
+    if (!error_code) {
+        return std::unexpected(error_code.error());
+    }
+    return DeleteTopicResponse{.error_code = static_cast<WireError>(*error_code)};
+}
+
+void OffsetCommitRequest::encode(Encoder& enc) const {
+    enc.put_string(group);
+    enc.put_string(topic);
+    enc.put_i32(partition);
+    enc.put_i64(offset);
+    enc.put_string(metadata);
+}
+
+expected<OffsetCommitRequest> OffsetCommitRequest::decode(Decoder& dec) {
+    auto group = dec.get_string();
+    if (!group) {
+        return std::unexpected(group.error());
+    }
+    auto topic = dec.get_string();
+    if (!topic) {
+        return std::unexpected(topic.error());
+    }
+    auto partition = dec.get_i32();
+    if (!partition) {
+        return std::unexpected(partition.error());
+    }
+    auto offset = dec.get_i64();
+    if (!offset) {
+        return std::unexpected(offset.error());
+    }
+    auto metadata = dec.get_string();
+    if (!metadata) {
+        return std::unexpected(metadata.error());
+    }
+    OffsetCommitRequest request;
+    request.group = std::string{*group};
+    request.topic = std::string{*topic};
+    request.partition = *partition;
+    request.offset = *offset;
+    request.metadata = std::string{*metadata};
+    return request;
+}
+
+void OffsetCommitResponse::encode(Encoder& enc) const {
+    enc.put_i16(static_cast<std::int16_t>(error_code));
+}
+
+expected<OffsetCommitResponse> OffsetCommitResponse::decode(Decoder& dec) {
+    auto error_code = dec.get_i16();
+    if (!error_code) {
+        return std::unexpected(error_code.error());
+    }
+    return OffsetCommitResponse{.error_code = static_cast<WireError>(*error_code)};
+}
+
+void OffsetFetchRequest::encode(Encoder& enc) const {
+    enc.put_string(group);
+    enc.put_string(topic);
+    enc.put_i32(partition);
+}
+
+expected<OffsetFetchRequest> OffsetFetchRequest::decode(Decoder& dec) {
+    auto group = dec.get_string();
+    if (!group) {
+        return std::unexpected(group.error());
+    }
+    auto topic = dec.get_string();
+    if (!topic) {
+        return std::unexpected(topic.error());
+    }
+    auto partition = dec.get_i32();
+    if (!partition) {
+        return std::unexpected(partition.error());
+    }
+    OffsetFetchRequest request;
+    request.group = std::string{*group};
+    request.topic = std::string{*topic};
+    request.partition = *partition;
+    return request;
+}
+
+void OffsetFetchResponse::encode(Encoder& enc) const {
+    enc.put_i64(offset);
+    enc.put_i16(static_cast<std::int16_t>(error_code));
+}
+
+expected<OffsetFetchResponse> OffsetFetchResponse::decode(Decoder& dec) {
+    auto offset = dec.get_i64();
+    if (!offset) {
+        return std::unexpected(offset.error());
+    }
+    auto error_code = dec.get_i16();
+    if (!error_code) {
+        return std::unexpected(error_code.error());
+    }
+    return OffsetFetchResponse{.offset = *offset,
+                               .error_code = static_cast<WireError>(*error_code)};
+}
+
 }  // namespace nexus
