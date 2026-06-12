@@ -16,7 +16,11 @@ add_executable(nexus-tests
   unit/storage/index_test.cpp
   unit/storage/segment_test.cpp
   unit/storage/partition_log_test.cpp
+  unit/bench/latency_histogram_test.cpp
   crash/partition_crash_test.cpp)
+
+# LatencyHistogram es header-only en tools/bench; el test lo incluye directamente.
+target_include_directories(nexus-tests PRIVATE ${PROJECT_SOURCE_DIR}/tools/bench)
 
 # nexus::common aporta C++20, los avisos-como-errores (vía nexus_options, PUBLIC)
 # y la cabecera; gtest_main aporta un main() que corre todos los TEST(...).

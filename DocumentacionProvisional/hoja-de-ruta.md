@@ -11,7 +11,9 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** Fase 1 · **M1 ✅ · M2 ✅ · M3 ✅ · M4 ✅ · M5 (Durabilidad) cerrado ✅** (`nexus-common` + `nexus-io` + `nexus-storage`: File RAII, RecordBatch, SparseIndex, Segment, PartitionLog con rotación + lectura cruzando segmentos + recuperación + política de `fsync`/`recovery_point` + test de *crash*; **58 tests** verdes en GCC/libstdc++, Clang/libc++ y ASan/UBSan). Siguiente: **M6 — Retención + benchmarks** (último hito de Fase 1).
+**Estado actual:** **FASE 1 COMPLETA ✅** (M1–M6). `nexus-common` + `nexus-io` + `nexus-storage` + `nexus-bench`: motor de log monopartición con E/S bloqueante (File RAII, RecordBatch+CRC32C, SparseIndex, Segment, PartitionLog con rotación + lectura cruzando segmentos + recuperación de cola *torn* + política de `fsync`/`recovery_point` + retención por tamaño/tiempo) y benchmark con histograma de latencias. **66 tests** verdes en GCC/libstdc++, Clang/libc++ y ASan/UBSan; CI verde. Siguiente fase: **Fase 1b — Reactor + broker monolítico** (io_uring + corrutinas, protocolo binario, cliente C++).
+
+> **Resumen de cierre de Fase 1.** Entregable: motor de log append-only monopartición, durable y recuperable, con cifras de rendimiento. Targets: `nexus-common`, `nexus-io`, `nexus-storage`, `nexus-bench`, `nexus-tests` (unit/property/crash). Modelo de errores `expected<T>` en todo el núcleo; RAII estricto; TDD rojo→verde→refactor; sin reactor ni io_uring (eso es 1b). Ajustes de diseño respecto al desglose anotados por hito (Buffer sobre vector, índice en vector propietario, el log asigna offsets, `cfg_` por valor, recuperación plegada en `open`, retención por *mtime*, open-loop diferido a 1b).
 
 ---
 
@@ -102,9 +104,11 @@ Harness de benchmark vacío y CI:
 
 ### M6 — Retención + benchmarks
 - [x] **M6a** `nexus-storage`: `retention.hpp` (`RetentionPolicy` por tiempo/tamaño) + `PartitionLog::enforce_retention` (borra sellados antiguos por tamaño o por *mtime* del `.log`; **nunca el activo**; avanza `log_start_offset`).
-- [ ] **M6b** `nexus-bench`: `latency_histogram` (`p50/p99/p999/max`) + `bench_config` + `load_generator` open-loop; benchmark del motor de log (throughput/percentiles, impacto de `fsync`), metodología §8.2.
+- [x] **M6b** `nexus-bench`: `LatencyHistogram` (estilo HdrHistogram, `p50/p99/p999/max`, error acotado) + `BenchConfig`; benchmark de `append` (throughput + percentiles + **impacto de `fsync`**: None/Interval/Commit), metodología §8.2 (warm-up descartado, sin *coordinated omission*). Ejecutable `nexus-bench [op_count]`.
 
 **Ajuste de diseño (M6a):** la antigüedad de un segmento se toma del *mtime* del `.log` (los records aún no llevan timestamp; con timestamp se usará el máximo del segmento). `RetentionPolicy::eligible` del desglose se **pliega** en `enforce_retention` (la retención por tamaño es acumulativa, no un predicado por segmento). `enforce_retention(now)` no recibe reloj: usa `file_clock::now()` (sin abstracción de `WallClock` todavía).
+
+**Ajuste de diseño (M6b):** el **generador open-loop** se **difiere a Fase 1b** (sin red no es significativo: en el motor monohilo se mide la **latencia de servicio** de `append`, no una tasa de llegada). `nexus-bench` deja de usar Google Benchmark (arnés propio con `LatencyHistogram`). `<print>`/`std::println` evitados (GCC 14+): se usa `std::format` + `std::cout` (compatible con el GCC 13 del CI). La lectura `mmap` queda como optimización futura (no se midió en M6).
 
 ---
 
