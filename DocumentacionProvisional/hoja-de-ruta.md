@@ -119,7 +119,13 @@ Harness de benchmark vacío y CI:
 > `nexus-client`, `nexus-server` (mono-nodo). Tests: integración.
 
 - [ ] `nexus-io`: puerto `Proactor` + backend **io_uring** (un anillo por reactor); `awaitable`s; `File`/`Socket` async; `Listener`.
-- [ ] `nexus-reactor`: `Reactor`, `CoroScheduler`, `task<T>`, `SpscQueue` (alignas anti *false sharing*), `MpmcQueue` (ABA), `CrossCoreMailbox`, `ArenaAllocator`, `ReactorPool` (afinidad).
+- [~] `nexus-reactor`: corrutinas, scheduler, colas, allocator, reactor, pool.
+  - [x] **R1** `reactor/task.hpp` — `task<T>` (corrutina perezosa, transferencia simétrica, solo-movible) + `sync_wait`. Target `nexus-reactor` (INTERFACE por ahora). *(`task` en minúscula = vocabulario estilo std, como `expected`.)*
+  - [ ] **R2** `CoroScheduler` + awaitable de cesión (`schedule`/`run_ready`).
+  - [ ] **R3** `SpscQueue` (alignas anti *false sharing*) + `MpmcQueue` (ABA).
+  - [ ] **R4** `Proactor` (puerto) + `FakeProactor` (doble de test) + awaitables.
+  - [ ] **R5** backend **io_uring** (liburing) con smoke-test que se omite si no está disponible.
+  - [ ] **R6** `Reactor`, `CrossCoreMailbox`, `ArenaAllocator`, `ReactorPool` (afinidad).
 - [~] `nexus-protocol`: framing, codec, mensajes, errores. *(El reactor async se intercala; el protocolo es puro encode/decode, sin async, y va primero por ser TDD-puro.)*
   - [x] **P1** `nexus-common`: `varint.hpp/.cpp` (LEB128 + zigzag, decodificador defensivo). *(Primitiva, junto a `load_le`/`store_le`; wire en **little-endian**, consistente con el almacenamiento.)*
   - [x] **P2** `protocol/codec.hpp/.cpp` — `Encoder`/`Decoder` (cursor con chequeo de límites; u8/u16/u32/i16/i32/i64, varint, bytes/string longitud-prefijo, zero-copy). Nuevo target `nexus-protocol`.
