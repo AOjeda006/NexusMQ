@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -19,6 +20,9 @@ using Term = std::int64_t;         ///< Mandato de Raft.
 using Index = std::int64_t;        ///< Índice en el log de Raft.
 using Crc = std::uint32_t;         ///< Checksum CRC32C.
 using Epoch = std::int32_t;        ///< Época de liderazgo de partición.
+
+/// Instante en el reloj monótono (deadlines de temporizadores; inmune a saltos del reloj de pared).
+using MonoTime = std::chrono::steady_clock::time_point;
 
 /// Códec de compresión de un RecordBatch.
 enum class Codec : std::uint8_t { None, Lz4, Zstd };
