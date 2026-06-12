@@ -2,7 +2,8 @@
 # Capa: depende solo de nexus-common (puro encode/decode, sin E/S ni async).
 add_library(nexus-protocol
   codec.cpp
-  error_code.cpp)
+  error_code.cpp
+  frame.cpp)
 add_library(nexus::protocol ALIAS nexus-protocol)
 
 target_include_directories(nexus-protocol PUBLIC ${PROJECT_SOURCE_DIR}/src)

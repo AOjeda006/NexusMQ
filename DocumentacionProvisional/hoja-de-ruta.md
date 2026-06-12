@@ -124,7 +124,7 @@ Harness de benchmark vacío y CI:
   - [x] **P1** `nexus-common`: `varint.hpp/.cpp` (LEB128 + zigzag, decodificador defensivo). *(Primitiva, junto a `load_le`/`store_le`; wire en **little-endian**, consistente con el almacenamiento.)*
   - [x] **P2** `protocol/codec.hpp/.cpp` — `Encoder`/`Decoder` (cursor con chequeo de límites; u8/u16/u32/i16/i32/i64, varint, bytes/string longitud-prefijo, zero-copy). Nuevo target `nexus-protocol`.
   - [x] **P3** `protocol/error_code.hpp/.cpp` — `WireError` (i16, tamaño de wire) + `is_retryable` + `from_error` (traducción núcleo→wire en el borde).
-  - [ ] **P4** `protocol/frame.hpp/.cpp` — `FrameHeader` (`length|api_key|api_version|correlation_id|flags`) + `ApiKey`.
+  - [x] **P4** `protocol/frame.hpp/.cpp` — `FrameHeader` (`length|api_key|api_version|correlation_id|flags`, encode/decode defensivo) + `ApiKey` + `length_for`/`has_credit_update`.
   - [ ] **P5** `protocol/messages.hpp/.cpp` — request/response por operación (ApiVersions/Metadata/Produce/Fetch…); `versioning`. *(compression/credits → cuando entren LZ4/Zstd y el control de flujo.)*
   - [ ] **P6** `FrameReader`/`FrameWriter` async (requieren el proactor; van tras el reactor).
 - [ ] `nexus-broker` (mono-nodo): `Topic`/`Partition` (produce/fetch hot-path), `producer_session` (idempotencia), `offset_manager`, `topic_manager`, backpressure.
