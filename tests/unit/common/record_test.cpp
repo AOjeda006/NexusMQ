@@ -59,6 +59,27 @@ TEST(RecordBatch, Decode_BitVolteado_DetectadoPorCrc) {
     EXPECT_EQ(r.error().code(), nexus::ErrorCode::Corrupt);
 }
 
+TEST(RecordBatch, Peek_DevuelveCabeceraYTamanoSinCopiarRecords) {
+    const std::vector<std::byte> payload{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+    nexus::Buffer buf;
+    make_batch(payload, 3).encode(buf);
+    const auto view = nexus::RecordBatch::peek(buf.as_span());
+    ASSERT_TRUE(view.has_value());
+    EXPECT_EQ(view->base_offset, 100);
+    EXPECT_EQ(view->record_count, 3);
+    EXPECT_EQ(view->encoded_size, buf.size());
+    EXPECT_EQ(view->last_offset(), 102);
+}
+
+TEST(RecordBatch, Peek_CabeceraTruncada_DevuelveCorrupt) {
+    nexus::Buffer buf;
+    make_batch({std::byte{9}}, 1).encode(buf);
+    const nexus::ByteSpan full = buf.as_span();
+    const auto r = nexus::RecordBatch::peek(full.subspan(0, nexus::RecordBatch::kHeaderSize - 1));
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code(), nexus::ErrorCode::Corrupt);
+}
+
 TEST(RecordBatch, RoundTrip_PayloadsAleatorios_Property) {
     std::mt19937_64 rng{0xBEEFU};
     std::uniform_int_distribution<int> byte_dist{0, 255};

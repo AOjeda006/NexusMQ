@@ -70,7 +70,7 @@ Harness de benchmark vacío y CI:
 - [x] **M3.2** `nexus-storage`: `index.hpp/.cpp` (`IndexEntry`, `SparseIndex` con `floor` por búsqueda binaria, `open`/`maybe_append`/`flush`). Nuevo target `nexus-storage`.
 - [~] **M3.3** `nexus-storage`: `segment.hpp/.cpp` — un tramo del log (`.log` + `.index`).
   - [x] **M3.3a** `create`/`open` + `append` (escribe `.log` e indexa) + `seal` + `is_full`. Ficheros `<base:020>.log`/`.index`.
-  - [ ] **M3.3b** `read(offset, max_bytes) -> FetchResult` (seek por `floor` + barrido hacia delante; §7.11 #3).
+  - [x] **M3.3b** `read(offset, max_bytes) -> FetchResult` (seek por `floor` + barrido; §7.11 #3). Nuevos: `FetchResult` (`storage/fetch_result.hpp`) y `RecordBatch::peek`/`encoded_size`/`RecordBatchView` (cabecera pública `kHeaderSize`) en `nexus-common` para recorrer el log sin copiar/revalidar.
   - [ ] **M3.3c** `recover()` (valida CRC + trunca cola *torn*; §7.11 #2) — base de M4.
 - [ ] Tests: append/read; índice disperso localiza el batch; *seek* correcto.
 

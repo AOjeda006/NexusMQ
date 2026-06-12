@@ -18,7 +18,7 @@ constexpr std::size_t kProducerIdPos = 18;     // i64
 constexpr std::size_t kProducerEpochPos = 26;  // i16
 constexpr std::size_t kBaseSequencePos = 28;   // i32
 constexpr std::size_t kRecordCountPos = 32;    // i32
-constexpr std::size_t kHeaderSize = 36;        // los records empiezan aquí
+// kHeaderSize (= 36, inicio de los records) vive en RecordBatch::kHeaderSize (cabecera pública).
 constexpr std::size_t kLengthFieldEnd = kLengthPos + 4;  // length cuenta a partir de aquí
 
 }  // namespace
@@ -81,6 +81,26 @@ expected<RecordBatch> RecordBatch::decode(ByteSpan data) {
 
     const ByteSpan rec = data.subspan(kHeaderSize, total - kHeaderSize);
     return RecordBatch{header, std::vector<std::byte>{rec.begin(), rec.end()}};
+}
+
+expected<RecordBatchView> RecordBatch::peek(ByteSpan data) {
+    if (data.size() < kHeaderSize) {
+        return make_error(ErrorCode::Corrupt, "batch truncado: cabecera incompleta");
+    }
+    // Decodificador defensivo: acotar `length` antes de derivar el tamaño on-disk (§7.9).
+    const auto length = load_le<std::int32_t>(data.subspan(kLengthPos));
+    if (length < 0) {
+        return make_error(ErrorCode::Corrupt, "length negativo");
+    }
+    const std::size_t total = kLengthFieldEnd + static_cast<std::size_t>(length);
+    if (total < kHeaderSize) {
+        return make_error(ErrorCode::Corrupt, "length inconsistente");
+    }
+    return RecordBatchView{
+        .base_offset = load_le<std::int64_t>(data.subspan(kBaseOffsetPos)),
+        .record_count = load_le<std::int32_t>(data.subspan(kRecordCountPos)),
+        .encoded_size = total,
+    };
 }
 
 Offset RecordBatch::last_offset() const noexcept {

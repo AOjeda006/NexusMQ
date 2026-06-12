@@ -44,6 +44,17 @@ nexus::RecordBatch make_batch(nexus::Offset base_offset, std::int32_t count,
     return nexus::RecordBatch{header, std::vector<std::byte>(payload_len, std::byte{0xAB})};
 }
 
+// Segmento con 4 batches de 3 records y payload 10 (encoded_size 46 c/u):
+// offsets b0 0..2, b1 3..5, b2 6..8, b3 9..11. Con interval 64 el índice ancla en b2 (pos 92).
+nexus::Segment filled_segment(const std::filesystem::path& dir) {
+    auto seg = nexus::Segment::create(dir, /*base_offset=*/0, /*interval=*/64);
+    EXPECT_TRUE(seg.has_value());
+    for (const nexus::Offset base : {0, 3, 6, 9}) {
+        EXPECT_TRUE(seg->append(make_batch(base, 3, 10)).has_value());
+    }
+    return std::move(*seg);
+}
+
 TEST(Segment, Append_VariosBatches_DevuelveUltimoOffsetYCreceTamano) {
     const TempDir dir("append");
     auto seg = nexus::Segment::create(dir.path(), /*base_offset=*/0, /*interval=*/64);
@@ -98,6 +109,46 @@ TEST(Segment, SealYReopen_PreservaTamanoYContenidoEnDisco) {
     const auto decoded = nexus::RecordBatch::decode(nexus::ByteSpan{raw});
     ASSERT_TRUE(decoded.has_value());
     EXPECT_EQ(decoded->last_offset(), off_seen);
+}
+
+TEST(Segment, Read_DesdeOffsetMedio_DevuelveBatchDesdeEseOffset) {
+    const TempDir dir("read_medio");
+    const auto seg = filled_segment(dir.path());
+    const auto fr = seg.read(4, 100000);
+    ASSERT_TRUE(fr.has_value());
+    const auto first = nexus::RecordBatch::decode(fr->batches.as_span());
+    ASSERT_TRUE(first.has_value());
+    EXPECT_EQ(first->header().base_offset, 3);  // el batch que contiene el offset 4
+    EXPECT_EQ(fr->next_offset, 12);             // tras el último batch (last 11)
+}
+
+TEST(Segment, Read_RespetaMaxBytes_DevuelveAlMenosUnBatch) {
+    const TempDir dir("read_max");
+    const auto seg = filled_segment(dir.path());
+    const auto fr = seg.read(0, 46);  // encoded_size de un batch = 36 + 10
+    ASSERT_TRUE(fr.has_value());
+    EXPECT_EQ(fr->batches.size(), 46U);  // exactamente un batch
+    EXPECT_EQ(fr->next_offset, 3);       // tras b0 (last 2)
+}
+
+TEST(Segment, Read_OffsetMasAllaDelFinal_DevuelveVacio) {
+    const TempDir dir("read_fin");
+    const auto seg = filled_segment(dir.path());
+    const auto fr = seg.read(100, 100000);
+    ASSERT_TRUE(fr.has_value());
+    EXPECT_TRUE(fr->batches.empty());
+    EXPECT_EQ(fr->next_offset, 100);
+}
+
+TEST(Segment, Read_SeekViaIndice_LocalizaBatchCorrecto) {
+    const TempDir dir("read_seek");
+    const auto seg = filled_segment(dir.path());
+    const auto fr = seg.read(7, 100000);  // floor(7) -> ancla {6,92}; salta b0/b1
+    ASSERT_TRUE(fr.has_value());
+    const auto first = nexus::RecordBatch::decode(fr->batches.as_span());
+    ASSERT_TRUE(first.has_value());
+    EXPECT_EQ(first->header().base_offset, 6);
+    EXPECT_EQ(fr->next_offset, 12);
 }
 
 TEST(Segment, Append_EnSegmentoSellado_DevuelveInvalidArgument) {

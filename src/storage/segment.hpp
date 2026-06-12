@@ -12,6 +12,7 @@
 #include "common/record.hpp"
 #include "common/types.hpp"
 #include "io/file.hpp"
+#include "storage/fetch_result.hpp"
 #include "storage/index.hpp"
 
 namespace nexus {
@@ -51,6 +52,14 @@ public:
     ///   a la caché de página. El offset base del batch debe encajar al final del log.
     /// @return El último offset del batch escrito, o error de E/S / segmento sellado.
     [[nodiscard]] expected<Offset> append(const RecordBatch& batch);
+
+    /// @brief Lee batches a partir de @p offset, hasta ~@p max_bytes (al menos uno si existe).
+    /// @details *Seek* por el índice (`floor`) + barrido hacia delante hasta el batch que
+    ///   contiene @p offset (§7.11 #3); copia batches **completos** mientras quepan en
+    ///   @p max_bytes. No revalida el CRC (eso es de `recover`); para un batch *torn* al final
+    ///   se detiene. Devuelve los bytes y el `next_offset` por el que continuar.
+    /// @return `FetchResult` (puede ir vacío si @p offset supera el final), o error de E/S.
+    [[nodiscard]] expected<FetchResult> read(Offset offset, std::size_t max_bytes) const;
 
     /// @brief Sella el segmento: persiste el índice, fuerza `fsync` del log y pasa a Closed.
     [[nodiscard]] expected<void> seal();

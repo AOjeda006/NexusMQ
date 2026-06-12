@@ -1,9 +1,13 @@
 #include "storage/segment.hpp"
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <format>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "common/bytes.hpp"
 
@@ -74,6 +78,50 @@ expected<Offset> Segment::append(const RecordBatch& batch) {
                         encoded.size());
     size_bytes_ += encoded.size();
     return batch.last_offset();
+}
+
+expected<FetchResult> Segment::read(Offset offset, std::size_t max_bytes) const {
+    FetchResult result;
+    result.next_offset = offset;
+
+    std::size_t position = index_.floor(offset).file_position;
+    std::array<std::byte, RecordBatch::kHeaderSize> header{};
+    while (position < size_bytes_) {
+        const auto read_header = log_.read_at(header, position);
+        if (!read_header) {
+            return std::unexpected(read_header.error());
+        }
+        if (*read_header < header.size()) {
+            break;  // cola incompleta (no debería ocurrir en un segmento íntegro)
+        }
+        const auto view = RecordBatch::peek(header);
+        if (!view) {
+            break;  // cabecera ilegible: fin de lo recuperable
+        }
+        const std::size_t total = view->encoded_size;
+        if (position + total > size_bytes_) {
+            break;  // batch truncado en disco
+        }
+        if (view->last_offset() < offset) {
+            position += total;  // batch enteramente anterior al offset pedido
+            continue;
+        }
+        if (!result.batches.empty() && result.batches.size() + total > max_bytes) {
+            break;  // límite de tamaño (siempre se devuelve al menos un batch)
+        }
+        std::vector<std::byte> body(total);
+        const auto read_body = log_.read_at(body, position);
+        if (!read_body) {
+            return std::unexpected(read_body.error());
+        }
+        if (*read_body < total) {
+            break;
+        }
+        result.batches.append(body);
+        result.next_offset = view->last_offset() + 1;
+        position += total;
+    }
+    return result;
 }
 
 expected<void> Segment::seal() {
