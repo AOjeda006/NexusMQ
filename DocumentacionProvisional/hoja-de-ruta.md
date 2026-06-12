@@ -122,7 +122,7 @@ Harness de benchmark vacío y CI:
 - [~] `nexus-reactor`: corrutinas, scheduler, colas, allocator, reactor, pool.
   - [x] **R1** `reactor/task.hpp` — `task<T>` (corrutina perezosa, transferencia simétrica, solo-movible) + `sync_wait`. Target `nexus-reactor` (INTERFACE por ahora). *(`task` en minúscula = vocabulario estilo std, como `expected`.)*
   - [x] **R2** `reactor/scheduler.hpp` — `CoroScheduler` (`schedule`/`run_ready`) + `yield_to` (cesión cooperativa, intercala corrutinas en el hilo).
-  - [ ] **R3** `SpscQueue` (alignas anti *false sharing*) + `MpmcQueue` (ABA).
+  - [x] **R3** `reactor/spsc_queue.hpp` (`SpscQueue<T,Cap>`, anillo SPSC release/acquire, `alignas(kCacheLineSize)` anti *false sharing*) + `reactor/mpmc_queue.hpp` (`MpmcQueue<T,Cap>` de Vyukov, celdas con nº de secuencia anti-ABA). Validadas con **ThreadSanitizer** (preset `linux-gcc-tsan` + job CI) con estrés productor/consumidor. *(Cap potencia de dos; `kCacheLineSize=64` fijo para evitar `-Winterference-size`.)*
   - [ ] **R4** `Proactor` (puerto) + `FakeProactor` (doble de test) + awaitables.
   - [ ] **R5** backend **io_uring** (liburing) con smoke-test que se omite si no está disponible.
   - [ ] **R6** `Reactor`, `CrossCoreMailbox`, `ArenaAllocator`, `ReactorPool` (afinidad).

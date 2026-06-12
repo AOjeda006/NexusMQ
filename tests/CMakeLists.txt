@@ -25,6 +25,8 @@ add_executable(nexus-tests
   unit/protocol/messages_test.cpp
   unit/reactor/task_test.cpp
   unit/reactor/scheduler_test.cpp
+  unit/reactor/spsc_queue_test.cpp
+  unit/reactor/mpmc_queue_test.cpp
   crash/partition_crash_test.cpp)
 
 # LatencyHistogram es header-only en tools/bench; el test lo incluye directamente.

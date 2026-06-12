@@ -24,6 +24,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
 endif()
 
 option(NEXUS_SANITIZERS "Compila con AddressSanitizer + UBSan (build de pruebas)" OFF)
+option(NEXUS_TSAN "Compila con ThreadSanitizer (valida las colas lock-free)" OFF)
 
 # Exporta compile_commands.json (lo consumen clang-tidy, clangd y los editores).
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -41,12 +42,21 @@ else()
   target_compile_options(nexus_options INTERFACE -Wall -Wextra -Wpedantic -Werror)
 endif()
 
-# Sanitizers (ASan/UBSan) bajo demanda para la build de pruebas. TSan se añadirá con la
-# concurrencia (Fase 1b); es incompatible con ASan, por eso no se combinan aquí.
+# Sanitizers bajo demanda para la build de pruebas. ASan/UBSan y TSan son **mutuamente
+# excluyentes** (no se pueden combinar en el mismo binario); cada uno tiene su preset.
+# TSan valida las colas lock-free de Fase 1b (SPSC/MPMC) frente a carreras de datos.
+if(NEXUS_SANITIZERS AND NEXUS_TSAN)
+  message(FATAL_ERROR "NEXUS_SANITIZERS y NEXUS_TSAN son incompatibles: usa un preset u otro.")
+endif()
 if(NEXUS_SANITIZERS AND NOT MSVC)
   target_compile_options(nexus_options INTERFACE
     -fsanitize=address,undefined -fno-omit-frame-pointer)
   target_link_options(nexus_options INTERFACE -fsanitize=address,undefined)
+endif()
+if(NEXUS_TSAN AND NOT MSVC)
+  target_compile_options(nexus_options INTERFACE
+    -fsanitize=thread -fno-omit-frame-pointer)
+  target_link_options(nexus_options INTERFACE -fsanitize=thread)
 endif()
 
 enable_testing()
@@ -60,4 +70,4 @@ foreach(_dir IN ITEMS src tools/bench tests)
   endif()
 endforeach()
 
-message(STATUS "NexusMQ ${PROJECT_VERSION} · C++23 · sanitizers=${NEXUS_SANITIZERS}")
+message(STATUS "NexusMQ ${PROJECT_VERSION} · C++23 · asan=${NEXUS_SANITIZERS} · tsan=${NEXUS_TSAN}")

@@ -37,16 +37,26 @@
       "cacheVariables": {
         "NEXUS_SANITIZERS": "ON"
       }
+    },
+    {
+      "name": "linux-gcc-tsan",
+      "inherits": "linux-gcc",
+      "displayName": "Linux GCC + ThreadSanitizer (colas lock-free)",
+      "cacheVariables": {
+        "NEXUS_TSAN": "ON"
+      }
     }
   ],
   "buildPresets": [
     { "name": "linux-gcc", "configurePreset": "linux-gcc" },
     { "name": "linux-clang", "configurePreset": "linux-clang" },
-    { "name": "linux-gcc-asan", "configurePreset": "linux-gcc-asan" }
+    { "name": "linux-gcc-asan", "configurePreset": "linux-gcc-asan" },
+    { "name": "linux-gcc-tsan", "configurePreset": "linux-gcc-tsan" }
   ],
   "testPresets": [
     { "name": "linux-gcc", "configurePreset": "linux-gcc", "output": { "outputOnFailure": true } },
     { "name": "linux-clang", "configurePreset": "linux-clang", "output": { "outputOnFailure": true } },
-    { "name": "linux-gcc-asan", "configurePreset": "linux-gcc-asan", "output": { "outputOnFailure": true } }
+    { "name": "linux-gcc-asan", "configurePreset": "linux-gcc-asan", "output": { "outputOnFailure": true } },
+    { "name": "linux-gcc-tsan", "configurePreset": "linux-gcc-tsan", "output": { "outputOnFailure": true } }
   ]
 }

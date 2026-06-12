@@ -53,6 +53,24 @@ jobs:
       - name: Tests bajo sanitizers
         run: ctest --preset linux-gcc-asan
 
+  tsan:
+    name: ThreadSanitizer (colas lock-free)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar toolchain
+        run: sudo apt-get update && sudo apt-get install -y ninja-build cmake g++
+
+      - name: Configurar (NEXUS_TSAN=ON)
+        run: cmake --preset linux-gcc-tsan
+
+      - name: Compilar
+        run: cmake --build --preset linux-gcc-tsan
+
+      - name: Tests bajo ThreadSanitizer
+        run: ctest --preset linux-gcc-tsan
+
   lint:
     name: formato & análisis estático
     runs-on: ubuntu-24.04
