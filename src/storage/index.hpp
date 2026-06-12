@@ -61,6 +61,11 @@ public:
     /// @brief Persiste al .index las entradas aún no escritas y hace fsync (sella).
     [[nodiscard]] expected<void> flush();
 
+    /// @brief Vacía el índice (memoria **y** fichero `.index`): base para reconstruirlo.
+    /// @details Lo usa `Segment::recover` antes de re-sembrar las anclas de los batches
+    ///   válidos. Trunca el `.index` a 0 y reinicia los contadores de intervalo.
+    [[nodiscard]] expected<void> reset();
+
     [[nodiscard]] Offset base_offset() const noexcept { return base_offset_; }
     [[nodiscard]] std::size_t size() const noexcept { return entries_.size(); }
     [[nodiscard]] bool empty() const noexcept { return entries_.empty(); }

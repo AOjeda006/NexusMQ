@@ -118,4 +118,11 @@ expected<void> SparseIndex::flush() {
     return file_.sync();
 }
 
+expected<void> SparseIndex::reset() {
+    entries_.clear();
+    bytes_since_ = 0;
+    flushed_ = 0;
+    return file_.truncate(0);
+}
+
 }  // namespace nexus

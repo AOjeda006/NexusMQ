@@ -98,6 +98,16 @@ expected<void> File::sync() const {
     return {};
 }
 
+expected<void> File::truncate(std::uint64_t length) const {
+    while (::ftruncate(fd_, static_cast<off_t>(length)) < 0) {
+        if (errno == EINTR) {
+            continue;
+        }
+        return io_error("ftruncate");
+    }
+    return {};
+}
+
 expected<std::uint64_t> File::size() const {
     struct stat st = {};
     if (::fstat(fd_, &st) < 0) {

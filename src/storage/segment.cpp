@@ -124,6 +124,59 @@ expected<FetchResult> Segment::read(Offset offset, std::size_t max_bytes) const 
     return result;
 }
 
+expected<Offset> Segment::recover() {
+    if (const auto cleared = index_.reset(); !cleared) {
+        return std::unexpected(cleared.error());
+    }
+    std::size_t valid_end = 0;
+    Offset last_valid = base_offset_ - 1;  // segmento vacío: aún nada válido.
+    std::array<std::byte, RecordBatch::kHeaderSize> header{};
+
+    while (valid_end < size_bytes_) {
+        const auto read_header = log_.read_at(header, valid_end);
+        if (!read_header) {
+            return std::unexpected(read_header.error());
+        }
+        if (*read_header < header.size()) {
+            break;  // cabecera incompleta: cola torn.
+        }
+        const auto view = RecordBatch::peek(header);
+        if (!view) {
+            break;  // cabecera inconsistente.
+        }
+        const std::size_t total = view->encoded_size;
+        if (valid_end + total > size_bytes_) {
+            break;  // batch truncado al final.
+        }
+        std::vector<std::byte> body(total);
+        const auto read_body = log_.read_at(body, valid_end);
+        if (!read_body) {
+            return std::unexpected(read_body.error());
+        }
+        if (*read_body < total) {
+            break;
+        }
+        const auto batch = RecordBatch::decode(body);
+        if (!batch) {
+            break;  // CRC no cuadra / corrupto: aquí empieza la cola torn.
+        }
+        index_.maybe_append(view->base_offset, static_cast<std::uint32_t>(valid_end), total);
+        last_valid = batch->last_offset();
+        valid_end += total;
+    }
+
+    if (valid_end < size_bytes_) {
+        if (const auto truncated = log_.truncate(valid_end); !truncated) {
+            return std::unexpected(truncated.error());
+        }
+        size_bytes_ = valid_end;
+    }
+    if (const auto flushed = index_.flush(); !flushed) {
+        return std::unexpected(flushed.error());
+    }
+    return last_valid;
+}
+
 expected<void> Segment::seal() {
     if (const auto flushed = index_.flush(); !flushed) {
         return flushed;

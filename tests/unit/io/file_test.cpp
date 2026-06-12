@@ -41,6 +41,19 @@ TEST(File, WriteSyncRead_RoundTrip) {
     std::filesystem::remove(path);
 }
 
+TEST(File, Truncate_ReduceElTamano) {
+    const std::string path = temp_path();
+    auto file = nexus::File::open(path, nexus::File::Mode::ReadWrite);
+    ASSERT_TRUE(file.has_value());
+    const std::array<std::byte, 8> data{};
+    ASSERT_TRUE(file->write_at(data, 0).has_value());
+    ASSERT_TRUE(file->truncate(3).has_value());
+    const auto size = file->size();
+    ASSERT_TRUE(size.has_value());
+    EXPECT_EQ(*size, 3U);
+    std::filesystem::remove(path);
+}
+
 TEST(File, ReadMasAllaDelFinal_DevuelveCeroBytes) {
     const std::string path = temp_path();
     auto file = nexus::File::open(path, nexus::File::Mode::ReadWrite);

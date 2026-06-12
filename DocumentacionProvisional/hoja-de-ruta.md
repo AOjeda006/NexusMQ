@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** Fase 1 · **M1 ✅ · M2 ✅ · M3.1 (File) ✅ · M3.2 (SparseIndex) ✅** (`nexus-common` + `nexus-io` + `nexus-storage`; **28 tests** verdes en GCC/libstdc++, Clang/libc++ y ASan/UBSan). Siguiente: **M3.3 — Segment** (`.log` + `.index`; une File + RecordBatch + SparseIndex).
+**Estado actual:** Fase 1 · **M1 ✅ · M2 ✅ · M3 (Segment) cerrado ✅** (`nexus-common` + `nexus-io` + `nexus-storage`: File RAII, RecordBatch, SparseIndex, Segment con append/read/seal/recover; **43 tests** verdes en GCC/libstdc++, Clang/libc++ y ASan/UBSan). Siguiente: **M4 — Log de partición** (rolling de segmentos + recuperación cruzando segmentos).
 
 ---
 
@@ -68,11 +68,11 @@ Harness de benchmark vacío y CI:
 ### M3 — Segment (`.log` + `.index`)
 - [x] **M3.1** `nexus-io`: `file.hpp/.cpp` — `File` RAII (Fase 1 **bloqueante**: `pread`/`pwrite`/`fsync`; `open`).
 - [x] **M3.2** `nexus-storage`: `index.hpp/.cpp` (`IndexEntry`, `SparseIndex` con `floor` por búsqueda binaria, `open`/`maybe_append`/`flush`). Nuevo target `nexus-storage`.
-- [~] **M3.3** `nexus-storage`: `segment.hpp/.cpp` — un tramo del log (`.log` + `.index`).
+- [x] **M3.3** `nexus-storage`: `segment.hpp/.cpp` — un tramo del log (`.log` + `.index`).
   - [x] **M3.3a** `create`/`open` + `append` (escribe `.log` e indexa) + `seal` + `is_full`. Ficheros `<base:020>.log`/`.index`.
   - [x] **M3.3b** `read(offset, max_bytes) -> FetchResult` (seek por `floor` + barrido; §7.11 #3). Nuevos: `FetchResult` (`storage/fetch_result.hpp`) y `RecordBatch::peek`/`encoded_size`/`RecordBatchView` (cabecera pública `kHeaderSize`) en `nexus-common` para recorrer el log sin copiar/revalidar.
-  - [ ] **M3.3c** `recover()` (valida CRC + trunca cola *torn*; §7.11 #2) — base de M4.
-- [ ] Tests: append/read; índice disperso localiza el batch; *seek* correcto.
+  - [x] **M3.3c** `recover()` (valida CRC + trunca cola *torn*; §7.11 #2; reconstruye el índice) — base de M4. Nuevos: `File::truncate` (ftruncate) y `SparseIndex::reset`.
+- [x] Tests: append/read; índice disperso localiza el batch; *seek* correcto; recuperación de cola *torn*/CRC corrupto.
 
 **Ajustes de diseño respecto al desglose (M3.2):**
 - `SparseIndex` mantiene las entradas en un `std::vector<IndexEntry>` **propietario** (no `std::span` sobre `mmap`): Fase 1 es E/S bloqueante y RAII estricto; el `mmap` de lectura queda como optimización medida de M6 ("lectura mmap"). Misma interfaz pública.

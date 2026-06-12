@@ -46,6 +46,9 @@ public:
     /// @brief Fuerza la durabilidad a disco (`fsync`).
     [[nodiscard]] expected<void> sync() const;
 
+    /// @brief Trunca (o extiende con ceros) el fichero a @p length bytes (`ftruncate`).
+    [[nodiscard]] expected<void> truncate(std::uint64_t length) const;
+
     /// @brief Tamaño actual del fichero en bytes.
     [[nodiscard]] expected<std::uint64_t> size() const;
 

@@ -61,6 +61,14 @@ public:
     /// @return `FetchResult` (puede ir vacío si @p offset supera el final), o error de E/S.
     [[nodiscard]] expected<FetchResult> read(Offset offset, std::size_t max_bytes) const;
 
+    /// @brief Valida el `.log` y trunca una cola *torn* (§7.11 #2); reconstruye el índice.
+    /// @details Recorre los batches desde el inicio validando longitud y CRC32C; se detiene en
+    ///   el primer batch incompleto o corrupto (la cola escrita a medias por un *crash*) y
+    ///   trunca el `.log` justo tras el último batch válido. Re-siembra el `.index` con los
+    ///   batches válidos. Se llama al arrancar sobre el segmento activo.
+    /// @return El último offset válido (o `base_offset() - 1` si el segmento queda vacío).
+    [[nodiscard]] expected<Offset> recover();
+
     /// @brief Sella el segmento: persiste el índice, fuerza `fsync` del log y pasa a Closed.
     [[nodiscard]] expected<void> seal();
 
