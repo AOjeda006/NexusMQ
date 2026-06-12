@@ -2,11 +2,15 @@
 
 #include <algorithm>
 #include <charconv>
+#include <chrono>
 #include <cstddef>
+#include <cstdint>
+#include <format>
 #include <functional>
 #include <iterator>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -25,6 +29,12 @@ namespace {
         return make_error(ErrorCode::InvalidArgument, "nombre de segmento no numérico: " + stem);
     }
     return base;
+}
+
+// Ruta de un fichero de segmento (`<base:020><ext>`) dentro del directorio de la partición.
+[[nodiscard]] std::filesystem::path seg_path(const std::filesystem::path& dir, Offset base,
+                                             std::string_view ext) {
+    return dir / std::format("{:020d}{}", base, ext);
 }
 
 }  // namespace
@@ -127,6 +137,42 @@ expected<void> PartitionLog::sync() {
     }
     recovery_point_ = log_end_offset_;
     bytes_since_sync_ = 0;
+    return {};
+}
+
+expected<void> PartitionLog::enforce_retention(const RetentionPolicy& policy) {
+    std::int64_t total = 0;
+    for (const auto& seg : segments_) {
+        total += static_cast<std::int64_t>(seg->size_bytes());
+    }
+    const auto now = std::filesystem::file_time_type::clock::now();
+
+    // Borra el segmento más antiguo mientras sea elegible, preservando siempre el activo.
+    while (segments_.size() > 1) {
+        const Offset base = segments_.front()->base_offset();
+        const auto seg_bytes = static_cast<std::int64_t>(segments_.front()->size_bytes());
+
+        bool eligible = policy.retention_bytes >= 0 && total > policy.retention_bytes;
+        if (!eligible && policy.retention_ms >= 0) {
+            std::error_code ec;
+            const auto mtime = std::filesystem::last_write_time(seg_path(dir_, base, ".log"), ec);
+            if (!ec) {
+                const auto age =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(now - mtime).count();
+                eligible = age > policy.retention_ms;
+            }
+        }
+        if (!eligible) {
+            break;  // el más antiguo ya no es elegible: el resto tampoco.
+        }
+
+        segments_.erase(segments_.begin());  // cierra los fd del segmento (RAII).
+        std::error_code ec;
+        std::filesystem::remove(seg_path(dir_, base, ".log"), ec);
+        std::filesystem::remove(seg_path(dir_, base, ".index"), ec);
+        total -= seg_bytes;
+        log_start_offset_ = segments_.front()->base_offset();
+    }
     return {};
 }
 

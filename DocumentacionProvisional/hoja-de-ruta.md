@@ -101,9 +101,10 @@ Harness de benchmark vacío y CI:
 **Ajuste de diseño (M5):** la **durabilidad real** (sobrevivir a corte de energía) la da `fsync`/`recovery_point`; un `kill -9` no pierde la *page cache* del kernel, así que el test demuestra la recuperación *end-to-end* (confirmados sobreviven, cola en vuelo se trunca). La simulación de corte de energía con inyección de fallos queda fuera de alcance de Fase 1.
 
 ### M6 — Retención + benchmarks
-- [ ] `nexus-storage`: `retention.hpp/.cpp` (`RetentionPolicy` por tiempo/tamaño; ciclo de vida de segmento; nunca borra el activo).
-- [ ] `nexus-bench`: `load_generator` open-loop + `latency_histogram` (HdrHistogram, `p50/p99/p999/max`); `bench_config`.
-- [ ] Benchmarks: throughput, percentiles, impacto de `fsync`, lectura `mmap`, con metodología §8.2 (núcleos aislados, descartar warm-up).
+- [x] **M6a** `nexus-storage`: `retention.hpp` (`RetentionPolicy` por tiempo/tamaño) + `PartitionLog::enforce_retention` (borra sellados antiguos por tamaño o por *mtime* del `.log`; **nunca el activo**; avanza `log_start_offset`).
+- [ ] **M6b** `nexus-bench`: `latency_histogram` (`p50/p99/p999/max`) + `bench_config` + `load_generator` open-loop; benchmark del motor de log (throughput/percentiles, impacto de `fsync`), metodología §8.2.
+
+**Ajuste de diseño (M6a):** la antigüedad de un segmento se toma del *mtime* del `.log` (los records aún no llevan timestamp; con timestamp se usará el máximo del segmento). `RetentionPolicy::eligible` del desglose se **pliega** en `enforce_retention` (la retención por tamaño es acumulativa, no un predicado por segmento). `enforce_retention(now)` no recibe reloj: usa `file_clock::now()` (sin abstracción de `WallClock` todavía).
 
 ---
 

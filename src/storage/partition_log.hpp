@@ -14,6 +14,7 @@
 #include "common/types.hpp"
 #include "storage/fetch_result.hpp"
 #include "storage/log_config.hpp"
+#include "storage/retention.hpp"
 #include "storage/segment.hpp"
 
 namespace nexus {
@@ -50,6 +51,10 @@ public:
 
     /// @brief Fuerza la durabilidad del segmento activo (`fsync`) y avanza `recovery_point`.
     [[nodiscard]] expected<void> sync();
+
+    /// @brief Aplica la retención: borra los segmentos sellados más antiguos elegibles por
+    ///   tamaño o tiempo, **nunca el activo**; avanza `log_start_offset`.
+    [[nodiscard]] expected<void> enforce_retention(const RetentionPolicy& policy);
 
     /// Primer offset disponible en el log (base del primer segmento).
     [[nodiscard]] Offset log_start_offset() const noexcept { return log_start_offset_; }

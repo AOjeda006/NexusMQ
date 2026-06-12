@@ -3,11 +3,13 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <format>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "common/bytes.hpp"
@@ -16,6 +18,7 @@
 #include "common/types.hpp"
 #include "io/file.hpp"
 #include "storage/log_config.hpp"
+#include "storage/retention.hpp"
 
 namespace {
 
@@ -57,6 +60,17 @@ nexus::LogConfig small_segments() {
 // Ruta del .log del segmento de offset base dado dentro de @p dir.
 std::string seg_log_path(const std::filesystem::path& dir, nexus::Offset base) {
     return (dir / std::format("{:020d}.log", base)).string();
+}
+
+// Log con 3 segmentos sellados/activo (offsets 0..5, dos batches de 76 bytes por segmento).
+nexus::PartitionLog three_segments(const std::filesystem::path& dir) {
+    auto plog = nexus::PartitionLog::open(dir, small_segments());
+    EXPECT_TRUE(plog.has_value());
+    for (int i = 0; i < 6; ++i) {
+        EXPECT_TRUE(plog->append(make_batch(1, 40)).has_value());
+    }
+    EXPECT_EQ(plog->segment_count(), 3U);
+    return std::move(*plog);
 }
 
 TEST(PartitionLog, Open_DirectorioVacio_CreaPrimerSegmento) {
@@ -283,6 +297,56 @@ TEST(PartitionLog, Reopen_BatchCorruptoEnActivo_TruncaDesdeElDanado) {
     const auto fr = reopened->read(0, 100000);
     ASSERT_TRUE(fr.has_value());
     EXPECT_EQ(fr->next_offset, 3);
+}
+
+TEST(PartitionLog, EnforceRetention_PorTamano_TrimAntiguosPreservaActivo) {
+    const TempDir dir("ret_size");
+    auto plog = three_segments(dir.path());  // total 3*152 = 456 bytes
+    nexus::RetentionPolicy pol;
+    pol.retention_bytes = 350;  // borra el más antiguo (456-152=304 <= 350) y para
+    ASSERT_TRUE(plog.enforce_retention(pol).has_value());
+    EXPECT_EQ(plog.segment_count(), 2U);
+    EXPECT_EQ(plog.log_start_offset(), 2);
+    EXPECT_EQ(plog.log_end_offset(), 6);
+
+    const auto borrado = plog.read(0, 1000);
+    ASSERT_FALSE(borrado.has_value());
+    EXPECT_EQ(borrado.error().code(), nexus::ErrorCode::OutOfRange);
+    EXPECT_TRUE(plog.read(2, 100000).has_value());
+}
+
+TEST(PartitionLog, EnforceRetention_NuncaBorraElActivo) {
+    const TempDir dir("ret_active");
+    auto plog = three_segments(dir.path());
+    nexus::RetentionPolicy pol;
+    pol.retention_bytes = 0;  // todo excede: borra todos los sellados, no el activo
+    ASSERT_TRUE(plog.enforce_retention(pol).has_value());
+    EXPECT_EQ(plog.segment_count(), 1U);
+    EXPECT_EQ(plog.log_start_offset(), 4);
+    EXPECT_EQ(plog.log_end_offset(), 6);
+    EXPECT_TRUE(plog.read(4, 100000).has_value());
+}
+
+TEST(PartitionLog, EnforceRetention_PorTiempo_BorraViejosPreservaRecientes) {
+    const TempDir dir("ret_time");
+    auto plog = three_segments(dir.path());
+    // Envejece el .log del segmento más antiguo (base 0) una hora.
+    const auto old_time = std::filesystem::file_time_type::clock::now() - std::chrono::hours(1);
+    std::filesystem::last_write_time(seg_log_path(dir.path(), 0), old_time);
+
+    nexus::RetentionPolicy pol;
+    pol.retention_ms = 60000;  // 1 minuto: solo el .log envejecido es elegible
+    ASSERT_TRUE(plog.enforce_retention(pol).has_value());
+    EXPECT_EQ(plog.segment_count(), 2U);  // borra seg0; conserva el reciente y el activo
+    EXPECT_EQ(plog.log_start_offset(), 2);
+}
+
+TEST(PartitionLog, EnforceRetention_SinLimites_NoBorraNada) {
+    const TempDir dir("ret_none");
+    auto plog = three_segments(dir.path());
+    ASSERT_TRUE(plog.enforce_retention(nexus::RetentionPolicy{}).has_value());
+    EXPECT_EQ(plog.segment_count(), 3U);
+    EXPECT_EQ(plog.log_start_offset(), 0);
 }
 
 }  // namespace
