@@ -172,6 +172,60 @@ TEST(PartitionLog, Read_OffsetBajoLogStart_DevuelveOutOfRange) {
     EXPECT_EQ(fr.error().code(), nexus::ErrorCode::OutOfRange);
 }
 
+nexus::LogConfig with_policy(nexus::FsyncPolicy policy, std::size_t interval = 1) {
+    nexus::LogConfig cfg;
+    cfg.fsync_policy = policy;
+    cfg.fsync_interval_bytes = interval;
+    return cfg;
+}
+
+TEST(PartitionLog, RecoveryPoint_Commit_AvanzaEnCadaAppend) {
+    const TempDir dir("rp_commit");
+    auto plog = nexus::PartitionLog::open(dir.path(), with_policy(nexus::FsyncPolicy::Commit));
+    ASSERT_TRUE(plog.has_value());
+    EXPECT_EQ(plog->recovery_point(), 0);
+    ASSERT_TRUE(plog->append(make_batch(3, 10)).has_value());  // log_end 3
+    EXPECT_EQ(plog->recovery_point(), 3);
+    ASSERT_TRUE(plog->append(make_batch(2, 10)).has_value());  // log_end 5
+    EXPECT_EQ(plog->recovery_point(), 5);
+}
+
+TEST(PartitionLog, RecoveryPoint_None_NoAvanzaHastaSyncExplicito) {
+    const TempDir dir("rp_none");
+    auto plog = nexus::PartitionLog::open(dir.path(), with_policy(nexus::FsyncPolicy::None));
+    ASSERT_TRUE(plog.has_value());
+    ASSERT_TRUE(plog->append(make_batch(3, 10)).has_value());
+    ASSERT_TRUE(plog->append(make_batch(2, 10)).has_value());
+    EXPECT_EQ(plog->recovery_point(), 0);  // None no sincroniza en append
+    ASSERT_TRUE(plog->sync().has_value());
+    EXPECT_EQ(plog->recovery_point(), plog->log_end_offset());
+}
+
+TEST(PartitionLog, RecoveryPoint_Interval_AvanzaAlSuperarElUmbral) {
+    const TempDir dir("rp_interval");
+    // Umbral 100 bytes; cada batch ocupa 36 + 40 = 76.
+    auto plog = nexus::PartitionLog::open(
+        dir.path(), with_policy(nexus::FsyncPolicy::Interval, /*interval=*/100));
+    ASSERT_TRUE(plog.has_value());
+    ASSERT_TRUE(plog->append(make_batch(1, 40)).has_value());  // 76 < 100 -> no sync
+    EXPECT_EQ(plog->recovery_point(), 0);
+    ASSERT_TRUE(plog->append(make_batch(1, 40)).has_value());  // 152 >= 100 -> sync
+    EXPECT_EQ(plog->recovery_point(), 2);
+}
+
+TEST(PartitionLog, RecoveryPoint_RotacionAvanzaAlSellar) {
+    const TempDir dir("rp_rota");
+    nexus::LogConfig cfg = small_segments();  // segmento de 100 bytes
+    cfg.fsync_policy = nexus::FsyncPolicy::None;
+    auto plog = nexus::PartitionLog::open(dir.path(), cfg);
+    ASSERT_TRUE(plog.has_value());
+    for (int i = 0; i < 3; ++i) {  // el 3.er append rota (sella el segmento de offsets 0,1)
+        ASSERT_TRUE(plog->append(make_batch(1, 40)).has_value());
+    }
+    ASSERT_GT(plog->segment_count(), 1U);
+    EXPECT_EQ(plog->recovery_point(), 2);  // el sellado quedó durable hasta el límite
+}
+
 TEST(PartitionLog, Reopen_ColaTornEnActivo_TruncaSinPerderConfirmados) {
     const TempDir dir("crash_torn");
     {

@@ -69,7 +69,11 @@ public:
     /// @return El último offset válido (o `base_offset() - 1` si el segmento queda vacío).
     [[nodiscard]] expected<Offset> recover();
 
-    /// @brief Sella el segmento: persiste el índice, fuerza `fsync` del log y pasa a Closed.
+    /// @brief Fuerza la durabilidad: persiste el índice y hace `fsync` del `.log`.
+    /// @details No cambia de estado (a diferencia de `seal`): el segmento sigue activo.
+    [[nodiscard]] expected<void> sync();
+
+    /// @brief Sella el segmento: lo sincroniza (`sync`) y pasa a Closed (solo lectura).
     [[nodiscard]] expected<void> seal();
 
     /// @brief ¿Ha alcanzado el segmento su tamaño máximo? (criterio de rotación, M4).

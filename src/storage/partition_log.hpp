@@ -48,10 +48,15 @@ public:
     ///   es anterior a `log_start_offset()`, o error de E/S.
     [[nodiscard]] expected<FetchResult> read(Offset offset, std::size_t max_bytes) const;
 
+    /// @brief Fuerza la durabilidad del segmento activo (`fsync`) y avanza `recovery_point`.
+    [[nodiscard]] expected<void> sync();
+
     /// Primer offset disponible en el log (base del primer segmento).
     [[nodiscard]] Offset log_start_offset() const noexcept { return log_start_offset_; }
     /// Offset que se asignará al próximo record (uno más que el último escrito).
     [[nodiscard]] Offset log_end_offset() const noexcept { return log_end_offset_; }
+    /// Offset hasta el que los datos están sincronizados a disco estable (garantía de durabilidad).
+    [[nodiscard]] Offset recovery_point() const noexcept { return recovery_point_; }
     /// Número de segmentos (observabilidad / pruebas).
     [[nodiscard]] std::size_t segment_count() const noexcept { return segments_.size(); }
 
@@ -61,6 +66,8 @@ private:
 
     [[nodiscard]] Segment* active() noexcept { return segments_.back().get(); }
     [[nodiscard]] expected<void> roll_segment();
+    /// Aplica la política de `fsync` tras escribir @p appended_bytes (puede sincronizar).
+    [[nodiscard]] expected<void> maybe_sync(std::size_t appended_bytes);
     /// Segmento cuyo rango contiene @p offset (mayor base ≤ offset); nullptr si es menor que todos.
     [[nodiscard]] const Segment* segment_for(Offset offset) const noexcept;
 
@@ -69,6 +76,8 @@ private:
     std::vector<std::unique_ptr<Segment>> segments_;  ///< Segmentos por offset base.
     Offset log_start_offset_;                         ///< Primer offset del log.
     Offset log_end_offset_;                           ///< Próximo offset a asignar.
+    Offset recovery_point_;                           ///< Hasta dónde está sincronizado a disco.
+    std::size_t bytes_since_sync_ = 0;                ///< Bytes escritos desde el último `fsync`.
 };
 
 }  // namespace nexus

@@ -36,7 +36,8 @@ PartitionLog::PartitionLog(std::filesystem::path dir, LogConfig cfg,
       cfg_(cfg),
       segments_(std::move(segments)),
       log_start_offset_(log_start),
-      log_end_offset_(log_end) {}
+      log_end_offset_(log_end),
+      recovery_point_(log_end) {}  // lo abierto/recuperado ya está en disco.
 
 expected<PartitionLog> PartitionLog::open(std::filesystem::path dir, LogConfig cfg) {
     std::error_code ec;
@@ -114,7 +115,35 @@ expected<Offset> PartitionLog::append(const RecordBatch& batch) {
         return std::unexpected(last.error());
     }
     log_end_offset_ = *last + 1;
+    if (const auto synced = maybe_sync(rebased.encoded_size()); !synced) {
+        return std::unexpected(synced.error());
+    }
     return *last;
+}
+
+expected<void> PartitionLog::sync() {
+    if (const auto synced = active()->sync(); !synced) {
+        return synced;
+    }
+    recovery_point_ = log_end_offset_;
+    bytes_since_sync_ = 0;
+    return {};
+}
+
+expected<void> PartitionLog::maybe_sync(std::size_t appended_bytes) {
+    switch (cfg_.fsync_policy) {
+        case FsyncPolicy::None:
+            return {};
+        case FsyncPolicy::Commit:
+            return sync();
+        case FsyncPolicy::Interval:
+            bytes_since_sync_ += appended_bytes;
+            if (bytes_since_sync_ >= cfg_.fsync_interval_bytes) {
+                return sync();
+            }
+            return {};
+    }
+    return {};  // inalcanzable (enum cerrado); satisface el análisis de flujo.
 }
 
 const Segment* PartitionLog::segment_for(Offset offset) const noexcept {
@@ -160,6 +189,8 @@ expected<void> PartitionLog::roll_segment() {
     if (const auto sealed = active()->seal(); !sealed) {
         return sealed;
     }
+    recovery_point_ = log_end_offset_;  // el segmento sellado queda durable hasta aquí.
+    bytes_since_sync_ = 0;
     auto seg = Segment::create(dir_, log_end_offset_, cfg_.index_interval_bytes);
     if (!seg) {
         return std::unexpected(seg.error());

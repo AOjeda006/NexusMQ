@@ -177,11 +177,15 @@ expected<Offset> Segment::recover() {
     return last_valid;
 }
 
-expected<void> Segment::seal() {
+expected<void> Segment::sync() {
     if (const auto flushed = index_.flush(); !flushed) {
         return flushed;
     }
-    if (const auto synced = log_.sync(); !synced) {
+    return log_.sync();
+}
+
+expected<void> Segment::seal() {
+    if (const auto synced = sync(); !synced) {
         return synced;
     }
     state_ = State::Closed;

@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** Fase 1 · **M1 ✅ · M2 ✅ · M3 ✅ · M4 (PartitionLog) cerrado ✅** (`nexus-common` + `nexus-io` + `nexus-storage`: File RAII, RecordBatch, SparseIndex, Segment, PartitionLog con rotación + lectura cruzando segmentos + recuperación; **53 tests** verdes en GCC/libstdc++, Clang/libc++ y ASan/UBSan). Siguiente: **M5 — Durabilidad** (política de `fsync`, `recovery_point`, tests de *crash*).
+**Estado actual:** Fase 1 · **M1 ✅ · M2 ✅ · M3 ✅ · M4 ✅ · M5 (Durabilidad) cerrado ✅** (`nexus-common` + `nexus-io` + `nexus-storage`: File RAII, RecordBatch, SparseIndex, Segment, PartitionLog con rotación + lectura cruzando segmentos + recuperación + política de `fsync`/`recovery_point` + test de *crash*; **58 tests** verdes en GCC/libstdc++, Clang/libc++ y ASan/UBSan). Siguiente: **M6 — Retención + benchmarks** (último hito de Fase 1).
 
 ---
 
@@ -94,9 +94,11 @@ Harness de benchmark vacío y CI:
 - `LogConfig` por ahora: `segment_bytes`, `index_interval_bytes`. `segment_ms` (rotación por tiempo), `fsync_policy`/`recovery_point` (M5) y retención (M6) se añadirán en su hito.
 - Recuperación **plegada en `open`** (recupera solo el segmento activo; los sellados se confían).
 
-### M5 — Durabilidad
-- [ ] `nexus-common`/`nexus-storage`: política de `fsync` (`none`/`interval`/`commit`); `recovery_point`.
-- [ ] Tests **crash**: `kill -9` a mitad de escritura → recuperación sin pérdida de lo confirmado.
+### M5 — Durabilidad ✅
+- [x] **M5a** `nexus-storage`: `FsyncPolicy` (`None`/`Interval`/`Commit`) en `LogConfig`; `Segment::sync` (fsync sin sellar); `PartitionLog::sync` + `recovery_point` (avanza por política de `append` y al sellar en la rotación).
+- [x] **M5b** Test **crash** (`tests/crash/`): proceso hijo confirma N batches (fsync) + cola *torn* y muere con **`kill -9`** (SIGKILL); el padre recupera sin perder lo confirmado y trunca la cola. Verde también bajo ASan.
+
+**Ajuste de diseño (M5):** la **durabilidad real** (sobrevivir a corte de energía) la da `fsync`/`recovery_point`; un `kill -9` no pierde la *page cache* del kernel, así que el test demuestra la recuperación *end-to-end* (confirmados sobreviven, cola en vuelo se trunca). La simulación de corte de energía con inyección de fallos queda fuera de alcance de Fase 1.
 
 ### M6 — Retención + benchmarks
 - [ ] `nexus-storage`: `retention.hpp/.cpp` (`RetentionPolicy` por tiempo/tamaño; ciclo de vida de segmento; nunca borra el activo).
