@@ -2,3 +2,4 @@
 add_subdirectory(common)
 add_subdirectory(io)
 add_subdirectory(storage)
+add_subdirectory(protocol)

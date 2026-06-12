@@ -18,6 +18,7 @@ add_executable(nexus-tests
   unit/storage/segment_test.cpp
   unit/storage/partition_log_test.cpp
   unit/bench/latency_histogram_test.cpp
+  unit/protocol/codec_test.cpp
   crash/partition_crash_test.cpp)
 
 # LatencyHistogram es header-only en tools/bench; el test lo incluye directamente.
@@ -29,7 +30,8 @@ target_link_libraries(nexus-tests PRIVATE
   nexus::common
   GTest::gtest_main
   nexus::io
-  nexus::storage)
+  nexus::storage
+  nexus::protocol)
 
 # Registra cada TEST(...) como un test de CTest (los descubre del binario).
 gtest_discover_tests(nexus-tests)
