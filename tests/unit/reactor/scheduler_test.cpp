@@ -4,7 +4,7 @@
 
 #include <vector>
 
-#include "reactor/task.hpp"
+#include "common/task.hpp"
 
 namespace {
 

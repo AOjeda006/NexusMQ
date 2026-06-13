@@ -9,11 +9,11 @@
 #include <vector>
 
 #include "common/move_only_function.hpp"
+#include "common/task.hpp"
 #include "io/proactor.hpp"
 #include "reactor/allocator.hpp"
 #include "reactor/cross_core.hpp"
 #include "reactor/scheduler.hpp"
-#include "reactor/task.hpp"
 
 namespace nexus {
 

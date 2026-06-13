@@ -53,7 +53,9 @@ namespace detail {
 template <class Derived>
 class IoAwaitable {
 public:
-    [[nodiscard]] static bool await_ready() noexcept { return false; }
+    // `const` (no estático) a propósito: el lenguaje lo invoca sobre la instancia del awaitable;
+    // `const` evita `readability-static-accessed-through-instance` en cada `co_await`.
+    [[nodiscard]] bool await_ready() const noexcept { return false; }
 
     void await_suspend(std::coroutine_handle<> awaiting) {
         static_cast<Derived*>(this)->submit([this, awaiting](std::int32_t result) {

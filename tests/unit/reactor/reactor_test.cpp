@@ -12,8 +12,8 @@
 #include <memory>
 #include <thread>
 
+#include "common/task.hpp"
 #include "io/awaitable.hpp"
-#include "reactor/task.hpp"
 #include "support/fake_proactor.hpp"
 
 namespace {

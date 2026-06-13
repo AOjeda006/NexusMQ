@@ -1,6 +1,6 @@
-/// @file   reactor/task.hpp
+/// @file   common/task.hpp
 /// @brief  task<T>: tipo de retorno de corrutina perezoso con transferencia simétrica.
-/// @ingroup reactor
+/// @ingroup common
 
 #pragma once
 
@@ -17,17 +17,19 @@ class task;  // NOLINT(readability-identifier-naming): tipo de vocabulario en mi
 namespace detail {
 
 /// Al terminar la corrutina, transfiere simétricamente a su continuación (o a noop si no hay).
+/// @note Puntos de personalización `const` (no estáticos): el lenguaje los invoca sobre una
+///   instancia, así que `const` evita el ruido de `readability-static-accessed-through-instance`.
 struct FinalAwaiter {
-    [[nodiscard]] static bool await_ready() noexcept { return false; }
+    [[nodiscard]] bool await_ready() const noexcept { return false; }
 
     template <class Promise>
-    [[nodiscard]] static std::coroutine_handle<> await_suspend(
-        std::coroutine_handle<Promise> coro) noexcept {
+    [[nodiscard]] std::coroutine_handle<> await_suspend(
+        std::coroutine_handle<Promise> coro) const noexcept {
         const std::coroutine_handle<> continuation = coro.promise().continuation;
         return continuation ? continuation : std::noop_coroutine();
     }
 
-    static void await_resume() noexcept {}
+    void await_resume() const noexcept {}
 };
 
 /// Promesa de `task<T>` (T != void): guarda el valor o la excepción.
@@ -35,8 +37,8 @@ template <class T>
 class TaskPromise {
 public:
     task<T> get_return_object() noexcept;
-    [[nodiscard]] static std::suspend_always initial_suspend() noexcept { return {}; }
-    [[nodiscard]] static FinalAwaiter final_suspend() noexcept { return {}; }
+    [[nodiscard]] std::suspend_always initial_suspend() const noexcept { return {}; }
+    [[nodiscard]] FinalAwaiter final_suspend() const noexcept { return {}; }
     void return_value(T value) { value_.emplace(std::move(value)); }
     void unhandled_exception() noexcept { exception_ = std::current_exception(); }
 
@@ -59,9 +61,9 @@ template <>
 class TaskPromise<void> {
 public:
     task<void> get_return_object() noexcept;
-    [[nodiscard]] static std::suspend_always initial_suspend() noexcept { return {}; }
-    [[nodiscard]] static FinalAwaiter final_suspend() noexcept { return {}; }
-    static void return_void() noexcept {}
+    [[nodiscard]] std::suspend_always initial_suspend() const noexcept { return {}; }
+    [[nodiscard]] FinalAwaiter final_suspend() const noexcept { return {}; }
+    void return_void() const noexcept {}
     void unhandled_exception() noexcept { exception_ = std::current_exception(); }
 
     void result() const {

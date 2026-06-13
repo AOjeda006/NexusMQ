@@ -1,7 +1,8 @@
 # nexus-io — abstracción de E/S. Fase 1: File bloqueante. Único lugar con código
 # específico de plataforma (en 1b/4 entran io_uring e IOCP tras el mismo puerto).
 add_library(nexus-io
-  file.cpp)
+  file.cpp
+  socket.cpp)
 add_library(nexus::io ALIAS nexus-io)
 
 # Backend io_uring: solo donde está el uapi del kernel (Linux). Habla por syscalls

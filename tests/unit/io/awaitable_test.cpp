@@ -8,7 +8,7 @@
 #include <optional>
 
 #include "common/error.hpp"
-#include "reactor/task.hpp"
+#include "common/task.hpp"
 #include "support/fake_proactor.hpp"
 
 namespace {

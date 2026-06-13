@@ -13,7 +13,9 @@ add_executable(nexus-tests
   unit/common/error_test.cpp
   unit/common/record_test.cpp
   unit/common/varint_test.cpp
+  unit/common/task_test.cpp
   unit/io/file_test.cpp
+  unit/io/socket_test.cpp
   unit/io/fake_proactor_test.cpp
   unit/io/awaitable_test.cpp
   unit/io/io_uring_backend_test.cpp
@@ -26,7 +28,6 @@ add_executable(nexus-tests
   unit/protocol/frame_test.cpp
   unit/protocol/versioning_test.cpp
   unit/protocol/messages_test.cpp
-  unit/reactor/task_test.cpp
   unit/reactor/allocator_test.cpp
   unit/reactor/cross_core_test.cpp
   unit/reactor/reactor_test.cpp
