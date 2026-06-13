@@ -35,6 +35,7 @@ add_executable(nexus-tests
   unit/reactor/scheduler_test.cpp
   unit/reactor/spsc_queue_test.cpp
   unit/reactor/mpmc_queue_test.cpp
+  unit/wire/frame_io_test.cpp
   crash/partition_crash_test.cpp)
 
 # LatencyHistogram es header-only en tools/bench; el test lo incluye directamente.
@@ -51,6 +52,7 @@ target_link_libraries(nexus-tests PRIVATE
   nexus::io
   nexus::storage
   nexus::protocol
+  nexus::wire
   nexus::reactor)
 
 # Registra cada TEST(...) como un test de CTest (los descubre del binario).

@@ -46,6 +46,8 @@ public:
         if (exception_) {
             std::rethrow_exception(exception_);
         }
+        // Tras completar sin excepción, value_ siempre tiene valor (lo fijó return_value).
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access): invariante de la corrutina.
         return std::move(*value_);
     }
 
@@ -120,6 +122,9 @@ public:
                 return coro;  // transferencia simétrica: arranca la task
             }
 
+            // Punto de personalización: el compilador lo invoca y el uso del valor lo decide el
+            // `co_await` (puede ser `task<void>`); por eso no se marca [[nodiscard]].
+            // NOLINTNEXTLINE(modernize-use-nodiscard)
             decltype(auto) await_resume() const { return coro.promise().result(); }
         };
         return Awaiter{handle_};

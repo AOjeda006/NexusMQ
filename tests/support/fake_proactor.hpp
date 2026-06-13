@@ -4,7 +4,9 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <utility>
@@ -108,6 +110,17 @@ public:
     void arm_front(std::int32_t result) {
         ready_.emplace_back(std::move(pending_.front()), result);
         pending_.pop_front();
+    }
+
+    /// @brief Entrega @p bytes a la op `recv`/`read` pendiente más antigua: copia hasta llenar su
+    ///   búfer (como haría el kernel) y la marca lista con la cuenta entregada.
+    /// @return bytes entregados (≤ tamaño del búfer de la operación).
+    std::size_t deliver_recv_front(ByteSpan bytes) {
+        Op& op = pending_.front();
+        const std::size_t n = std::min(bytes.size(), op.read_buffer.size());
+        std::copy_n(bytes.begin(), n, op.read_buffer.begin());
+        arm_front(static_cast<std::int32_t>(n));
+        return n;
     }
 
 private:
