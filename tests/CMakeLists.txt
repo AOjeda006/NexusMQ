@@ -27,6 +27,7 @@ add_executable(nexus-tests
   unit/protocol/versioning_test.cpp
   unit/protocol/messages_test.cpp
   unit/reactor/task_test.cpp
+  unit/reactor/allocator_test.cpp
   unit/reactor/scheduler_test.cpp
   unit/reactor/spsc_queue_test.cpp
   unit/reactor/mpmc_queue_test.cpp

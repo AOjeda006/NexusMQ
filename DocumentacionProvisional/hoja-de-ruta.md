@@ -125,7 +125,16 @@ Harness de benchmark vacío y CI:
   - [x] **R3** `reactor/spsc_queue.hpp` (`SpscQueue<T,Cap>`, anillo SPSC release/acquire, `alignas(kCacheLineSize)` anti *false sharing*) + `reactor/mpmc_queue.hpp` (`MpmcQueue<T,Cap>` de Vyukov, celdas con nº de secuencia anti-ABA). Validadas con **ThreadSanitizer** (preset `linux-gcc-tsan` + job CI) con estrés productor/consumidor. *(Cap potencia de dos; `kCacheLineSize=64` fijo para evitar `-Winterference-size`.)*
   - [x] **R4** `io/proactor.hpp` — puerto `Proactor` (submit_read/write/fsync/accept/recv/send/timer + run_completions + wake; `Completion` = callback estilo io_uring) + `io/awaitable.hpp` (7 awaitables vía base CRTP, mapean el resultado a `expected`) + `tests/support/fake_proactor.hpp` (doble de test: completions deterministas). Soporte: `common/move_only_function.hpp` (`std::move_only_function` **no está en libc++ 21**; reimplementado portátil) y `MonoTime` en `common/types.hpp`. *(El backend io_uring real es R5; aquí solo el puerto + doble.)*
   - [x] **R5** `io/io_uring_backend.hpp/.cpp` — `IoUringBackend : Proactor` **directo sobre el uapi del kernel** (`io_uring_setup`/`io_uring_enter` por `syscall`, anillos `mmap` con `SINGLE_MMAP`, barreras acquire/release), **sin liburing** (ADR-0012): cero dependencias. CMake lo compila solo donde existe `<linux/io_uring.h>` (`NEXUS_HAVE_IOURING`); smoke-test con E/S real (write/read/fsync/timer/fd inválido) que se **omite** (`GTEST_SKIP`) si io_uring no está disponible. Validado en local en GCC/Clang/ASan/TSan. *(`wake` queda no-op hasta R6.)*
-  - [ ] **R6** `Reactor`, `CrossCoreMailbox`, `ArenaAllocator`, `ReactorPool` (afinidad).
+  - [~] **R6** `Reactor`, `CrossCoreMailbox`, `ArenaAllocator`, `ReactorPool` (afinidad).
+    - [x] **R6a** `reactor/allocator.hpp` — `ArenaAllocator` (arena monótona reactor-local sobre
+      `std::pmr::monotonic_buffer_resource`; `resource()`/`reset()`/`make<T>` con `construct_at`
+      confinado). Libera en bloque (sin destructores → `make` exige `T` trivialmente destruible).
+    - [ ] **R6b** `reactor/cross_core.hpp/.cpp` — `CrossCoreMailbox` (N buzones SPSC + `wake`).
+    - [ ] **R6c** Proactor: espera bloqueante con `deadline` (`wait_completions`) + `wake` por eventfd
+      en el anillo io_uring (instante); doble de test no bloquea.
+    - [ ] **R6d** `reactor/reactor.hpp/.cpp` — `Reactor` (dueño de proactor/scheduler/allocator/mailbox;
+      `run`/`poll_once`/`spawn`/`submit_to`/`stop`).
+    - [ ] **R6e** `reactor/reactor_pool.hpp/.cpp` — `ReactorPool` (N reactores *pinned* por afinidad).
 - [~] `nexus-protocol`: framing, codec, mensajes, errores. *(El reactor async se intercala; el protocolo es puro encode/decode, sin async, y va primero por ser TDD-puro.)*
   - [x] **P1** `nexus-common`: `varint.hpp/.cpp` (LEB128 + zigzag, decodificador defensivo). *(Primitiva, junto a `load_le`/`store_le`; wire en **little-endian**, consistente con el almacenamiento.)*
   - [x] **P2** `protocol/codec.hpp/.cpp` — `Encoder`/`Decoder` (cursor con chequeo de límites; u8/u16/u32/i16/i32/i64, varint, bytes/string longitud-prefijo, zero-copy). Nuevo target `nexus-protocol`.
