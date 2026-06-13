@@ -17,6 +17,7 @@
 #include <cstring>
 #include <memory>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -138,6 +139,75 @@ TEST(IoUringBackend, Timer_Vence_DevuelveCero) {
     ASSERT_TRUE(drain_one(*backend));
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(*result, 0);  // -ETIME se traduce a éxito
+}
+
+TEST(IoUringBackend, WaitCompletions_OpLista_BloqueaYEjecutaLaCompletion) {
+    auto backend = make_backend();
+    if (!backend) {
+        GTEST_SKIP() << "io_uring no disponible en este entorno";
+    }
+    TempFd file;
+    ASSERT_GE(file.get(), 0);
+
+    const std::string payload = "wait";
+    nexus::ByteSpan data{reinterpret_cast<const std::byte*>(payload.data()), payload.size()};
+    std::optional<std::int32_t> result;
+    backend->submit_write(file.get(), data, 0, [&](std::int32_t res) { result = res; });
+
+    // Bloquea hasta que la escritura complete (deadline amplio de seguridad).
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    const int processed = backend->wait_completions(8, deadline);
+    EXPECT_EQ(processed, 1);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, static_cast<std::int32_t>(payload.size()));
+}
+
+TEST(IoUringBackend, WaitCompletions_Wake_DesdeOtroHilo_InterrumpeLaEspera) {
+    auto backend = make_backend();
+    if (!backend) {
+        GTEST_SKIP() << "io_uring no disponible en este entorno";
+    }
+    const auto start = std::chrono::steady_clock::now();
+    std::jthread waker([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        backend->wake();
+    });
+
+    // Deadline amplio: debe volver por el wake (~50 ms), mucho antes del deadline.
+    const int processed = backend->wait_completions(8, start + std::chrono::seconds(5));
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    waker.join();
+
+    EXPECT_EQ(processed, 0);  // el wake es interno (eventfd): no es completion de usuario
+    EXPECT_GE(elapsed, std::chrono::milliseconds(30));  // bloqueó hasta el wake (no fue un spin)
+    EXPECT_LT(elapsed, std::chrono::seconds(4));        // volvió por el wake, no por el deadline
+}
+
+TEST(IoUringBackend, WaitCompletions_SinTrabajo_VenceElDeadline) {
+    auto backend = make_backend();
+    if (!backend) {
+        GTEST_SKIP() << "io_uring no disponible en este entorno";
+    }
+    // Guarda anti-cuelgue: si el kernel no admitiera el timeout (ext-arg), despierta a los 4 s para
+    // que el test FALLE de forma visible (assert < 2 s) en lugar de colgarse indefinidamente.
+    std::jthread guard([&](std::stop_token stop) {
+        for (int i = 0; i < 40 && !stop.stop_requested(); ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        if (!stop.stop_requested()) {
+            backend->wake();
+        }
+    });
+
+    const auto start = std::chrono::steady_clock::now();
+    const int processed = backend->wait_completions(8, start + std::chrono::milliseconds(50));
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    guard.request_stop();
+
+    EXPECT_EQ(processed, 0);
+    EXPECT_GE(elapsed,
+              std::chrono::milliseconds(30));     // esperó ~hasta el deadline (no fue un spin)
+    EXPECT_LT(elapsed, std::chrono::seconds(2));  // venció el deadline, no el guarda de 4 s
 }
 
 }  // namespace

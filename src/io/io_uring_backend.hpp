@@ -42,6 +42,7 @@ public:
     void submit_send(int fd, ByteSpan data, Completion on_done) override;
     void submit_timer(MonoTime deadline, Completion on_done) override;
     int run_completions(int max) override;
+    int wait_completions(int max, MonoTime deadline) override;
     void wake() override;
 
 private:

@@ -134,8 +134,11 @@ Harness de benchmark vacío y CI:
       (cede el hilo si el buzón está lleno) y despierta al destino; `drain` lo consume el reactor
       dueño (único consumidor). Estrés multi-productor/único-consumidor validado bajo TSan.
       `nexus-reactor` pasa a STATIC. `FakeProactor::wake` ahora es atómico (es cross-hilo).
-    - [ ] **R6c** Proactor: espera bloqueante con `deadline` (`wait_completions`) + `wake` por eventfd
-      en el anillo io_uring (instante); doble de test no bloquea.
+    - [x] **R6c** Proactor: espera bloqueante `wait_completions(max, deadline)` (cede la CPU hasta
+      una completion, un `wake` o el deadline) + `wake` real por **eventfd** en el anillo io_uring
+      (lectura persistente re-armada; el `wake` escribe el eventfd e interrumpe `io_uring_enter`).
+      Timeout vía `IORING_ENTER_EXT_ARG` si el kernel lo admite. `FakeProactor` no bloquea (drena).
+      Tests io_uring: la espera vuelve por la op, por el `wake` (otro hilo) y por el deadline.
     - [ ] **R6d** `reactor/reactor.hpp/.cpp` — `Reactor` (dueño de proactor/scheduler/allocator/mailbox;
       `run`/`poll_once`/`spawn`/`submit_to`/`stop`).
     - [ ] **R6e** `reactor/reactor_pool.hpp/.cpp` — `ReactorPool` (N reactores *pinned* por afinidad).

@@ -86,6 +86,9 @@ public:
     }
 
     // `wake()` puede llegar desde otros hilos (lo invoca `CrossCoreMailbox::post`): átomo.
+    // El doble NO bloquea: drena lo armado (los tests deciden las completions de forma síncrona).
+    int wait_completions(int max, MonoTime /*deadline*/) override { return run_completions(max); }
+
     void wake() override { wakes_.fetch_add(1, std::memory_order_relaxed); }
 
     // --- API de control para los tests ---

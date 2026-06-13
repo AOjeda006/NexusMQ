@@ -58,4 +58,16 @@ TEST(FakeProactor, Wake_IncrementaContador) {
     EXPECT_EQ(proactor.wakes(), 2);
 }
 
+TEST(FakeProactor, WaitCompletions_NoBloquea_DrenaLoArmado) {
+    nexus::FakeProactor proactor;
+    int ran = 0;
+    proactor.submit_send(1, {}, [&](std::int32_t) { ++ran; });
+    proactor.arm_front(0);
+
+    // El doble no bloquea: ignora el deadline y drena como run_completions.
+    EXPECT_EQ(proactor.wait_completions(8, nexus::MonoTime{}), 1);
+    EXPECT_EQ(ran, 1);
+    EXPECT_EQ(proactor.wait_completions(8, nexus::MonoTime{}), 0);  // nada más armado
+}
+
 }  // namespace

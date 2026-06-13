@@ -5,6 +5,7 @@
 #include "io/io_uring_backend.hpp"
 
 #include <linux/io_uring.h>
+#include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -14,6 +15,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <system_error>
 #include <unordered_map>
 #include <utility>
@@ -34,6 +36,11 @@ long io_uring_setup(unsigned entries, io_uring_params* params) {
 }
 long io_uring_enter(int ring_fd, unsigned to_submit, unsigned min_complete, unsigned flags) {
     return syscall(__NR_io_uring_enter, ring_fd, to_submit, min_complete, flags, nullptr, 0);
+}
+// Variante con argumento extendido (IORING_ENTER_EXT_ARG): permite pasar un timeout a la espera.
+long io_uring_enter(int ring_fd, unsigned to_submit, unsigned min_complete, unsigned flags,
+                    const void* arg, std::size_t argsz) {
+    return syscall(__NR_io_uring_enter, ring_fd, to_submit, min_complete, flags, arg, argsz);
 }
 
 /// Devuelve `base + offset` reinterpretado como `T*` (los anillos se publican por desplazamientos).
@@ -87,8 +94,16 @@ struct IoUringBackend::Ring {
     io_uring_sqe* sqe_array = nullptr;
     unsigned entries = 0;
 
+    int event_fd = -1;              // eventfd para wake() cross-hilo (interrumpe la espera)
+    std::uint64_t eventfd_buf = 0;  // destino de la lectura del eventfd (vive en vuelo)
+    bool has_ext_arg = false;       // ¿el kernel admite timeout en io_uring_enter?
+
     std::unordered_map<std::uint64_t, OpState> inflight;
     std::uint64_t next_id = 0;
+
+    /// user_data reservado para la lectura persistente del eventfd (los ids reales nacen en 0 y
+    /// crecen de uno en uno: nunca alcanzan este centinela).
+    static constexpr std::uint64_t kEventfdToken = std::numeric_limits<std::uint64_t>::max();
 
     explicit Ring(unsigned requested);
     ~Ring() { release(); }
@@ -112,6 +127,50 @@ struct IoUringBackend::Ring {
             ::close(fd);
             fd = -1;
         }
+        if (event_fd >= 0) {
+            ::close(event_fd);
+            event_fd = -1;
+        }
+    }
+
+    /// (Re)arma la lectura persistente del eventfd. Su completion la vuelve a armar, así un
+    /// `wake()` (escritura en el eventfd) siempre interrumpe la espera bloqueante; la lectura de 8
+    /// bytes pone además el contador del eventfd a cero. Sin efecto si la SQ estuviera llena (no
+    /// esperable).
+    void arm_eventfd_read() const {
+        std::uint32_t index = 0;
+        io_uring_sqe* sqe = acquire_sqe(&index);
+        if (sqe == nullptr) {
+            return;
+        }
+        sqe->opcode = static_cast<std::uint8_t>(IORING_OP_READ);
+        sqe->fd = event_fd;
+        sqe->addr = address_of(&eventfd_buf);
+        sqe->len = sizeof(eventfd_buf);
+        sqe->off = 0;
+        sqe->user_data = kEventfdToken;
+        submit(index);
+    }
+
+    /// Bloquea en `io_uring_enter` hasta que haya ≥1 completion (E/S, temporizador o wake vía
+    /// eventfd) o se alcance @p deadline. El timeout se pasa con ext-arg si el kernel lo admite; si
+    /// no, se espera sin tope (el eventfd y las propias ops igualmente interrumpen la espera).
+    void enter_wait(MonoTime deadline) const {
+        if (!has_ext_arg) {
+            io_uring_enter(fd, 0, 1, IORING_ENTER_GETEVENTS);
+            return;
+        }
+        __kernel_timespec timeout{};
+        const auto now = std::chrono::steady_clock::now();
+        if (deadline > now) {
+            const auto nanos =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(deadline - now).count();
+            timeout.tv_sec = nanos / 1'000'000'000;
+            timeout.tv_nsec = nanos % 1'000'000'000;
+        }
+        io_uring_getevents_arg arg{};
+        arg.ts = address_of(&timeout);
+        io_uring_enter(fd, 0, 1, IORING_ENTER_GETEVENTS | IORING_ENTER_EXT_ARG, &arg, sizeof(arg));
     }
 
     /// Reserva la siguiente SQE libre (ya puesta a cero), o `nullptr` si el anillo de envío llena.
@@ -194,6 +253,18 @@ IoUringBackend::Ring::Ring(unsigned requested) {
     cq_ring_mask = at_offset<std::uint32_t>(ring_map, params.cq_off.ring_mask);
     cqes = at_offset<io_uring_cqe>(ring_map, params.cq_off.cqes);
     sqe_array = static_cast<io_uring_sqe*>(sqes_map);
+
+    has_ext_arg = (params.features & IORING_FEAT_EXT_ARG) != 0;
+
+    // eventfd + lectura persistente: da el camino de wake (interrumpe la espera bloqueante desde
+    // otro hilo). Sin O_NONBLOCK: io_uring espera asíncronamente a que el contador sea > 0.
+    event_fd = ::eventfd(0, EFD_CLOEXEC);
+    if (event_fd < 0) {
+        const int err = errno;
+        release();
+        throw std::system_error(err, std::generic_category(), "eventfd");
+    }
+    arm_eventfd_read();
 }
 
 IoUringBackend::IoUringBackend(unsigned entries) : ring_(std::make_unique<Ring>(entries)) {}
@@ -268,9 +339,14 @@ int IoUringBackend::run_completions(int max) {
     while (head != tail && processed < max) {
         const io_uring_cqe& cqe = ring.cqes[head & *ring.cq_ring_mask];
         const std::uint64_t user_data = cqe.user_data;
-        std::int32_t result = cqe.res;
         ++head;
 
+        if (user_data == Ring::kEventfdToken) {
+            ring.arm_eventfd_read();  // wake interno: vuelve a armar; no cuenta como completion
+            continue;
+        }
+
+        std::int32_t result = cqe.res;
         auto found = ring.inflight.find(user_data);
         if (found != ring.inflight.end()) {
             auto state = std::move(found->second);
@@ -286,9 +362,17 @@ int IoUringBackend::run_completions(int max) {
     return processed;
 }
 
+int IoUringBackend::wait_completions(int max, MonoTime deadline) {
+    ring_->enter_wait(deadline);  // bloquea hasta completion / wake / deadline
+    return run_completions(max);  // drena lo que haya quedado listo
+}
+
 void IoUringBackend::wake() {
-    // Sin efecto por ahora: la integración con el reactor (eventfd registrado en el anillo para
-    // interrumpir `io_uring_enter` desde otro hilo) llega en R6 (CrossCoreMailbox).
+    // Escribe en el eventfd: el kernel completa la lectura persistente y se interrumpe la espera
+    // bloqueante de wait_completions. Seguro desde otro hilo (la escritura del eventfd es atómica).
+    const std::uint64_t one = 1;
+    const ssize_t written = ::write(ring_->event_fd, &one, sizeof(one));
+    static_cast<void>(written);  // solo fallaría (EAGAIN) si el contador desbordara 2^64: se ignora
 }
 
 }  // namespace nexus

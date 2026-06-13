@@ -47,11 +47,18 @@ public:
     /// Dispara una completion cuando el reloj monótono alcance @p deadline.
     virtual void submit_timer(MonoTime deadline, Completion on_done) = 0;
 
-    /// @brief Drena hasta @p max completions terminadas, ejecutando su callback.
+    /// @brief Drena hasta @p max completions terminadas **sin bloquear**, ejecutando su callback.
     /// @return Cuántas se procesaron.
     virtual int run_completions(int max) = 0;
 
-    /// Despierta el reactor si está bloqueado esperando completions (desde otro hilo).
+    /// @brief Bloquea hasta que haya alguna completion lista, llegue un `wake()` o se alcance
+    ///   @p deadline; luego drena hasta @p max (como `run_completions`).
+    /// @return Cuántas completions de usuario se ejecutaron.
+    /// @details Es el modo de espera eficiente del bucle del reactor: cede la CPU mientras no haya
+    ///   nada que hacer. El doble de test no bloquea (drena lo que haya, para tests deterministas).
+    virtual int wait_completions(int max, MonoTime deadline) = 0;
+
+    /// Despierta el reactor si está bloqueado en `wait_completions` (seguro desde otro hilo).
     virtual void wake() = 0;
 
 protected:
