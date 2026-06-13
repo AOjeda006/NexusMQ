@@ -3,8 +3,13 @@
 # .cpp del reactor); el resto (task, scheduler, colas, allocator) sigue siendo header-only.
 add_library(nexus-reactor
   cross_core.cpp
-  reactor.cpp)
+  reactor.cpp
+  reactor_pool.cpp)
 add_library(nexus::reactor ALIAS nexus-reactor)
 
 target_include_directories(nexus-reactor PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(nexus-reactor PUBLIC nexus::common nexus::io nexus_options)
+# _GNU_SOURCE: expone pthread_setaffinity_np (afinidad de CPU del pool). Solo el .cpp lo usa;
+# las cabeceras no lo necesitan. Con GCC ya viene predefinido; con Clang/libc++ hace falta.
+target_compile_definitions(nexus-reactor PRIVATE _GNU_SOURCE)
+target_link_libraries(nexus-reactor PUBLIC Threads::Threads)

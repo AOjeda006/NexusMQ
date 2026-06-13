@@ -29,6 +29,10 @@ option(NEXUS_TSAN "Compila con ThreadSanitizer (valida las colas lock-free)" OFF
 # Exporta compile_commands.json (lo consumen clang-tidy, clangd y los editores).
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Hilos POSIX (el reactor thread-per-core de Fase 1b: std::thread + afinidad de CPU).
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+
 # Requisitos comunes de compilación, propagados a TODOS los targets vía un target
 # INTERFACE (CMake moderno basado en targets). C++23 (necesario para std::expected,
 # modelo de errores del núcleo, ADR-0009) y "avisos como errores".
