@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "broker/offset_manager.hpp"
 #include "broker/topic_manager.hpp"
 #include "common/bytes.hpp"
 #include "common/error.hpp"
@@ -44,6 +45,8 @@ private:
     NodeId node_id_;
     std::string host_;
     std::uint16_t port_;
+    /// Offsets confirmados por grupo (REACTOR-LOCAL: uno por router/reactor; ver `OffsetManager`).
+    OffsetManager offsets_;
 };
 
 }  // namespace nexus

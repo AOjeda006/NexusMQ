@@ -56,6 +56,13 @@ public:
     [[nodiscard]] expected<ProduceResponse> produce(const ProduceRequest& req);
     /// Lee desde una partición (bajo nivel; `batches` válido hasta la próxima petición).
     [[nodiscard]] expected<FetchResponse> fetch(const FetchRequest& req);
+    /// Confirma el offset consumido de @p group en @p topic/@p partition.
+    [[nodiscard]] expected<OffsetCommitResponse> commit_offset(std::string group, std::string topic,
+                                                               PartitionId partition, Offset offset,
+                                                               std::string metadata = {});
+    /// Consulta el offset confirmado de @p group en @p topic/@p partition (`-1` si no hay).
+    [[nodiscard]] expected<OffsetFetchResponse> fetch_offset(std::string group, std::string topic,
+                                                             PartitionId partition);
 
     /// Crea un `Producer` ligado a este cliente (debe sobrevivirlo).
     [[nodiscard]] Producer producer();

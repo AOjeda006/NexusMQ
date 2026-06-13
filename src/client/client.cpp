@@ -139,6 +139,25 @@ expected<FetchResponse> Client::fetch(const FetchRequest& req) {
     return round_trip<FetchResponse>(ApiKey::Fetch, 0, req);
 }
 
+expected<OffsetCommitResponse> Client::commit_offset(std::string group, std::string topic,
+                                                     PartitionId partition, Offset offset,
+                                                     std::string metadata) {
+    return round_trip<OffsetCommitResponse>(ApiKey::OffsetCommit, 0,
+                                            OffsetCommitRequest{.group = std::move(group),
+                                                                .topic = std::move(topic),
+                                                                .partition = partition,
+                                                                .offset = offset,
+                                                                .metadata = std::move(metadata)});
+}
+
+expected<OffsetFetchResponse> Client::fetch_offset(std::string group, std::string topic,
+                                                   PartitionId partition) {
+    return round_trip<OffsetFetchResponse>(
+        ApiKey::OffsetFetch, 0,
+        OffsetFetchRequest{
+            .group = std::move(group), .topic = std::move(topic), .partition = partition});
+}
+
 Producer Client::producer() {
     return Producer{*this};
 }

@@ -207,6 +207,48 @@ TEST(ClientE2E, Metadata_ListaBrokerYTopic) {
     EXPECT_EQ(meta->topics[0].partitions.size(), 2U);
 }
 
+TEST(ClientE2E, CommitYFetchOffset_PersistenEnElBroker) {
+    TempDir dir{"offset"};
+    std::optional<ServerFixture> fixture;
+    try {
+        fixture.emplace(dir.path());
+    } catch (const std::system_error& ex) {
+        GTEST_SKIP() << "io_uring no disponible en este entorno: " << ex.what();
+    }
+    ASSERT_TRUE(fixture->start());
+
+    nexus::expected<nexus::Client> client_exp =
+        nexus::Client::connect(nexus::Endpoint{.host = "127.0.0.1", .port = fixture->port()});
+    ASSERT_TRUE(client_exp.has_value());
+    nexus::Client& client = *client_exp;
+    ASSERT_TRUE(client.create_topic("t", 1).has_value());
+
+    // Sin commit previo: el broker devuelve -1 (sin error).
+    const nexus::expected<nexus::OffsetFetchResponse> before = client.fetch_offset("grp", "t", 0);
+    ASSERT_TRUE(before.has_value());
+    EXPECT_EQ(before->error_code, nexus::WireError::None);
+    EXPECT_EQ(before->offset, -1);
+
+    // Confirmar y volver a leer.
+    const nexus::expected<nexus::OffsetCommitResponse> committed =
+        client.commit_offset("grp", "t", 0, 5);
+    ASSERT_TRUE(committed.has_value());
+    EXPECT_EQ(committed->error_code, nexus::WireError::None);
+
+    const nexus::expected<nexus::OffsetFetchResponse> after = client.fetch_offset("grp", "t", 0);
+    ASSERT_TRUE(after.has_value());
+    EXPECT_EQ(after->offset, 5);
+
+    // Otra conexión ve el mismo commit (vive en el broker, no en el cliente).
+    nexus::expected<nexus::Client> other_exp =
+        nexus::Client::connect(nexus::Endpoint{.host = "127.0.0.1", .port = fixture->port()});
+    ASSERT_TRUE(other_exp.has_value());
+    const nexus::expected<nexus::OffsetFetchResponse> from_other =
+        other_exp->fetch_offset("grp", "t", 0);
+    ASSERT_TRUE(from_other.has_value());
+    EXPECT_EQ(from_other->offset, 5);
+}
+
 TEST(ClientE2E, Produce_TopicInexistente_DevuelveError) {
     TempDir dir{"notopic"};
     std::optional<ServerFixture> fixture;

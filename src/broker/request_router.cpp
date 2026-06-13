@@ -49,6 +49,33 @@ ProduceResponse handle_produce(TopicManager& topics, const ProduceRequest& req) 
     return resp;
 }
 
+OffsetCommitResponse handle_offset_commit(OffsetManager& offsets, Decoder& body) {
+    const expected<OffsetCommitRequest> req = OffsetCommitRequest::decode(body);
+    OffsetCommitResponse resp;
+    if (!req) {
+        resp.error_code = WireError::InvalidRequest;
+        return resp;
+    }
+    offsets.commit(req->group, req->topic, req->partition, req->offset, req->metadata);
+    return resp;
+}
+
+OffsetFetchResponse handle_offset_fetch(const OffsetManager& offsets, Decoder& body) {
+    const expected<OffsetFetchRequest> req = OffsetFetchRequest::decode(body);
+    OffsetFetchResponse resp;
+    if (!req) {
+        resp.error_code = WireError::InvalidRequest;
+        return resp;
+    }
+    if (const expected<Offset> offset = offsets.fetch(req->group, req->topic, req->partition);
+        offset) {
+        resp.offset = *offset;
+    } else {
+        resp.offset = -1;  // Sin commit previo: no es error; el cliente decide el inicio.
+    }
+    return resp;
+}
+
 MetadataResponse handle_metadata(TopicManager& topics, NodeId node_id, const std::string& host,
                                  std::uint16_t port, const MetadataRequest& req) {
     MetadataResponse resp;
@@ -86,6 +113,8 @@ std::vector<ApiVersionRange> RequestRouter::supported_versions() {
         ApiVersionRange{.key = ApiKey::Fetch, .min = 0, .max = 0},
         ApiVersionRange{.key = ApiKey::CreateTopic, .min = 0, .max = 0},
         ApiVersionRange{.key = ApiKey::DeleteTopic, .min = 0, .max = 0},
+        ApiVersionRange{.key = ApiKey::OffsetCommit, .min = 0, .max = 0},
+        ApiVersionRange{.key = ApiKey::OffsetFetch, .min = 0, .max = 0},
     };
 }
 
@@ -166,8 +195,14 @@ expected<void> RequestRouter::dispatch(ApiKey key, std::uint16_t /*api_version*/
             resp.encode(enc);
             return {};
         }
-        case ApiKey::OffsetCommit:
-        case ApiKey::OffsetFetch:
+        case ApiKey::OffsetCommit: {
+            handle_offset_commit(offsets_, body).encode(enc);
+            return {};
+        }
+        case ApiKey::OffsetFetch: {
+            handle_offset_fetch(offsets_, body).encode(enc);
+            return {};
+        }
         case ApiKey::JoinGroup:
         case ApiKey::SyncGroup:
         case ApiKey::Heartbeat:

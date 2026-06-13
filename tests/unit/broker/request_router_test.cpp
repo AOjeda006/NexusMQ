@@ -186,6 +186,53 @@ TEST(RequestRouter, CreateTopic_CreaYLuegoMetadataLoLista) {
     EXPECT_EQ(mresp->topics[0].partitions.size(), 2U);
 }
 
+TEST(RequestRouter, OffsetCommitLuegoFetch_DevuelveElOffset) {
+    TempDir dir{"offset"};
+    nexus::TopicManager topics{dir.path()};
+    nexus::RequestRouter router{topics, 0, "127.0.0.1", 9092};
+
+    nexus::Buffer cbody = encode_request(nexus::OffsetCommitRequest{
+        .group = "g", .topic = "t", .partition = 0, .offset = 7, .metadata = ""});
+    nexus::Decoder cdec{cbody.as_span()};
+    nexus::Buffer cout;
+    ASSERT_TRUE(router.dispatch(nexus::ApiKey::OffsetCommit, 0, cdec, cout).has_value());
+    nexus::Decoder cresp_dec{cout.as_span()};
+    const nexus::expected<nexus::OffsetCommitResponse> cresp =
+        nexus::OffsetCommitResponse::decode(cresp_dec);
+    ASSERT_TRUE(cresp.has_value());
+    EXPECT_EQ(cresp->error_code, nexus::WireError::None);
+
+    nexus::Buffer fbody =
+        encode_request(nexus::OffsetFetchRequest{.group = "g", .topic = "t", .partition = 0});
+    nexus::Decoder fdec{fbody.as_span()};
+    nexus::Buffer fout;
+    ASSERT_TRUE(router.dispatch(nexus::ApiKey::OffsetFetch, 0, fdec, fout).has_value());
+    nexus::Decoder fresp_dec{fout.as_span()};
+    const nexus::expected<nexus::OffsetFetchResponse> fresp =
+        nexus::OffsetFetchResponse::decode(fresp_dec);
+    ASSERT_TRUE(fresp.has_value());
+    EXPECT_EQ(fresp->error_code, nexus::WireError::None);
+    EXPECT_EQ(fresp->offset, 7);
+}
+
+TEST(RequestRouter, OffsetFetch_SinCommit_DevuelveMenosUno) {
+    TempDir dir{"nooffset"};
+    nexus::TopicManager topics{dir.path()};
+    nexus::RequestRouter router{topics, 0, "127.0.0.1", 9092};
+
+    nexus::Buffer fbody =
+        encode_request(nexus::OffsetFetchRequest{.group = "nuevo", .topic = "t", .partition = 0});
+    nexus::Decoder fdec{fbody.as_span()};
+    nexus::Buffer fout;
+    ASSERT_TRUE(router.dispatch(nexus::ApiKey::OffsetFetch, 0, fdec, fout).has_value());
+    nexus::Decoder fresp_dec{fout.as_span()};
+    const nexus::expected<nexus::OffsetFetchResponse> fresp =
+        nexus::OffsetFetchResponse::decode(fresp_dec);
+    ASSERT_TRUE(fresp.has_value());
+    EXPECT_EQ(fresp->error_code, nexus::WireError::None);
+    EXPECT_EQ(fresp->offset, -1);
+}
+
 TEST(RequestRouter, ApiKeyNoSoportada_DevuelveError) {
     TempDir dir{"unsup"};
     nexus::TopicManager topics{dir.path()};

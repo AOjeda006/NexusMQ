@@ -4,6 +4,7 @@
 add_library(nexus-broker
   partition.cpp
   topic_manager.cpp
+  offset_manager.cpp
   request_router.cpp)
 add_library(nexus::broker ALIAS nexus-broker)
 

@@ -40,6 +40,7 @@ add_executable(nexus-tests
   unit/broker/partition_test.cpp
   unit/broker/topic_test.cpp
   unit/broker/topic_manager_test.cpp
+  unit/broker/offset_manager_test.cpp
   unit/broker/request_router_test.cpp
   e2e/broker_e2e_test.cpp
   e2e/client_e2e_test.cpp
