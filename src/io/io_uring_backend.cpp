@@ -10,7 +10,6 @@
 #include <unistd.h>
 
 #include <algorithm>
-#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
@@ -48,12 +47,15 @@ std::uint64_t address_of(const void* pointer) {
     return reinterpret_cast<std::uintptr_t>(pointer);  // NOLINT(*-reinterpret-cast)
 }
 
-// Barreras sobre los índices compartidos con el kernel (load-acquire / store-release).
-std::uint32_t load_acquire(std::uint32_t* slot) {
-    return std::atomic_ref<std::uint32_t>(*slot).load(std::memory_order_acquire);
+// Barreras sobre los índices compartidos con el kernel (load-acquire / store-release). Usamos los
+// builtins atómicos del compilador, no `std::atomic_ref` (ausente en la libc++ 18 del CI); es lo
+// idiomático para memoria compartida con el kernel (estilo `smp_load_acquire` de liburing).
+std::uint32_t load_acquire(const std::uint32_t* slot) {
+    return __atomic_load_n(slot, __ATOMIC_ACQUIRE);
 }
+// NOLINTNEXTLINE(readability-non-const-parameter): el builtin escribe en `slot` (tidy no lo ve).
 void store_release(std::uint32_t* slot, std::uint32_t value) {
-    std::atomic_ref<std::uint32_t>(*slot).store(value, std::memory_order_release);
+    __atomic_store_n(slot, value, __ATOMIC_RELEASE);
 }
 
 }  // namespace
