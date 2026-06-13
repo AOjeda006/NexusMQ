@@ -20,11 +20,16 @@ namespace nexus {
 /// @details `segment_bytes`/`retention_*` se trasladan al `LogConfig` de cada `PartitionLog`.
 ///   `compaction` y `compression` quedan reservados (compactación y LZ4/Zstd llegan en Fase 4).
 struct TopicConfig {
-    std::size_t segment_bytes = 64UL * 1024 * 1024;  ///< Tamaño del segmento activo.
-    std::int64_t retention_ms = -1;                  ///< Retención por tiempo (`-1` = sin límite).
-    std::int64_t retention_bytes = -1;               ///< Retención por tamaño (`-1` = sin límite).
-    bool compaction = false;                         ///< Compactación por clave (Fase 4).
-    Codec compression = Codec::None;                 ///< Compresión por batch (Fase 4).
+    /// Tamaño del segmento activo.
+    std::size_t segment_bytes = 64UL * 1024 * 1024;
+    /// Retención por tiempo (`-1` = sin límite).
+    std::int64_t retention_ms = -1;
+    /// Retención por tamaño (`-1` = sin límite).
+    std::int64_t retention_bytes = -1;
+    /// Compactación por clave (Fase 4).
+    bool compaction = false;
+    /// Compresión por batch (Fase 4).
+    Codec compression = Codec::None;
 };
 
 /// @brief Metadatos (inmutables) de un topic. Afinidad: INMUTABLE.
