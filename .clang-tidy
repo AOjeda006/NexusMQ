@@ -1,6 +1,17 @@
 # Análisis estático (Core Guidelines, bugprone, performance, modernize) y
 # enforcement del naming del proyecto vía readability-identifier-naming.
 # Algunos chequeos ruidosos o de criterio se desactivan explícitamente.
+#
+# Desactivados por chocar con el núcleo de corrutinas (decisión de proyecto):
+#  - readability-convert-member-functions-to-static: los puntos de personalización
+#    (await_ready/initial_suspend/final_suspend…) los invoca el lenguaje sobre una
+#    instancia, así que se mantienen no estáticos; este check los querría estáticos,
+#    lo que a su vez dispara readability-static-accessed-through-instance en cada
+#    rampa de corrutina (conflicto irresoluble). Conservamos el segundo (más útil).
+#  - cppcoreguidelines-avoid-reference-coroutine-parameters: en el modelo
+#    thread-per-core las corrutinas reciben referencias a objetos REACTOR-LOCAL
+#    (Proactor, Socket, Buffer) que las sobreviven por construcción; Proactor es
+#    abstracto y no puede pasarse por valor. La referencia es correcta y segura.
 ---
 Checks: >
   -*,
@@ -24,6 +35,8 @@ Checks: >
   -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
   -cppcoreguidelines-pro-type-vararg,
   -cppcoreguidelines-pro-type-union-access,
+  -cppcoreguidelines-avoid-reference-coroutine-parameters,
+  -readability-convert-member-functions-to-static,
   -portability-avoid-pragma-once
 
 WarningsAsErrors: '*'
