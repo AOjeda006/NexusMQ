@@ -35,6 +35,16 @@ public:
     /// Añade una copia de @p data al final; crece si hace falta.
     void append(ByteSpan data);
 
+    /// @brief Hace crecer el búfer en @p n bytes y devuelve una vista **mutable** sobre esa cola,
+    ///   para escribir E/S de entrada directamente (p. ej. `recv` sin copia intermedia).
+    /// @details `size()` crece en @p n; los bytes nuevos quedan a cero. Si la E/S llena menos de
+    ///   @p n, ajusta con `truncate`. La vista es válida hasta el próximo `extend`/`append`/`clear`
+    ///   (pueden realocar). @return vista de los @p n bytes recién añadidos.
+    [[nodiscard]] MutByteSpan extend(std::size_t n);
+
+    /// Recorta el tamaño a @p new_size (debe ser ≤ `size()`); conserva la capacidad.
+    void truncate(std::size_t new_size) noexcept;
+
     /// Vacía el contenido (size() = 0) conservando la capacidad reservada.
     void clear() noexcept;
 

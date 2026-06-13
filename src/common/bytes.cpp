@@ -14,6 +14,18 @@ void Buffer::append(ByteSpan data) {
     data_.insert(data_.end(), data.begin(), data.end());
 }
 
+MutByteSpan Buffer::extend(std::size_t n) {
+    const std::size_t old_size = data_.size();
+    data_.resize(old_size + n);
+    return MutByteSpan{data_.data() + old_size, n};
+}
+
+// Precondición: new_size <= size(). resize hacia abajo no realoca ni lanza (bytes triviales).
+// NOLINTNEXTLINE(bugprone-exception-escape): por eso es noexcept pese a llamar a resize.
+void Buffer::truncate(std::size_t new_size) noexcept {
+    data_.resize(new_size);
+}
+
 void Buffer::clear() noexcept {
     data_.clear();
 }
