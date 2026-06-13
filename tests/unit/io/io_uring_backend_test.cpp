@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
@@ -17,7 +18,6 @@
 #include <cstring>
 #include <memory>
 #include <optional>
-#include <stop_token>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -168,7 +168,7 @@ TEST(IoUringBackend, WaitCompletions_Wake_DesdeOtroHilo_InterrumpeLaEspera) {
         GTEST_SKIP() << "io_uring no disponible en este entorno";
     }
     const auto start = std::chrono::steady_clock::now();
-    std::jthread waker([&] {
+    std::thread waker([&] {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
         backend->wake();
     });
@@ -190,11 +190,12 @@ TEST(IoUringBackend, WaitCompletions_SinTrabajo_VenceElDeadline) {
     }
     // Guarda anti-cuelgue: si el kernel no admitiera el timeout (ext-arg), despierta a los 4 s para
     // que el test FALLE de forma visible (assert < 2 s) en lugar de colgarse indefinidamente.
-    std::jthread guard([&](std::stop_token stop) {
-        for (int i = 0; i < 40 && !stop.stop_requested(); ++i) {
+    std::atomic<bool> done{false};
+    std::thread guard([&] {
+        for (int i = 0; i < 40 && !done.load(std::memory_order_acquire); ++i) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
-        if (!stop.stop_requested()) {
+        if (!done.load(std::memory_order_acquire)) {
             backend->wake();
         }
     });
@@ -202,7 +203,8 @@ TEST(IoUringBackend, WaitCompletions_SinTrabajo_VenceElDeadline) {
     const auto start = std::chrono::steady_clock::now();
     const int processed = backend->wait_completions(8, start + std::chrono::milliseconds(50));
     const auto elapsed = std::chrono::steady_clock::now() - start;
-    guard.request_stop();
+    done.store(true, std::memory_order_release);
+    guard.join();
 
     EXPECT_EQ(processed, 0);
     EXPECT_GE(elapsed,

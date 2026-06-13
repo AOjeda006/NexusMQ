@@ -87,7 +87,7 @@ TEST(CrossCoreMailbox, Concurrente_ProductoresPorBuzon_ConsumidorUnico_NoPierdeM
     nexus::CrossCoreMailbox mailbox(kProducers, proactor);
 
     std::atomic<bool> go{false};
-    std::vector<std::jthread> producers;
+    std::vector<std::thread> producers;
     producers.reserve(kProducers);
     for (int core = 0; core < kProducers; ++core) {
         producers.emplace_back([&mailbox, &go, core] {
@@ -112,7 +112,7 @@ TEST(CrossCoreMailbox, Concurrente_ProductoresPorBuzon_ConsumidorUnico_NoPierdeM
         });
     }
 
-    for (std::jthread& producer : producers) {
+    for (std::thread& producer : producers) {
         producer.join();
     }
     EXPECT_EQ(received, kTotal);
