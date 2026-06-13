@@ -129,7 +129,11 @@ Harness de benchmark vacío y CI:
     - [x] **R6a** `reactor/allocator.hpp` — `ArenaAllocator` (arena monótona reactor-local sobre
       `std::pmr::monotonic_buffer_resource`; `resource()`/`reset()`/`make<T>` con `construct_at`
       confinado). Libera en bloque (sin destructores → `make` exige `T` trivialmente destruible).
-    - [ ] **R6b** `reactor/cross_core.hpp/.cpp` — `CrossCoreMailbox` (N buzones SPSC + `wake`).
+    - [x] **R6b** `reactor/cross_core.hpp/.cpp` — `CrossCoreMailbox` (N buzones SPSC, uno por núcleo
+      origen + `wake` del destino) y `Message{target_core, work}`. `post` aplica contrapresión
+      (cede el hilo si el buzón está lleno) y despierta al destino; `drain` lo consume el reactor
+      dueño (único consumidor). Estrés multi-productor/único-consumidor validado bajo TSan.
+      `nexus-reactor` pasa a STATIC. `FakeProactor::wake` ahora es atómico (es cross-hilo).
     - [ ] **R6c** Proactor: espera bloqueante con `deadline` (`wait_completions`) + `wake` por eventfd
       en el anillo io_uring (instante); doble de test no bloquea.
     - [ ] **R6d** `reactor/reactor.hpp/.cpp` — `Reactor` (dueño de proactor/scheduler/allocator/mailbox;

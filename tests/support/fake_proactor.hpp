@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <utility>
@@ -84,13 +85,14 @@ public:
         return processed;
     }
 
-    void wake() override { ++wakes_; }
+    // `wake()` puede llegar desde otros hilos (lo invoca `CrossCoreMailbox::post`): átomo.
+    void wake() override { wakes_.fetch_add(1, std::memory_order_relaxed); }
 
     // --- API de control para los tests ---
 
     [[nodiscard]] std::size_t pending() const noexcept { return pending_.size(); }
     [[nodiscard]] const Op& peek(std::size_t index) const { return pending_.at(index); }
-    [[nodiscard]] int wakes() const noexcept { return wakes_; }
+    [[nodiscard]] int wakes() const noexcept { return wakes_.load(std::memory_order_relaxed); }
 
     /// Completa **de inmediato** la operación pendiente más antigua con @p result.
     void complete_front(std::int32_t result) {
@@ -108,7 +110,7 @@ public:
 private:
     std::deque<Op> pending_;
     std::deque<std::pair<Op, std::int32_t>> ready_;
-    int wakes_ = 0;
+    std::atomic<int> wakes_{0};
 };
 
 }  // namespace nexus
