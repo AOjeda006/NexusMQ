@@ -2,8 +2,13 @@
 # particiones, idempotencia, offsets, grupos, backpressure. STATIC desde Partition
 # (primera unidad .cpp); irá ganando dependencias (reactor, protocol, wire) por hito.
 add_library(nexus-broker
-  partition.cpp)
+  partition.cpp
+  topic_manager.cpp)
 add_library(nexus::broker ALIAS nexus-broker)
 
 target_include_directories(nexus-broker PUBLIC ${PROJECT_SOURCE_DIR}/src)
-target_link_libraries(nexus-broker PUBLIC nexus::common nexus::storage nexus_options)
+target_link_libraries(nexus-broker PUBLIC
+  nexus::common
+  nexus::storage
+  nexus::protocol
+  nexus_options)

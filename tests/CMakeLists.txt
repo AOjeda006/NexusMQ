@@ -39,6 +39,7 @@ add_executable(nexus-tests
   unit/broker/producer_session_test.cpp
   unit/broker/partition_test.cpp
   unit/broker/topic_test.cpp
+  unit/broker/topic_manager_test.cpp
   crash/partition_crash_test.cpp)
 
 # LatencyHistogram es header-only en tools/bench; el test lo incluye directamente.
