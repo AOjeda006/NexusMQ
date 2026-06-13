@@ -41,4 +41,10 @@ enum class WireError : std::int16_t {
 /// @brief Traduce un `Error` interno al código de wire (en el borde del protocolo).
 [[nodiscard]] WireError from_error(const Error& error) noexcept;
 
+/// @brief Traduce un código de wire a un `Error` interno (en el borde del **cliente**, ADR-0009).
+/// @details Inverso aproximado de `from_error`: el cliente recibe `errorCode:i16` y lo reintroduce
+///   en el modelo interno. `WireError::None` no es error (el llamante lo comprueba antes); se mapea
+///   a `InvalidArgument` por robustez.
+[[nodiscard]] Error to_error(WireError error);
+
 }  // namespace nexus

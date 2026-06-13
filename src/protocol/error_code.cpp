@@ -29,6 +29,46 @@ bool is_retryable(WireError error) noexcept {
     return false;
 }
 
+Error to_error(WireError error) {
+    switch (error) {
+        case WireError::UnknownTopicOrPartition:
+            return Error{ErrorCode::NotFound, "topic o partición desconocidos"};
+        case WireError::OffsetOutOfRange:
+            return Error{ErrorCode::OutOfRange, "offset fuera de rango"};
+        case WireError::OutOfOrderSequence:
+            return Error{ErrorCode::OutOfRange, "secuencia idempotente fuera de orden"};
+        case WireError::DuplicateSequence:
+            return Error{ErrorCode::OutOfRange, "secuencia idempotente duplicada"};
+        case WireError::CorruptMessage:
+            return Error{ErrorCode::Corrupt, "mensaje corrupto"};
+        case WireError::MessageTooLarge:
+            return Error{ErrorCode::InvalidArgument, "mensaje demasiado grande"};
+        case WireError::UnsupportedVersion:
+            return Error{ErrorCode::Unsupported, "versión no soportada"};
+        case WireError::Unauthorized:
+            return Error{ErrorCode::InvalidArgument, "no autorizado"};
+        case WireError::InvalidRequest:
+            return Error{ErrorCode::InvalidArgument, "petición inválida"};
+        // Condiciones transitorias del servidor: el líder cambió/no está, timeout, falta quórum,
+        // throttling o rebalanceo. Sin código de núcleo dedicado: se reportan como E/S transitoria.
+        case WireError::NotLeaderForPartition:
+            return Error{ErrorCode::IoError, "la partición no tiene líder aquí"};
+        case WireError::LeaderNotAvailable:
+            return Error{ErrorCode::IoError, "líder no disponible"};
+        case WireError::RequestTimedOut:
+            return Error{ErrorCode::IoError, "la petición expiró"};
+        case WireError::NotEnoughReplicas:
+            return Error{ErrorCode::IoError, "réplicas insuficientes"};
+        case WireError::Throttled:
+            return Error{ErrorCode::IoError, "limitado por el servidor (throttling)"};
+        case WireError::RebalanceInProgress:
+            return Error{ErrorCode::IoError, "rebalanceo en curso"};
+        case WireError::None:
+            return Error{ErrorCode::InvalidArgument, "sin error (None)"};
+    }
+    return Error{ErrorCode::InvalidArgument, "código de wire desconocido"};
+}
+
 WireError from_error(const Error& error) noexcept {
     switch (error.code()) {
         case ErrorCode::Corrupt:
