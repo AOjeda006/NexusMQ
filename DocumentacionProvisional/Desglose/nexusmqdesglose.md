@@ -34,7 +34,7 @@ intención de diseño coherente con el anteproyecto; se concretará por fases.
 ================================================================================
 1. ESTRUCTURA DE LA SOLUCIÓN (targets y áreas)
 ================================================================================
-1 solución → 4 áreas → ~14 targets:
+1 solución → 4 áreas → ~15 targets:
 
 ÁREA            TARGET (tipo)              FASE   RESPONSABILIDAD
 -------------   ------------------------   ----   ------------------------------------
@@ -42,7 +42,8 @@ Núcleo (libs)   nexus-common      (lib)    1      Tipos, bytes, CRC32C, error, 
                 nexus-io          (lib)    1/1b   Abstracción proactor (io_uring/IOCP), File, Socket.
                 nexus-reactor     (lib)    1b     Reactor thread-per-core, scheduler de corrutinas, SPSC, allocator.
                 nexus-storage     (lib)    1      Record/Batch, Segment, índice, PartitionLog, retención, recuperación.
-                nexus-protocol    (lib)    1b     Framing, codec, mensajes, códigos de error, compresión, créditos.
+                nexus-protocol    (lib)    1b     Codec, cabecera de trama, mensajes, códigos de error, compresión, créditos (PURO: sin E/S ni async).
+                nexus-wire        (lib)    1b     Framing sobre conexión: FrameReader/FrameWriter (Socket + Proactor). ADR-0013.
                 nexus-consensus   (lib)    2      Raft por partición (estado, RPC, log, elección).
                 nexus-broker      (lib)    1b/2   Topics, particiones, grupos, offsets, idempotencia, backpressure.
                 nexus-ingress     (lib)    3      TLS, rate-limit, circuit-breaker, balanceo, REST gateway.
@@ -58,13 +59,14 @@ Pruebas         nexus-tests       (tests)  1+     unit/property/integration/cras
 nexus-common                         (sin dependencias internas)
   ├── nexus-io          → common
   ├── nexus-protocol    → common
+  ├── nexus-wire        → common, io, protocol
   ├── nexus-reactor     → common, io
   ├── nexus-storage     → common, io
   ├── nexus-consensus   → common, storage, protocol
-  ├── nexus-broker      → common, io, reactor, storage, protocol, consensus
-  ├── nexus-ingress     → common, io, protocol
-  ├── nexus-client      → common, io, protocol
-  ├── nexus-server (exe) → common, io, reactor, storage, protocol, consensus, broker, ingress
+  ├── nexus-broker      → common, io, reactor, storage, protocol, wire, consensus
+  ├── nexus-ingress     → common, io, protocol, wire
+  ├── nexus-client      → common, io, protocol, wire
+  ├── nexus-server (exe) → common, io, reactor, storage, protocol, wire, consensus, broker, ingress
   ├── nexus-cli    (exe) → common, protocol, client
   ├── nexus-bench  (exe) → common, protocol, client
   └── nexus-tests        → (todos)

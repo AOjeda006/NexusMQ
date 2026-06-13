@@ -25,6 +25,7 @@ tags: [nexusmq, message-broker, sistemas-distribuidos, cpp20, anteproyecto, raft
 | 0.4.0   | 2026-06-10  | borrador | **Conformidad con la normativa de referencia de C++/sistemas:** REST admin a **`/api/v1`** + **RFC 7807** + paginación + OpenAPI + **JWT** (§7.6); convenciones **Docker** (multi-stage→distroless, no-root, *healthcheck*, *scan*) (§5.3); build con **`-Werror`** + `clang-tidy`/`clang-format`/`cppcheck` (§3.2); **Conventional Commits** + ramas + *build-once-promote* (§8.4); **`alignas` (false sharing)** + manejo de **ABA** en colas lock-free (§6.3); **apagado limpio** `SIGTERM`/`SIGINT` (§7.4); **TDD** + naming de tests (§8.1). **Nuevo ADR-0009** (política de manejo de errores por capa). Estado de ADR-0003/0005 saneado a `aceptado` (la nota "provisional revisable" pasa al cuerpo). |
 | 0.5.0   | 2026-06-11  | borrador | **Nuevo ADR-0010** (entorno de desarrollo: migración del IDE de **Visual Studio a VS Code sobre WSL** —*Remote-WSL* + *CMake Tools*—; reemplaza la elección de IDE de ADR-0001, que por lo demás sigue vigente). Actualiza §3.2 (*toolchain*), la tabla de decisiones y el índice de ADRs (§6.7). Presets **estandarizados en `linux-*` (Ninja)**; se descartan los `wsl-ubuntu*` y los *vendor maps* de Visual Studio. |
 | 0.6.0   | 2026-06-11  | borrador | **Nuevo ADR-0011** (estándar **C++23** + **libc++ en Clang** para `std::expected`, mecanismo del modelo de errores de ADR-0009). Sube `cxx_std_23`; GCC con libstdc++, Clang con `-stdlib=libc++` (preset `linux-clang` y CI, incluido clang-tidy). Actualiza §3.1/§3.2 y la tabla de decisiones. |
+| 0.7.0   | 2026-06-13  | borrador | **Nuevo ADR-0013** (capa **`nexus-wire`** para el framing sobre conexión —`FrameReader`/`FrameWriter`—; `nexus-protocol` se mantiene puro). Sincroniza el catálogo de ADRs (§6.7) con **ADR-0012** (backend io_uring directo sobre el uapi, sin liburing) y ADR-0013. |
 
 > **Naturaleza del documento.** Es un documento **vivo** en estado `borrador`. Las secciones de diseño detallado por subsistema (§7) y la estrategia de calidad (§8) se profundizarán por fases. Una vez `aceptado`, un ADR no se edita: se reemplaza por otro nuevo. La decisión de arquitectura central (ADR-0005) se fija como **provisional revisable**: se reconsiderará a la luz de los *benchmarks* de la Fase 1.
 
@@ -645,7 +646,7 @@ Resumen de las estructuras nucleares con sus campos; alimenta directamente el de
 
 ### 6.7 Catálogo de ADRs
 
-Ver §9. Índice rápido: ADR-0001 (plataforma), ADR-0002 (I/O), ADR-0003 (replicación: **Raft por partición**, *aceptado*), ADR-0004 (protocolo: **binario propio + REST**, *aceptado*), ADR-0005 (concurrencia: ***shared-nothing thread-per-core***, *aceptado*), ADR-0006 (*ingress* dos modos, *aceptado*), ADR-0007 (consistencia CP/PACELC, *aceptado*), ADR-0008 (coste cero, *aceptado*), ADR-0009 (manejo de errores por capa, *aceptado*), ADR-0010 (IDE: migración a **VS Code** sobre WSL, *aceptado*), ADR-0011 (estándar **C++23** + libc++ en Clang, *aceptado*).
+Ver §9. Índice rápido: ADR-0001 (plataforma), ADR-0002 (I/O), ADR-0003 (replicación: **Raft por partición**, *aceptado*), ADR-0004 (protocolo: **binario propio + REST**, *aceptado*), ADR-0005 (concurrencia: ***shared-nothing thread-per-core***, *aceptado*), ADR-0006 (*ingress* dos modos, *aceptado*), ADR-0007 (consistencia CP/PACELC, *aceptado*), ADR-0008 (coste cero, *aceptado*), ADR-0009 (manejo de errores por capa, *aceptado*), ADR-0010 (IDE: migración a **VS Code** sobre WSL, *aceptado*), ADR-0011 (estándar **C++23** + libc++ en Clang, *aceptado*), ADR-0012 (backend io_uring directo sobre el uapi, sin liburing, *aceptado*), ADR-0013 (capa **`nexus-wire`** para el framing sobre conexión; `nexus-protocol` queda puro, *aceptado*).
 
 ---
 
@@ -1139,6 +1140,23 @@ Procedimientos de operación que el diseño debe soportar (se concretan en Fase 
 **Alternativas consideradas.**
 - **liburing vía `liburing-dev` (apt):** lo estándar, pero requiere `sudo` (no disponible) y añade dependencia de sistema a instalar en cada entorno; descartado por la restricción del entorno.
 - **liburing vendorizada (FetchContent/ExternalProject):** reproducible sin `sudo`, pero liburing usa *autotools* (genera cabeceras con `./configure`): wrapper frágil en CMake y más lento en CI; descartado por complejidad frente a la opción sin dependencias.
+
+### ADR-0013: Capa `nexus-wire` para el framing sobre conexión (`FrameReader`/`FrameWriter`)
+
+- **Estado:** aceptado
+- **Fecha:** 2026-06-13
+
+> **Refina el desglose** (no cambia el diseño del protocolo): el desglose detallado ubicaba `FrameReader`/`FrameWriter` en `protocol/frame.hpp`, pero el grafo de dependencias fija `nexus-protocol → common` y «protocolo puro (encode/decode, sin E/S ni async)». Este ADR resuelve ese conflicto entre dos fuentes de verdad.
+
+**Contexto.** `FrameReader`/`FrameWriter` leen y escriben tramas longitud-prefijo (§7.2) sobre un `Socket` mediante el `Proactor`: necesitan `nexus-io` (Socket, Proactor) y corrutinas (`task<expected<T>>`). Colocarlos en `nexus-protocol` obligaría a que el protocolo —hoy puro encode/decode, testable y fuzzeable sin E/S— dependiera de `nexus-io` y de la maquinaria async, contradiciendo el grafo (protocol→common) y el principio de capas limpias. Los consumidores del framing-sobre-conexión (broker, client, ingress, server) ya dependen tanto de `io` como de `protocol`.
+
+**Decisión.** Crear un target nuevo **`nexus-wire`** (`src/wire/`), que depende de **common + io + protocol** y aloja `Frame`, `FrameReader` y `FrameWriter`. `nexus-protocol` se mantiene **puro** (codec, `FrameHeader`, mensajes, códigos de error: solo→common, sin E/S ni async, independientemente testeable). broker/client/ingress/server dependen de `nexus-wire` para el transporte de tramas. El `Buffer` de `nexus-common` gana `extend`/`truncate` (cola mutable para `recv` sin copia intermedia), que usa `FrameReader`.
+
+**Consecuencias.** (+) `nexus-protocol` queda independiente de E/S: la (de)serialización se prueba y fuzzea sin tocar sockets ni io_uring. (+) Separación de responsabilidades clara (protocolo = bytes; wire = tramas sobre conexión) y reutilizable por todos los consumidores. (+) Grafo acíclico y descendente (wire → {common, io, protocol}). (−) Un target más en el árbol (15 en total) y una desviación respecto a la ubicación del desglose detallado (anotada en la hoja de ruta). (−) `read_frame` expone el payload como vista **dentro del búfer del lector** (válida hasta la siguiente lectura): zero-copy a cambio de una invariante de vida documentada.
+
+**Alternativas consideradas.**
+- **`nexus-protocol` depende de `io` (FrameReader en `protocol/frame_io.hpp`):** sigue el desglose detallado y evita un target nuevo, pero rompe la pureza del protocolo (lo acopla a io_uring/async) y el grafo protocol→common; descartado por el autor a favor de capas limpias.
+- **FrameReader genérico en `nexus-io` (sin conocer `FrameHeader`):** mantiene io→common, pero parte el concepto de «trama» en dos capas y se aparta del `read_frame()→Frame` del desglose; descartado.
 
 ---
 
