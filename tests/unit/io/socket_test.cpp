@@ -92,6 +92,20 @@ TEST(Listener, Bind_HostInvalido_DevuelveInvalidArgument) {
     EXPECT_EQ(listener.error().code(), nexus::ErrorCode::InvalidArgument);
 }
 
+TEST(Socket, Connect_AlListener_Conecta) {
+    auto listener = nexus::Listener::bind("127.0.0.1", 0);
+    ASSERT_TRUE(listener.has_value());
+    auto sock = nexus::Socket::connect("127.0.0.1", listener->local_port());
+    ASSERT_TRUE(sock.has_value());
+    EXPECT_TRUE(sock->is_open());
+}
+
+TEST(Socket, Connect_HostInvalido_DevuelveInvalidArgument) {
+    auto sock = nexus::Socket::connect("no-es-una-ip", 12345);
+    ASSERT_FALSE(sock.has_value());
+    EXPECT_EQ(sock.error().code(), nexus::ErrorCode::InvalidArgument);
+}
+
 #ifdef NEXUS_HAVE_IOURING
 
 // Corrutina servidora: acepta una conexión, lee un mensaje y lo devuelve (eco); produce lo leído.

@@ -52,6 +52,27 @@ void Socket::close() noexcept {
     }
 }
 
+expected<Socket> Socket::connect(std::string_view host, std::uint16_t port) {
+    const int fd = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (fd < 0) {
+        return io_error("socket");
+    }
+    Socket socket{fd};  // toma posesión: cierra el fd si algo falla a partir de aquí (RAII)
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    const std::string host_z{host};  // inet_pton necesita cadena terminada en NUL
+    if (::inet_pton(AF_INET, host_z.c_str(), &addr.sin_addr) != 1) {
+        return make_error(ErrorCode::InvalidArgument, "host IPv4 inválido: " + host_z);
+    }
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): API de sockets POSIX (sockaddr).
+    if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+        return io_error("connect");
+    }
+    return socket;
+}
+
 void Socket::set_nodelay(bool enabled) const {
     const int value = enabled ? 1 : 0;
     // Mejor esfuerzo: TCP_NODELAY es una optimización de latencia, no es crítico si falla.

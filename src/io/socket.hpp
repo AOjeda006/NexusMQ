@@ -26,6 +26,11 @@ public:
     Socket() = default;
     /// Adopta @p fd (ya conectado), tomando su propiedad.
     explicit Socket(int fd) noexcept : fd_(fd) {}
+
+    /// @brief Conecta (bloqueante, plano de control) a @p host (IPv4 punteada) : @p port.
+    /// @details La conexión es plano de control; el transporte de datos posterior es async. Pensado
+    ///   para el cliente y los tests. @return el socket conectado o `IoError`/`InvalidArgument`.
+    [[nodiscard]] static expected<Socket> connect(std::string_view host, std::uint16_t port);
     ~Socket();
     Socket(Socket&& other) noexcept;
     Socket& operator=(Socket&& other) noexcept;
