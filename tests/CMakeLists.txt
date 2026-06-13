@@ -29,6 +29,7 @@ add_executable(nexus-tests
   unit/reactor/task_test.cpp
   unit/reactor/allocator_test.cpp
   unit/reactor/cross_core_test.cpp
+  unit/reactor/reactor_test.cpp
   unit/reactor/scheduler_test.cpp
   unit/reactor/spsc_queue_test.cpp
   unit/reactor/mpmc_queue_test.cpp

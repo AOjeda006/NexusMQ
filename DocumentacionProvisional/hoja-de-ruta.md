@@ -139,8 +139,12 @@ Harness de benchmark vacío y CI:
       (lectura persistente re-armada; el `wake` escribe el eventfd e interrumpe `io_uring_enter`).
       Timeout vía `IORING_ENTER_EXT_ARG` si el kernel lo admite. `FakeProactor` no bloquea (drena).
       Tests io_uring: la espera vuelve por la op, por el `wake` (otro hilo) y por el deadline.
-    - [ ] **R6d** `reactor/reactor.hpp/.cpp` — `Reactor` (dueño de proactor/scheduler/allocator/mailbox;
-      `run`/`poll_once`/`spawn`/`submit_to`/`stop`).
+    - [x] **R6d** `reactor/reactor.hpp/.cpp` — `Reactor` (dueño de proactor/scheduler/allocator/mailbox).
+      `run` repite `poll_once` (lista→buzón→espera E/S bloqueante si ocioso; las completions reanudan
+      sus corrutinas en el acto). `spawn` posee el frame detached y lo recoge al terminar; `submit_to`
+      postea al buzón del peer (cableados con `connect_peers`); `stop` marca el flag y hace `wake`.
+      Ajustes del desglose: ctor toma `num_cores` (lo necesita el buzón), `poll_once` público (test
+      paso a paso / embebido), `partitions_` se difiere al broker. Tests con FakeProactor.
     - [ ] **R6e** `reactor/reactor_pool.hpp/.cpp` — `ReactorPool` (N reactores *pinned* por afinidad).
 - [~] `nexus-protocol`: framing, codec, mensajes, errores. *(El reactor async se intercala; el protocolo es puro encode/decode, sin async, y va primero por ser TDD-puro.)*
   - [x] **P1** `nexus-common`: `varint.hpp/.cpp` (LEB128 + zigzag, decodificador defensivo). *(Primitiva, junto a `load_le`/`store_le`; wire en **little-endian**, consistente con el almacenamiento.)*
