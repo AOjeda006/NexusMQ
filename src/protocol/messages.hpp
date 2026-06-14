@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -216,6 +217,112 @@ struct OffsetFetchResponse {
     void encode(Encoder& enc) const;
     [[nodiscard]] static expected<OffsetFetchResponse> decode(Decoder& dec);
     bool operator==(const OffsetFetchResponse&) const = default;
+};
+
+/// @brief Miembro de un grupo tal como lo ve el líder al repartir (id + suscripción opaca).
+struct GroupMember {
+    std::string member_id;
+    std::vector<std::byte> subscription;
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<GroupMember> decode(Decoder& dec);
+    bool operator==(const GroupMember&) const = default;
+};
+
+/// @brief Asignación que el líder fija para un miembro (bytes opacos del reparto de particiones).
+struct GroupAssignment {
+    std::string member_id;
+    std::vector<std::byte> assignment;
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<GroupAssignment> decode(Decoder& dec);
+    bool operator==(const GroupAssignment&) const = default;
+};
+
+/// @brief (Re)incorpora un consumidor a un grupo (abre o continúa el rebalanceo).
+struct JoinGroupRequest {
+    std::string group;
+    std::string member_id;  ///< Vacío: alta de un consumidor nuevo (el broker asigna el id).
+    std::int32_t session_timeout_ms = 0;
+    std::vector<std::byte> subscription;  ///< Metadatos opacos del cliente (topics suscritos…).
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<JoinGroupRequest> decode(Decoder& dec);
+    bool operator==(const JoinGroupRequest&) const = default;
+};
+
+/// @brief Resultado del `join`: identidad, generación y, solo para el líder, la lista de miembros.
+struct JoinGroupResponse {
+    WireError error_code = WireError::None;
+    Generation generation = 0;
+    std::string member_id;
+    std::string leader_id;
+    bool is_leader = false;
+    std::vector<GroupMember> members;  ///< Poblado solo para el líder (la lista a repartir).
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<JoinGroupResponse> decode(Decoder& dec);
+    bool operator==(const JoinGroupResponse&) const = default;
+};
+
+/// @brief Reparte (líder) o recoge (seguidor) las asignaciones de la generación.
+struct SyncGroupRequest {
+    std::string group;
+    std::string member_id;
+    Generation generation = 0;
+    std::vector<GroupAssignment> assignments;  ///< Solo el líder lo rellena.
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<SyncGroupRequest> decode(Decoder& dec);
+    bool operator==(const SyncGroupRequest&) const = default;
+};
+
+/// @brief Asignación de este miembro tras el `sync`.
+struct SyncGroupResponse {
+    WireError error_code = WireError::None;
+    std::vector<std::byte> assignment;
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<SyncGroupResponse> decode(Decoder& dec);
+    bool operator==(const SyncGroupResponse&) const = default;
+};
+
+/// @brief Latido de liveness de un miembro de un grupo.
+struct HeartbeatRequest {
+    std::string group;
+    std::string member_id;
+    Generation generation = 0;
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<HeartbeatRequest> decode(Decoder& dec);
+    bool operator==(const HeartbeatRequest&) const = default;
+};
+
+/// @brief Resultado del latido (`None`, `RebalanceInProgress`, generación obsoleta…).
+struct HeartbeatResponse {
+    WireError error_code = WireError::None;
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<HeartbeatResponse> decode(Decoder& dec);
+    bool operator==(const HeartbeatResponse&) const = default;
+};
+
+/// @brief Baja voluntaria de un miembro de un grupo.
+struct LeaveGroupRequest {
+    std::string group;
+    std::string member_id;
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<LeaveGroupRequest> decode(Decoder& dec);
+    bool operator==(const LeaveGroupRequest&) const = default;
+};
+
+struct LeaveGroupResponse {
+    WireError error_code = WireError::None;
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<LeaveGroupResponse> decode(Decoder& dec);
+    bool operator==(const LeaveGroupResponse&) const = default;
 };
 
 }  // namespace nexus

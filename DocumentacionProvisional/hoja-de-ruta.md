@@ -298,8 +298,12 @@ Harness de benchmark vacío y CI:
     asignación, opaca), `heartbeat` (`Ok`/`RebalanceInProgress`), `leave`, `tick(now)`. Nuevo alias
     `Generation` en `common/types.hpp`. 15 tests: alta/líder, reparto, rebalanceo al entrar/salir,
     heartbeat en rebalanceo, expiración por `tick`, generación obsoleta, miembro desconocido.
-  - [ ] **C10b** mensajes de protocolo `JoinGroup`/`SyncGroup`/`Heartbeat`/`LeaveGroup` (encode/decode
-    + round-trip) sobre el codec.
+  - [x] **C10b** mensajes de protocolo de grupo en `protocol/messages.{hpp,cpp}` (las `ApiKey` ya
+    existían): `JoinGroup`/`SyncGroup`/`Heartbeat`/`LeaveGroup` request/response + sub-structs
+    `GroupMember`/`GroupAssignment` (DTOs wire que el borde traduce a/desde `MemberInfo`/
+    `MemberAssignment` del dominio). `encode`/`decode` sobre el codec (suscripciones/asignaciones como
+    `bytes`; listas con `varint`+elementos; `error_code:i16`). Tests de round-trip (con miembros y
+    asignaciones) y de `decode` truncado en `messages_test.cpp`.
   - [ ] **C10c** `GroupCoordinator` (posee los grupos por id) + cableado en `RequestRouter`
     (traducción wire↔dominio en el borde) + e2e de cliente.
 - [ ] **C11** cross-core message passing / routing de particiones multi-reactor.

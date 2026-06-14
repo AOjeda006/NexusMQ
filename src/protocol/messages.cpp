@@ -529,4 +529,253 @@ expected<OffsetFetchResponse> OffsetFetchResponse::decode(Decoder& dec) {
                                .error_code = static_cast<WireError>(*error_code)};
 }
 
+void GroupMember::encode(Encoder& enc) const {
+    enc.put_string(member_id);
+    enc.put_bytes(subscription);
+}
+
+expected<GroupMember> GroupMember::decode(Decoder& dec) {
+    auto member_id = dec.get_string();
+    if (!member_id) {
+        return std::unexpected(member_id.error());
+    }
+    auto subscription = dec.get_bytes();
+    if (!subscription) {
+        return std::unexpected(subscription.error());
+    }
+    return GroupMember{
+        .member_id = std::string{*member_id},
+        .subscription = std::vector<std::byte>{subscription->begin(), subscription->end()}};
+}
+
+void GroupAssignment::encode(Encoder& enc) const {
+    enc.put_string(member_id);
+    enc.put_bytes(assignment);
+}
+
+expected<GroupAssignment> GroupAssignment::decode(Decoder& dec) {
+    auto member_id = dec.get_string();
+    if (!member_id) {
+        return std::unexpected(member_id.error());
+    }
+    auto assignment = dec.get_bytes();
+    if (!assignment) {
+        return std::unexpected(assignment.error());
+    }
+    return GroupAssignment{
+        .member_id = std::string{*member_id},
+        .assignment = std::vector<std::byte>{assignment->begin(), assignment->end()}};
+}
+
+void JoinGroupRequest::encode(Encoder& enc) const {
+    enc.put_string(group);
+    enc.put_string(member_id);
+    enc.put_i32(session_timeout_ms);
+    enc.put_bytes(subscription);
+}
+
+expected<JoinGroupRequest> JoinGroupRequest::decode(Decoder& dec) {
+    auto group = dec.get_string();
+    if (!group) {
+        return std::unexpected(group.error());
+    }
+    auto member_id = dec.get_string();
+    if (!member_id) {
+        return std::unexpected(member_id.error());
+    }
+    auto session_timeout_ms = dec.get_i32();
+    if (!session_timeout_ms) {
+        return std::unexpected(session_timeout_ms.error());
+    }
+    auto subscription = dec.get_bytes();
+    if (!subscription) {
+        return std::unexpected(subscription.error());
+    }
+    return JoinGroupRequest{
+        .group = std::string{*group},
+        .member_id = std::string{*member_id},
+        .session_timeout_ms = *session_timeout_ms,
+        .subscription = std::vector<std::byte>{subscription->begin(), subscription->end()}};
+}
+
+void JoinGroupResponse::encode(Encoder& enc) const {
+    enc.put_i16(static_cast<std::int16_t>(error_code));
+    enc.put_i32(generation);
+    enc.put_string(member_id);
+    enc.put_string(leader_id);
+    enc.put_u8(is_leader ? 1U : 0U);
+    enc.put_varint(members.size());
+    for (const GroupMember& member : members) {
+        member.encode(enc);
+    }
+}
+
+expected<JoinGroupResponse> JoinGroupResponse::decode(Decoder& dec) {
+    auto error_code = dec.get_i16();
+    if (!error_code) {
+        return std::unexpected(error_code.error());
+    }
+    auto generation = dec.get_i32();
+    if (!generation) {
+        return std::unexpected(generation.error());
+    }
+    auto member_id = dec.get_string();
+    if (!member_id) {
+        return std::unexpected(member_id.error());
+    }
+    auto leader_id = dec.get_string();
+    if (!leader_id) {
+        return std::unexpected(leader_id.error());
+    }
+    auto is_leader = dec.get_u8();
+    if (!is_leader) {
+        return std::unexpected(is_leader.error());
+    }
+    auto count = get_count(dec);
+    if (!count) {
+        return std::unexpected(count.error());
+    }
+    JoinGroupResponse response;
+    response.error_code = static_cast<WireError>(*error_code);
+    response.generation = *generation;
+    response.member_id = std::string{*member_id};
+    response.leader_id = std::string{*leader_id};
+    response.is_leader = (*is_leader != 0U);
+    response.members.reserve(*count);
+    for (std::size_t i = 0; i < *count; ++i) {
+        auto member = GroupMember::decode(dec);
+        if (!member) {
+            return std::unexpected(member.error());
+        }
+        response.members.push_back(std::move(*member));
+    }
+    return response;
+}
+
+void SyncGroupRequest::encode(Encoder& enc) const {
+    enc.put_string(group);
+    enc.put_string(member_id);
+    enc.put_i32(generation);
+    enc.put_varint(assignments.size());
+    for (const GroupAssignment& assignment : assignments) {
+        assignment.encode(enc);
+    }
+}
+
+expected<SyncGroupRequest> SyncGroupRequest::decode(Decoder& dec) {
+    auto group = dec.get_string();
+    if (!group) {
+        return std::unexpected(group.error());
+    }
+    auto member_id = dec.get_string();
+    if (!member_id) {
+        return std::unexpected(member_id.error());
+    }
+    auto generation = dec.get_i32();
+    if (!generation) {
+        return std::unexpected(generation.error());
+    }
+    auto count = get_count(dec);
+    if (!count) {
+        return std::unexpected(count.error());
+    }
+    SyncGroupRequest request;
+    request.group = std::string{*group};
+    request.member_id = std::string{*member_id};
+    request.generation = *generation;
+    request.assignments.reserve(*count);
+    for (std::size_t i = 0; i < *count; ++i) {
+        auto assignment = GroupAssignment::decode(dec);
+        if (!assignment) {
+            return std::unexpected(assignment.error());
+        }
+        request.assignments.push_back(std::move(*assignment));
+    }
+    return request;
+}
+
+void SyncGroupResponse::encode(Encoder& enc) const {
+    enc.put_i16(static_cast<std::int16_t>(error_code));
+    enc.put_bytes(assignment);
+}
+
+expected<SyncGroupResponse> SyncGroupResponse::decode(Decoder& dec) {
+    auto error_code = dec.get_i16();
+    if (!error_code) {
+        return std::unexpected(error_code.error());
+    }
+    auto assignment = dec.get_bytes();
+    if (!assignment) {
+        return std::unexpected(assignment.error());
+    }
+    return SyncGroupResponse{
+        .error_code = static_cast<WireError>(*error_code),
+        .assignment = std::vector<std::byte>{assignment->begin(), assignment->end()}};
+}
+
+void HeartbeatRequest::encode(Encoder& enc) const {
+    enc.put_string(group);
+    enc.put_string(member_id);
+    enc.put_i32(generation);
+}
+
+expected<HeartbeatRequest> HeartbeatRequest::decode(Decoder& dec) {
+    auto group = dec.get_string();
+    if (!group) {
+        return std::unexpected(group.error());
+    }
+    auto member_id = dec.get_string();
+    if (!member_id) {
+        return std::unexpected(member_id.error());
+    }
+    auto generation = dec.get_i32();
+    if (!generation) {
+        return std::unexpected(generation.error());
+    }
+    return HeartbeatRequest{.group = std::string{*group},
+                            .member_id = std::string{*member_id},
+                            .generation = *generation};
+}
+
+void HeartbeatResponse::encode(Encoder& enc) const {
+    enc.put_i16(static_cast<std::int16_t>(error_code));
+}
+
+expected<HeartbeatResponse> HeartbeatResponse::decode(Decoder& dec) {
+    auto error_code = dec.get_i16();
+    if (!error_code) {
+        return std::unexpected(error_code.error());
+    }
+    return HeartbeatResponse{.error_code = static_cast<WireError>(*error_code)};
+}
+
+void LeaveGroupRequest::encode(Encoder& enc) const {
+    enc.put_string(group);
+    enc.put_string(member_id);
+}
+
+expected<LeaveGroupRequest> LeaveGroupRequest::decode(Decoder& dec) {
+    auto group = dec.get_string();
+    if (!group) {
+        return std::unexpected(group.error());
+    }
+    auto member_id = dec.get_string();
+    if (!member_id) {
+        return std::unexpected(member_id.error());
+    }
+    return LeaveGroupRequest{.group = std::string{*group}, .member_id = std::string{*member_id}};
+}
+
+void LeaveGroupResponse::encode(Encoder& enc) const {
+    enc.put_i16(static_cast<std::int16_t>(error_code));
+}
+
+expected<LeaveGroupResponse> LeaveGroupResponse::decode(Decoder& dec) {
+    auto error_code = dec.get_i16();
+    if (!error_code) {
+        return std::unexpected(error_code.error());
+    }
+    return LeaveGroupResponse{.error_code = static_cast<WireError>(*error_code)};
+}
+
 }  // namespace nexus

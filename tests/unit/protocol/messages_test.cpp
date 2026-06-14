@@ -226,4 +226,77 @@ TEST(Messages, OffsetFetch_RoundTrip) {
     EXPECT_EQ(*decoded_resp, resp);
 }
 
+TEST(Messages, JoinGroup_RoundTrip_ConMiembros) {
+    const nexus::JoinGroupRequest req{.group = "g1",
+                                      .member_id = "",
+                                      .session_timeout_ms = 30000,
+                                      .subscription = {std::byte{0x01}, std::byte{0x02}}};
+    const auto decoded = round_trip(req);
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(*decoded, req);
+
+    nexus::JoinGroupResponse resp;
+    resp.error_code = nexus::WireError::None;
+    resp.generation = 2;
+    resp.member_id = "g1-1";
+    resp.leader_id = "g1-1";
+    resp.is_leader = true;
+    resp.members.push_back({.member_id = "g1-1", .subscription = {std::byte{0xAA}}});
+    resp.members.push_back({.member_id = "g1-2", .subscription = {}});
+    const auto decoded_resp = round_trip(resp);
+    ASSERT_TRUE(decoded_resp.has_value());
+    EXPECT_EQ(*decoded_resp, resp);
+}
+
+TEST(Messages, SyncGroup_RoundTrip_ConAsignaciones) {
+    nexus::SyncGroupRequest req;
+    req.group = "g1";
+    req.member_id = "g1-1";
+    req.generation = 2;
+    req.assignments.push_back({.member_id = "g1-1", .assignment = {std::byte{0x10}}});
+    req.assignments.push_back(
+        {.member_id = "g1-2", .assignment = {std::byte{0x20}, std::byte{0x21}}});
+    const auto decoded = round_trip(req);
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(*decoded, req);
+
+    const nexus::SyncGroupResponse resp{.error_code = nexus::WireError::None,
+                                        .assignment = {std::byte{0x10}}};
+    const auto decoded_resp = round_trip(resp);
+    ASSERT_TRUE(decoded_resp.has_value());
+    EXPECT_EQ(*decoded_resp, resp);
+}
+
+TEST(Messages, Heartbeat_RoundTrip) {
+    const nexus::HeartbeatRequest req{.group = "g1", .member_id = "g1-1", .generation = 5};
+    const auto decoded = round_trip(req);
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(*decoded, req);
+
+    const nexus::HeartbeatResponse resp{.error_code = nexus::WireError::RebalanceInProgress};
+    EXPECT_EQ(
+        round_trip(resp).value_or(nexus::HeartbeatResponse{.error_code = nexus::WireError::None}),
+        resp);
+}
+
+TEST(Messages, LeaveGroup_RoundTrip) {
+    const nexus::LeaveGroupRequest req{.group = "g1", .member_id = "g1-1"};
+    const auto decoded = round_trip(req);
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(*decoded, req);
+
+    const nexus::LeaveGroupResponse resp{.error_code = nexus::WireError::None};
+    EXPECT_EQ(round_trip(resp).value_or(
+                  nexus::LeaveGroupResponse{.error_code = nexus::WireError::InvalidRequest}),
+              resp);
+}
+
+TEST(Messages, JoinGroup_Truncado_DecodeFalla) {
+    nexus::Buffer buf;
+    nexus::Encoder enc{buf};
+    enc.put_string("g1");  // solo el group; faltan member_id, timeout y subscription.
+    nexus::Decoder dec{buf.as_span()};
+    EXPECT_FALSE(nexus::JoinGroupRequest::decode(dec).has_value());
+}
+
 }  // namespace
