@@ -236,7 +236,21 @@ Harness de benchmark vacío y CI:
   → `commit_index` es la **high-watermark**. `become_leader`/`tick` replican (heartbeat). Tests:
   `propose` en no-líder da error, nodo único confirma inmediato, réplica a 3 nodos confirma por
   mayoría, seguidor atrasado alcanza la cola por retroceso de `next_index`.
-- [ ] **C7** `consensus/election.hpp` — pre-vote, leadership transfer, learners.
+- **C7** pre-vote, leadership transfer, learners. **Ajuste del desglose (anotado):** el desglose
+  preveía un `election.hpp/.cpp` con firmas de corrutina/transporte (`task<expected<void>>
+  transfer(...)`); ADR-0015 eliminó corrutinas y `RaftTransport` del núcleo de consenso, así que
+  estas funciones se integran **dentro de `RaftNode`** (la FSM síncrona) en vez de un módulo aparte
+  con firmas obsoletas. Se subdivide en incrementos pequeños:
+  - [x] **C7a** **pre-vote** (§9.6). Nuevo rol `RaftRole::PreCandidate`: al vencer el *election
+    timeout*, `tick` arranca `start_pre_election` (sondea con el término *prospectivo* `current+1`
+    y `pre_vote=true`, **sin** subir el término ni votarse a sí mismo); con mayoría de pre-votos
+    pasa a `become_candidate` (elección real). `make_pre_vote_reply` concede el pre-voto solo si el
+    log está al día **y** expiró el *lease* del líder (`now >= election_deadline_`) **y** no nos
+    creemos líder, sin mutar estado. Un nodo aislado nunca sube su término → al reincorporarse no
+    fuerza el *step-down* del líder vigente. Tests: el sondeo no sube el término, denegación por
+    *lease* vigente, concesión sin líder y con log al día, nodo aislado conserva su término.
+  - [ ] **C7b** leadership transfer (`TimeoutNow` + `transfer_leadership`).
+  - [ ] **C7c** learners (miembros no votantes: replican sin contar para quorum ni votar).
 - [ ] **C8** Arnés de **simulación determinista** (`tests/sim/`, reloj/red virtuales): elecciones,
   *splits*, failover; invariantes (un líder por término; sin pérdida de *committed*).
 - [ ] **C9** `nexus-broker`: integrar Raft en `Partition`; `acks=quorum`;

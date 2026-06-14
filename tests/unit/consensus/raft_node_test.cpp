@@ -116,6 +116,15 @@ void route_messages(nexus::RaftNode& sender, std::vector<NodeBox*>& cluster, nex
     }
 }
 
+// Reparte `rounds` rondas de mensajes de `sender` (con pre-vote, una elección necesita 2: la ronda
+// de pre-votos promueve a candidato y la siguiente recoge los votos reales que lo hacen líder).
+void run_rounds(nexus::RaftNode& sender, std::vector<NodeBox*>& cluster, nexus::MonoTime now,
+                int rounds) {
+    for (int i = 0; i < rounds; ++i) {
+        route_messages(sender, cluster, now);
+    }
+}
+
 TEST(RaftNode, NodoUnico_SeAutoeligeLider) {
     auto box = make_node(1, {}, "single");
     box->node->tick(at(0));     // arma el temporizador.
@@ -132,8 +141,8 @@ TEST(RaftNode, TresNodos_EligenUnLider) {
     for (NodeBox* box : cluster) {
         box->node->tick(at(0));  // todos arman.
     }
-    a->node->tick(at(2000));                      // el nodo 1 vence primero y se postula.
-    route_messages(*a->node, cluster, at(2000));  // reparte RequestVote y recoge votos.
+    a->node->tick(at(2000));                     // el nodo 1 vence primero y sondea pre-votos.
+    run_rounds(*a->node, cluster, at(2000), 2);  // pre-votos → candidato → votos reales → líder.
 
     EXPECT_TRUE(a->node->is_leader());
     EXPECT_EQ(a->node->current_term(), 1);
@@ -151,7 +160,7 @@ TEST(RaftNode, Heartbeat_EvitaNuevaEleccion) {
         box->node->tick(at(0));
     }
     a->node->tick(at(2000));
-    route_messages(*a->node, cluster, at(2000));  // 1 es líder; emite heartbeats.
+    run_rounds(*a->node, cluster, at(2000), 2);  // 1 gana la elección (pre-vote + voto real).
     ASSERT_TRUE(a->node->is_leader());
     route_messages(*a->node, cluster, at(2000));  // reparte los heartbeats iniciales a 2 y 3.
 
@@ -251,7 +260,7 @@ TEST(RaftNode, Propose_ReplicaYConfirmaPorMayoria) {
         box->node->tick(at(0));
     }
     a->node->tick(at(2000));
-    route_messages(*a->node, cluster, at(2000));  // 1 se elige líder, término 1.
+    run_rounds(*a->node, cluster, at(2000), 2);  // 1 se elige líder, término 1 (pre-vote + voto).
     ASSERT_TRUE(a->node->is_leader());
     route_messages(*a->node, cluster, at(2000));  // reparte los heartbeats iniciales.
 
@@ -278,7 +287,7 @@ TEST(RaftNode, Replicacion_SeguidorAtrasado_RetrocedeYAlcanza) {
         box->node->tick(at(0));
     }
     a->node->tick(at(2000));
-    route_messages(*a->node, cluster, at(2000));  // 1 se elige líder, término 2.
+    run_rounds(*a->node, cluster, at(2000), 2);  // 1 se elige líder, término 2 (pre-vote + voto).
     ASSERT_TRUE(a->node->is_leader());
 
     // Propone una entrada del término actual (índice 4): necesaria para poder confirmar (§5.4).
@@ -292,6 +301,64 @@ TEST(RaftNode, Replicacion_SeguidorAtrasado_RetrocedeYAlcanza) {
     }
     EXPECT_EQ(b->rlog->last_index(), 4);    // alcanzó toda la cola.
     EXPECT_EQ(a->node->commit_index(), 4);  // confirmada al replicar la entrada del término 2.
+}
+
+TEST(RaftNode, PreVote_Sondeo_NoSubeTermino) {
+    auto a = make_node(1, {2, 3}, "prevote");
+    a->node->tick(at(0));
+    a->node->tick(at(2000));  // vence el timeout: arranca la pre-elección.
+    EXPECT_EQ(a->node->role(), nexus::RaftRole::PreCandidate);
+    EXPECT_EQ(a->node->current_term(), 0);  // el pre-voto NO sube el término propio.
+
+    const auto msgs = a->node->take_messages();
+    ASSERT_FALSE(msgs.empty());
+    const auto* rv = std::get_if<nexus::RequestVoteArgs>(&msgs.front().payload);
+    ASSERT_NE(rv, nullptr);
+    EXPECT_TRUE(rv->pre_vote);
+    EXPECT_EQ(rv->term, 1);  // anuncia el término prospectivo (current + 1) sin adoptarlo.
+}
+
+TEST(RaftNode, PreVote_LiderReciente_DenegadoSinSubirTermino) {
+    auto follower = make_node(1, {2, 3}, "lease");
+    follower->node->tick(at(0));
+    // Un líder legítimo (término 1) contacta en t=1000 → rearma el election timer del seguidor.
+    const nexus::AppendEntriesArgs hb{.term = 1,
+                                      .leader_id = 2,
+                                      .prev_log_index = 0,
+                                      .prev_log_term = 0,
+                                      .entries = {},
+                                      .leader_commit = 0,
+                                      .leader_epoch = 1};
+    ASSERT_TRUE(follower->node->on_append_entries(at(1000), hb).success);
+
+    // Un retador sondea pre-votos poco después (t=1100), aún dentro del *lease*.
+    const nexus::RequestVoteArgs pv{
+        .term = 2, .candidate_id = 3, .last_log_index = 0, .last_log_term = 0, .pre_vote = true};
+    const auto reply = follower->node->on_request_vote(at(1100), pv);
+    EXPECT_FALSE(reply.vote_granted);              // *lease* vigente: no disrumpe al líder.
+    EXPECT_EQ(follower->node->current_term(), 1);  // el pre-voto NO subió el término.
+}
+
+TEST(RaftNode, PreVote_SinLiderYLogAlDia_Concede) {
+    auto follower = make_node(1, {2, 3}, "grant");
+    follower->node->tick(at(0));  // election_deadline ∈ [1000, 1500].
+    const nexus::RequestVoteArgs pv{
+        .term = 1, .candidate_id = 2, .last_log_index = 0, .last_log_term = 0, .pre_vote = true};
+    const auto reply = follower->node->on_request_vote(at(3000), pv);  // *lease* expirado.
+    EXPECT_TRUE(reply.vote_granted);
+    EXPECT_EQ(follower->node->current_term(), 0);  // conceder un pre-voto no sube el término.
+}
+
+TEST(RaftNode, PreVote_NodoAislado_NoSubeTermino) {
+    auto isolated = make_node(1, {2, 3}, "isolated");
+    isolated->node->tick(at(0));
+    // Sin peers que respondan, cada expiración solo reintenta pre-votos: el término nunca sube
+    // (clave anti-disrupción §9.6: al reincorporarse no fuerza el *step-down* del líder vigente).
+    isolated->node->tick(at(2000));
+    isolated->node->tick(at(4000));
+    isolated->node->tick(at(6000));
+    EXPECT_EQ(isolated->node->role(), nexus::RaftRole::PreCandidate);
+    EXPECT_EQ(isolated->node->current_term(), 0);
 }
 
 }  // namespace

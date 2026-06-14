@@ -51,6 +51,21 @@ void RaftNode::become_follower(MonoTime now, Term term) {
     reset_election_timer(now);
 }
 
+void RaftNode::start_pre_election(MonoTime now) {
+    // Pre-vote (§9.6): sondea con el término *prospectivo* (current+1) sin subir el propio término
+    // ni persistir un voto. Evita que un nodo aislado que se reincorpora disrumpa al líder vigente.
+    role_ = RaftRole::PreCandidate;
+    leader_id_.reset();
+    votes_granted_.clear();
+    votes_granted_.insert(self_);  // cuenta su propio pre-voto.
+    reset_election_timer(now);
+    if (has_majority(votes_granted_.size())) {
+        become_candidate(now);  // cluster de un solo nodo: salta directo a la elección real.
+        return;
+    }
+    broadcast_request_vote(true);
+}
+
 void RaftNode::become_candidate(MonoTime now) {
     persistent_.advance_term(persistent_.current_term() + 1);
     persistent_.record_vote(self_);  // se vota a sí mismo.
@@ -63,7 +78,7 @@ void RaftNode::become_candidate(MonoTime now) {
         become_leader(now);  // cluster de un solo nodo: mayoría inmediata.
         return;
     }
-    broadcast_request_vote();
+    broadcast_request_vote(false);
 }
 
 void RaftNode::become_leader(MonoTime now) {
@@ -76,12 +91,15 @@ void RaftNode::become_leader(MonoTime now) {
     replicate_all();  // afirma el liderazgo de inmediato (heartbeats).
 }
 
-void RaftNode::broadcast_request_vote() {
-    const RequestVoteArgs args{.term = persistent_.current_term(),
+void RaftNode::broadcast_request_vote(bool pre_vote) {
+    // El pre-voto anuncia el término *prospectivo* (current+1) sin adoptarlo; el voto real usa el
+    // término ya incrementado en `become_candidate`.
+    const Term term = pre_vote ? persistent_.current_term() + 1 : persistent_.current_term();
+    const RequestVoteArgs args{.term = term,
                                .candidate_id = self_,
                                .last_log_index = log_.last_index(),
                                .last_log_term = log_.last_term(),
-                               .pre_vote = false};
+                               .pre_vote = pre_vote};
     for (const NodeId peer : peers_) {
         send(peer, args);
     }
@@ -143,7 +161,7 @@ void RaftNode::tick(MonoTime now) {
         return;
     }
     if (now >= election_deadline_) {
-        become_candidate(now);
+        start_pre_election(now);  // pre-vote antes de subir el término (§9.6).
     }
 }
 
@@ -155,7 +173,28 @@ bool RaftNode::log_is_up_to_date(Index last_log_index, Term last_log_term) const
     return last_log_index >= log_.last_index();
 }
 
+RequestVoteReply RaftNode::make_pre_vote_reply(MonoTime now, const RequestVoteArgs& args) const {
+    // Concede un pre-voto sin tocar estado: ni sube el término ni persiste voto ni rearma el timer.
+    RequestVoteReply reply{.term = persistent_.current_term(), .vote_granted = false};
+    if (args.term < persistent_.current_term()) {
+        return reply;  // término prospectivo obsoleto.
+    }
+    if (role_ == RaftRole::Leader) {
+        return reply;  // nos creemos líder: no respaldamos a un retador.
+    }
+    if (now < election_deadline_) {
+        return reply;  // *lease*: hubo contacto reciente con el líder, no disrumpir.
+    }
+    if (log_is_up_to_date(args.last_log_index, args.last_log_term)) {
+        reply.vote_granted = true;
+    }
+    return reply;
+}
+
 RequestVoteReply RaftNode::on_request_vote(MonoTime now, const RequestVoteArgs& args) {
+    if (args.pre_vote) {
+        return make_pre_vote_reply(now, args);
+    }
     if (args.term > persistent_.current_term()) {
         become_follower(now, args.term);
     }
@@ -177,6 +216,15 @@ RequestVoteReply RaftNode::on_request_vote(MonoTime now, const RequestVoteArgs& 
 void RaftNode::on_request_vote_reply(MonoTime now, NodeId from, const RequestVoteReply& reply) {
     if (reply.term > persistent_.current_term()) {
         become_follower(now, reply.term);
+        return;
+    }
+    if (role_ == RaftRole::PreCandidate) {
+        if (reply.term == persistent_.current_term() && reply.vote_granted) {
+            votes_granted_.insert(from);
+            if (has_majority(votes_granted_.size())) {
+                become_candidate(now);  // pre-votos en mayoría: arranca la elección real.
+            }
+        }
         return;
     }
     if (role_ != RaftRole::Candidate || reply.term != persistent_.current_term()) {

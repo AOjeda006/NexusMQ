@@ -17,12 +17,14 @@
 namespace nexus {
 
 /// @brief Rol de una réplica en su grupo Raft. Afinidad: REACTOR-LOCAL.
-/// @details Transiciones (§5.5): `Follower` →(election timeout)→ `Candidate` →(mayoría)→ `Leader`;
-///   cualquier rol →(término mayor observado)→ `Follower`.
+/// @details Transiciones (§5.5 + pre-vote §9.6): `Follower` →(election timeout)→ `PreCandidate`
+///   →(mayoría de pre-votos)→ `Candidate` →(mayoría de votos)→ `Leader`; cualquier rol →(término
+///   mayor observado)→ `Follower`.
 enum class RaftRole : std::uint8_t {
-    Follower,   ///< Réplica pasiva: replica del líder y vota.
-    Candidate,  ///< Solicita votos tras vencer su *election timeout*.
-    Leader,     ///< Sirve produce/fetch y replica su log a los seguidores.
+    Follower,      ///< Réplica pasiva: replica del líder y vota.
+    PreCandidate,  ///< Sondea pre-votos sin subir su término (anti-disrupción §9.6).
+    Candidate,     ///< Solicita votos tras ganar la ronda de pre-votos.
+    Leader,        ///< Sirve produce/fetch y replica su log a los seguidores.
 };
 
 /// @brief Naturaleza de una entrada del log de Raft.

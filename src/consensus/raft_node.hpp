@@ -54,10 +54,11 @@ struct RaftMessage {
 ///   lo enruta al `on_*_reply` del origen).
 /// @invariant Roles y términos siguen las reglas de Raft (§5): término monótono; a lo sumo un líder
 ///   por término; un voto por término.
-/// @note Cubre el ciclo completo de réplica: **elección + voto** (§5.2), **manejo de
-///   `AppendEntries` en el seguidor** con *log matching* (§5.3/§7.11 #5), y la **propuesta** del
-///   líder con replicación, retroceso de `next_index` por `conflict_index` y avance de
-///   `commit_index` por mayoría del término actual (§5.4) — `commit_index` es la *high-watermark*.
+/// @note Cubre el ciclo completo de réplica: **elección con pre-vote** (§5.2/§9.6), **voto**,
+///   **manejo de `AppendEntries` en el seguidor** con *log matching* (§5.3/§7.11 #5), y la
+///   **propuesta** del líder con replicación, retroceso de `next_index` por `conflict_index` y
+///   avance de `commit_index` por mayoría del término actual (§5.4) — `commit_index` es la
+///   *high-watermark*.
 class RaftNode {
 public:
     RaftNode(NodeId self, std::vector<NodeId> peers, RaftLog& log, RaftConfig config);
@@ -98,11 +99,18 @@ public:
 
 private:
     void become_follower(MonoTime now, Term term);
+    /// Inicia la ronda de **pre-votos** (§9.6): sondea sin subir el término ni votarse a sí mismo.
+    void start_pre_election(MonoTime now);
     void become_candidate(MonoTime now);
     void become_leader(MonoTime now);
     void reset_election_timer(MonoTime now);
     void reset_heartbeat_timer(MonoTime now);
-    void broadcast_request_vote();
+    /// Difunde `RequestVote` a los peers; @p pre_vote distingue el sondeo (§9.6) del voto real.
+    void broadcast_request_vote(bool pre_vote);
+    /// Decide si conceder un **pre-voto** sin mutar estado (no sube término ni rearma el
+    /// temporizador).
+    [[nodiscard]] RequestVoteReply make_pre_vote_reply(MonoTime now,
+                                                       const RequestVoteArgs& args) const;
     /// Envía `AppendEntries` a @p peer desde su `next_index` (vacío = *heartbeat*).
     void replicate_to(NodeId peer);
     /// Replica a todos los peers (también sirve de ronda de *heartbeats*).
