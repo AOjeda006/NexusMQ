@@ -205,9 +205,14 @@ Harness de benchmark vacío y CI:
   retrocede `log_end_offset`/`recovery_point`, deja el segmento objetivo activo; `InvalidArgument`
   si cae a mitad de un batch, `OutOfRange` fuera de `[log_start, log_end]`. Tests unit (Segment +
   PartitionLog: corte en/entre segmentos, mitad de batch, no-op, reapertura).
-- [ ] **C4** ADR-0014 + `consensus/raft_log.hpp/.cpp` — `RaftLog` (vista `(term,index)` sobre
-  `PartitionLog`): `append`/`truncate_from`/`term_at`/`last_index`/`last_term`/`entries_from`.
-  Fija el mapeo índice↔`Offset` y la persistencia del término.
+- [x] **C4** **ADR-0014** + `consensus/raft_log.hpp/.cpp` — `RaftLog` (vista `(term,index)` sobre
+  `PartitionLog`): `append`/`truncate_from`/`term_at`/`last_index`/`last_term`/`entries_from` +
+  `offsets_at`. **Modelo (ADR-0014):** una entrada de Raft ↔ un `RecordBatch`; el **índice es el
+  ordinal de entrada** (1-based, +1/entrada), espacio distinto del offset por record; el mapeo
+  `índice → (term, base, last, type)` se persiste en un **sidecar** de 25 B/entrada (`raft-meta`),
+  dejando el `RecordBatch` y `nexus-storage` intactos. `truncate_from` delega en
+  `PartitionLog::truncate_to` (C3). Tests unit (append/índices/términos, `offsets_at`,
+  `entries_from` con `max`, truncado+reanudación, reapertura recupera el estado).
 - [ ] **C5** `consensus/raft_node.hpp/.cpp` — `RaftNode` FSM: elección (`tick`, `become_*`),
   `on_request_vote`, `on_append_entries`; puerto `RaftTransport`. Tests deterministas (reloj
   virtual + transporte doble).

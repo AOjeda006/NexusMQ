@@ -26,6 +26,7 @@ tags: [nexusmq, message-broker, sistemas-distribuidos, cpp20, anteproyecto, raft
 | 0.5.0   | 2026-06-11  | borrador | **Nuevo ADR-0010** (entorno de desarrollo: migración del IDE de **Visual Studio a VS Code sobre WSL** —*Remote-WSL* + *CMake Tools*—; reemplaza la elección de IDE de ADR-0001, que por lo demás sigue vigente). Actualiza §3.2 (*toolchain*), la tabla de decisiones y el índice de ADRs (§6.7). Presets **estandarizados en `linux-*` (Ninja)**; se descartan los `wsl-ubuntu*` y los *vendor maps* de Visual Studio. |
 | 0.6.0   | 2026-06-11  | borrador | **Nuevo ADR-0011** (estándar **C++23** + **libc++ en Clang** para `std::expected`, mecanismo del modelo de errores de ADR-0009). Sube `cxx_std_23`; GCC con libstdc++, Clang con `-stdlib=libc++` (preset `linux-clang` y CI, incluido clang-tidy). Actualiza §3.1/§3.2 y la tabla de decisiones. |
 | 0.7.0   | 2026-06-13  | borrador | **Nuevo ADR-0013** (capa **`nexus-wire`** para el framing sobre conexión —`FrameReader`/`FrameWriter`—; `nexus-protocol` se mantiene puro). Sincroniza el catálogo de ADRs (§6.7) con **ADR-0012** (backend io_uring directo sobre el uapi, sin liburing) y ADR-0013. |
+| 0.8.0   | 2026-06-14  | borrador | **Nuevo ADR-0014** (modelo del **log de Raft**, Fase 2): una entrada de Raft ↔ un `RecordBatch`; el **índice de Raft es el ordinal de entrada** (espacio distinto del offset por record); `RaftLog` envuelve el `PartitionLog` y persiste `term`/offsets por entrada en un **sidecar** de tamaño fijo, dejando el `RecordBatch` y `nexus-storage` **sin cambios**. Actualiza el catálogo de ADRs (§6.7). |
 
 > **Naturaleza del documento.** Es un documento **vivo** en estado `borrador`. Las secciones de diseño detallado por subsistema (§7) y la estrategia de calidad (§8) se profundizarán por fases. Una vez `aceptado`, un ADR no se edita: se reemplaza por otro nuevo. La decisión de arquitectura central (ADR-0005) se fija como **provisional revisable**: se reconsiderará a la luz de los *benchmarks* de la Fase 1.
 
@@ -646,7 +647,7 @@ Resumen de las estructuras nucleares con sus campos; alimenta directamente el de
 
 ### 6.7 Catálogo de ADRs
 
-Ver §9. Índice rápido: ADR-0001 (plataforma), ADR-0002 (I/O), ADR-0003 (replicación: **Raft por partición**, *aceptado*), ADR-0004 (protocolo: **binario propio + REST**, *aceptado*), ADR-0005 (concurrencia: ***shared-nothing thread-per-core***, *aceptado*), ADR-0006 (*ingress* dos modos, *aceptado*), ADR-0007 (consistencia CP/PACELC, *aceptado*), ADR-0008 (coste cero, *aceptado*), ADR-0009 (manejo de errores por capa, *aceptado*), ADR-0010 (IDE: migración a **VS Code** sobre WSL, *aceptado*), ADR-0011 (estándar **C++23** + libc++ en Clang, *aceptado*), ADR-0012 (backend io_uring directo sobre el uapi, sin liburing, *aceptado*), ADR-0013 (capa **`nexus-wire`** para el framing sobre conexión; `nexus-protocol` queda puro, *aceptado*).
+Ver §9. Índice rápido: ADR-0001 (plataforma), ADR-0002 (I/O), ADR-0003 (replicación: **Raft por partición**, *aceptado*), ADR-0004 (protocolo: **binario propio + REST**, *aceptado*), ADR-0005 (concurrencia: ***shared-nothing thread-per-core***, *aceptado*), ADR-0006 (*ingress* dos modos, *aceptado*), ADR-0007 (consistencia CP/PACELC, *aceptado*), ADR-0008 (coste cero, *aceptado*), ADR-0009 (manejo de errores por capa, *aceptado*), ADR-0010 (IDE: migración a **VS Code** sobre WSL, *aceptado*), ADR-0011 (estándar **C++23** + libc++ en Clang, *aceptado*), ADR-0012 (backend io_uring directo sobre el uapi, sin liburing, *aceptado*), ADR-0013 (capa **`nexus-wire`** para el framing sobre conexión; `nexus-protocol` queda puro, *aceptado*), ADR-0014 (modelo del **log de Raft**: índice = ordinal de entrada, término en sidecar; `RecordBatch` intacto, *aceptado*).
 
 ---
 
@@ -1157,6 +1158,24 @@ Procedimientos de operación que el diseño debe soportar (se concretan en Fase 
 **Alternativas consideradas.**
 - **`nexus-protocol` depende de `io` (FrameReader en `protocol/frame_io.hpp`):** sigue el desglose detallado y evita un target nuevo, pero rompe la pureza del protocolo (lo acopla a io_uring/async) y el grafo protocol→common; descartado por el autor a favor de capas limpias.
 - **FrameReader genérico en `nexus-io` (sin conocer `FrameHeader`):** mantiene io→common, pero parte el concepto de «trama» en dos capas y se aparta del `read_frame()→Frame` del desglose; descartado.
+
+### ADR-0014: Modelo del log de Raft (índice = ordinal de entrada; término en sidecar)
+
+- **Estado:** aceptado
+- **Fecha:** 2026-06-14
+
+> **Refina el desglose** (no cambia ADR-0003): concreta *cómo* `RaftLog` es «una vista `(term,index)` sobre el `PartitionLog`» cuando el formato de `RecordBatch` (§5.4) no lleva campo de término y los offsets del log son **por record** (un batch abarca varios offsets).
+
+**Contexto.** ADR-0003 fija que «el log de Raft **es** el log de la partición». Al implementarlo surgen dos fricciones: (1) el `RecordBatch` (la unidad de replicación, §5.4) **no tiene** campo de término, y añadírselo cambiaría el formato en disco y su CRC (toca todo `nexus-storage`); (2) el offset de partición es **por record** (un batch de N records ocupa N offsets), mientras que Raft razona con un **índice por entrada**. Igualar «índice = offset» obligaría a entradas de un solo record (mata el *batching*, contrario al §5.4) o a partir batches al truncar.
+
+**Decisión.** Una **entrada de Raft ↔ un `RecordBatch`**. El **índice de Raft es el ordinal de la entrada** (1-based, +1 por entrada, contiguo), **espacio distinto** del offset de partición (por record). `RaftLog` envuelve un `PartitionLog` (que almacena los bytes de cada entrada y asigna sus offsets) y **posee el mapeo** `índice → (term, base_offset, last_offset, type)`. El **término** (y el resto de metadatos por entrada) se persiste en un **sidecar** de registros de tamaño fijo (`raft-meta`, 25 B/entrada: `term:i64 | base_offset:i64 | last_offset:i64 | type:u8`), append-only y truncable; así el log de partición conserva `RecordBatch` **intactos** (el *fetch* del consumidor los lee sin desenvolver) y la recuperación del término no exige tocar el formato del batch. El *high-watermark* visible (espacio de offsets) = `last_offset` de la entrada en `commit_index`. Resolución de conflictos (`truncate_from(index)`) → `PartitionLog::truncate_to(base_offset(index))` (frontera de batch, ADR/C3) + truncado del sidecar.
+
+**Consecuencias.** (+) `RecordBatch` y `nexus-storage` quedan **sin cambios** (formato y CRC estables); el *fetch* sirve batches tal cual. (+) El algoritmo de Raft opera sobre índices contiguos +1 (formulación estándar del *paper*; sin aritmética de offsets). (+) El sidecar de tamaño fijo hace `term_at`/`last_term`/recuperación O(1)/lineal triviales. (−) Dos espacios de coordenadas (índice de entrada vs offset de record) que la capa de partición reconcilia (el *high-watermark* traduce de uno a otro). (−) Un fichero sidecar por partición además del `.log`/`.index`. (−) El mapeo se persiste por duplicado parcial (base/last son derivables del log escaneándolo), a cambio de un `open` simple sin re-escanear el log.
+
+**Alternativas consideradas.**
+- **Añadir `leader_epoch`/term a la cabecera del `RecordBatch`** (estilo Kafka v2): fiel a «el log es el log», pero cambia el formato en disco y el CRC, e impacta todo `nexus-storage` y sus tests; descartado para no reabrir un formato ya estabilizado en Fase 1.
+- **Índice = offset+1 con entradas de un solo record:** iguala ambos espacios, pero elimina el *record batch* como unidad (contradice §5.4 y el modelo Kafka); descartado.
+- **Anidar el `RecordBatch` del cliente dentro de un marco Raft** (term/type + payload como records del batch del log): término durable sin sidecar, pero cambia la semántica del offset a *por batch* (rompe el modelo por record de la Fase 1b) y obliga al *fetch* a desenvolver; descartado.
 
 ---
 
