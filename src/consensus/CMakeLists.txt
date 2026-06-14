@@ -3,7 +3,8 @@
 add_library(nexus-consensus
   raft_state.cpp
   raft_rpc.cpp
-  raft_log.cpp)
+  raft_log.cpp
+  raft_node.cpp)
 add_library(nexus::consensus ALIAS nexus-consensus)
 
 target_include_directories(nexus-consensus PUBLIC ${PROJECT_SOURCE_DIR}/src)

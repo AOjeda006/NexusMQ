@@ -46,6 +46,7 @@ add_executable(nexus-tests
   unit/consensus/raft_state_test.cpp
   unit/consensus/raft_rpc_test.cpp
   unit/consensus/raft_log_test.cpp
+  unit/consensus/raft_node_test.cpp
   e2e/broker_e2e_test.cpp
   e2e/client_e2e_test.cpp
   crash/partition_crash_test.cpp)

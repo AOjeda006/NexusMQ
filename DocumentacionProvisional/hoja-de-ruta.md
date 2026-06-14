@@ -213,11 +213,21 @@ Harness de benchmark vacío y CI:
   dejando el `RecordBatch` y `nexus-storage` intactos. `truncate_from` delega en
   `PartitionLog::truncate_to` (C3). Tests unit (append/índices/términos, `offsets_at`,
   `entries_from` con `max`, truncado+reanudación, reapertura recupera el estado).
-- [ ] **C5** `consensus/raft_node.hpp/.cpp` — `RaftNode` FSM: elección (`tick`, `become_*`),
-  `on_request_vote`, `on_append_entries`; puerto `RaftTransport`. Tests deterministas (reloj
-  virtual + transporte doble).
-- [ ] **C6** `propose` + replicación (`replicate_to`, `advance_commit_index`, `apply_committed`);
-  `commit_index` → high-watermark.
+- [x] **C5** **ADR-0015** + `consensus/raft_node.hpp/.cpp` — `RaftNode` como **máquina de estados
+  síncrona sin E/S** (entradas `tick`/`on_*` con `now` inyectado → cola de `RaftMessage` drenable
+  con `take_messages`; reemplaza el par corrutina `propose` + `RaftTransport` del desglose). C5
+  cubre: elección (`tick` → `become_candidate` → `RequestVote`; `become_leader` por mayoría;
+  *self-elección* en cluster de 1), voto (`on_request_vote` con regla de log al-día §5.4 y un voto
+  por término), `on_append_entries` (term/leadership, *log matching* §7.11 #5 con `conflict_index`,
+  anexado/truncado de entradas, avance de `commit_index` por `leader_commit`), `become_follower`
+  por término mayor, *heartbeats* del líder. RNG sembrado por nodo (election timeout reproducible).
+  Tests deterministas (`now` inyectado, mensajes enrutados a mano): auto-elección, elección a 3
+  nodos, heartbeat evita elección, denegación por log obsoleto, *step-down*, anexado+commit,
+  `prev_log_index` inexistente. **Pendiente C6:** `propose` + replicación del líder (`match_index`,
+  `advance_commit_index` por mayoría).
+- [ ] **C6** `propose` + replicación del líder (`replicate_to` con `next_index`/retroceso por
+  `conflict_index`, `on_append_entries_reply` → `match_index`, `advance_commit_index` por mayoría
+  del término actual); `commit_index` → high-watermark.
 - [ ] **C7** `consensus/election.hpp` — pre-vote, leadership transfer, learners.
 - [ ] **C8** Arnés de **simulación determinista** (`tests/sim/`, reloj/red virtuales): elecciones,
   *splits*, failover; invariantes (un líder por término; sin pérdida de *committed*).
