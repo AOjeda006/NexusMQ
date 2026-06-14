@@ -35,6 +35,7 @@ add_executable(nexus-tests
   unit/reactor/scheduler_test.cpp
   unit/reactor/spsc_queue_test.cpp
   unit/reactor/mpmc_queue_test.cpp
+  unit/reactor/cross_core_call_test.cpp
   unit/wire/frame_io_test.cpp
   unit/broker/producer_session_test.cpp
   unit/broker/partition_test.cpp
