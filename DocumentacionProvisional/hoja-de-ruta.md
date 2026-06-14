@@ -275,8 +275,17 @@ Harness de benchmark vacío y CI:
   el *lease* se comprobaba contra `election_deadline_` (siempre armado), bloqueando la elección
   inicial; ahora se rastrea `last_leader_contact_` (solo `AppendEntries` válido) y se concede el
   pre-voto si no hubo contacto de líder en un *election timeout* — justifica el valor del arnés.
-- [ ] **C9** `nexus-broker`: integrar Raft en `Partition`; `acks=quorum`;
-  high-watermark = `commit_index`.
+- [x] **C9** **ADR-0016** + `nexus-broker`: `ReplicatedPartition` (`broker/replicated_partition.{hpp,cpp}`)
+  como **tipo paralelo** a `Partition` (no se muta esta; el desglose preveía mutarla). Compone la pila
+  por `unique_ptr` (`PartitionLog`+`RaftLog`+`RaftNode`) → **movible** pese a las referencias internas
+  autorreferenciales. `produce` (solo líder; `Unsupported` si no) aplica idempotencia (§5.9) y
+  **propone** al `RaftNode`, traduciendo el índice de Raft a su último offset vía `RaftLog::offsets_at`;
+  `high_watermark()` = offset (exclusivo) de `commit_index` → **`acks=quorum`** (una escritura no es
+  visible hasta que el quórum la confirma). La FSM no se conduce sola: `raft()` expone la superficie
+  para el portador (reactor/arnés). Pruebas (`tests/unit/broker/replicated_partition_test.cpp`) con
+  reloj y red virtuales: nodo único confirma al proponer; 3 nodos no avanzan el high-watermark hasta
+  el quórum y los seguidores se ponen al día; no-líder → `Unsupported`; idempotencia duplicado/hueco.
+  El **cambio en caliente** del broker (con transporte real) se difiere a **C11**.
 - [ ] **C10** grupos de consumidores + rebalanceo (`JoinGroup`/`SyncGroup`/`Heartbeat`/`LeaveGroup`).
 - [ ] **C11** cross-core message passing / routing de particiones multi-reactor.
 - [ ] **C12** Tests **chaos** (`tc netem`) → failover y postura **CP**; cierre de Fase 2.

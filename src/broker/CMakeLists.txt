@@ -3,6 +3,7 @@
 # (primera unidad .cpp); irá ganando dependencias (reactor, protocol, wire) por hito.
 add_library(nexus-broker
   partition.cpp
+  replicated_partition.cpp
   topic_manager.cpp
   offset_manager.cpp
   request_router.cpp)
@@ -13,4 +14,5 @@ target_link_libraries(nexus-broker PUBLIC
   nexus::common
   nexus::storage
   nexus::protocol
+  nexus::consensus
   nexus_options)

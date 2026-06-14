@@ -73,6 +73,8 @@ public:
     [[nodiscard]] Offset recovery_point() const noexcept { return recovery_point_; }
     /// Número de segmentos (observabilidad / pruebas).
     [[nodiscard]] std::size_t segment_count() const noexcept { return segments_.size(); }
+    /// Directorio de la partición (p. ej. para ubicar sidecars como el `raft-meta` del `RaftLog`).
+    [[nodiscard]] const std::filesystem::path& dir() const noexcept { return dir_; }
 
 private:
     PartitionLog(std::filesystem::path dir, LogConfig cfg,
