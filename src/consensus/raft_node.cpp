@@ -9,6 +9,10 @@
 #include <cstdint>
 #include <span>
 #include <utility>
+#include <vector>
+
+#include "common/bytes.hpp"
+#include "common/record.hpp"
 
 namespace nexus {
 
@@ -67,8 +71,9 @@ void RaftNode::become_leader(MonoTime now) {
     leader_id_ = self_;
     leader_epoch_ += 1;
     volatile_.reset_leader_progress(peers_, log_.last_index());
+    last_sent_.clear();
     reset_heartbeat_timer(now);
-    broadcast_heartbeat();  // afirma el liderazgo de inmediato.
+    replicate_all();  // afirma el liderazgo de inmediato (heartbeats).
 }
 
 void RaftNode::broadcast_request_vote() {
@@ -82,16 +87,45 @@ void RaftNode::broadcast_request_vote() {
     }
 }
 
-void RaftNode::broadcast_heartbeat() {
-    const AppendEntriesArgs args{.term = persistent_.current_term(),
+void RaftNode::replicate_to(NodeId peer) {
+    const Index next = volatile_.next_index(peer);
+    const Index prev_index = next - 1;
+    const auto prev_term = log_.term_at(prev_index);
+    auto entries = log_.entries_from(next, kMaxEntriesPerAppend);
+    std::vector<RaftLogEntry> payload = entries ? std::move(*entries) : std::vector<RaftLogEntry>{};
+    last_sent_[peer] = payload.empty() ? prev_index : payload.back().index;
+    send(peer, AppendEntriesArgs{.term = persistent_.current_term(),
                                  .leader_id = self_,
-                                 .prev_log_index = log_.last_index(),
-                                 .prev_log_term = log_.last_term(),
-                                 .entries = {},
+                                 .prev_log_index = prev_index,
+                                 .prev_log_term = prev_term ? *prev_term : Term{0},
+                                 .entries = std::move(payload),
                                  .leader_commit = volatile_.commit_index(),
-                                 .leader_epoch = leader_epoch_};
+                                 .leader_epoch = leader_epoch_});
+}
+
+void RaftNode::replicate_all() {
     for (const NodeId peer : peers_) {
-        send(peer, args);
+        replicate_to(peer);
+    }
+}
+
+void RaftNode::advance_commit_index() {
+    // Índice replicado en mayoría: ordena los match_index (incluido el propio = last_index) y toma
+    // el de la posición de la mayoría. Solo se confirma si la entrada es del término actual (§5.4).
+    std::vector<Index> matches;
+    matches.reserve(cluster_size());
+    matches.push_back(log_.last_index());
+    for (const NodeId peer : peers_) {
+        matches.push_back(volatile_.match_index(peer));
+    }
+    std::ranges::sort(matches, std::ranges::greater{});
+    const Index candidate = matches[cluster_size() / 2];
+    if (candidate <= volatile_.commit_index()) {
+        return;
+    }
+    const auto term = log_.term_at(candidate);
+    if (term && *term == persistent_.current_term()) {
+        volatile_.set_commit_index(candidate);
     }
 }
 
@@ -104,7 +138,7 @@ void RaftNode::tick(MonoTime now) {
     if (role_ == RaftRole::Leader) {
         if (now >= heartbeat_deadline_) {
             reset_heartbeat_timer(now);
-            broadcast_heartbeat();
+            replicate_all();
         }
         return;
     }
@@ -222,8 +256,44 @@ AppendEntriesReply RaftNode::on_append_entries(MonoTime now, const AppendEntries
 void RaftNode::on_append_entries_reply(MonoTime now, NodeId from, const AppendEntriesReply& reply) {
     if (reply.term > persistent_.current_term()) {
         become_follower(now, reply.term);
+        return;
     }
-    (void)from;  // El avance de match_index/commit_index por mayoría llega en C6.
+    if (role_ != RaftRole::Leader || reply.term != persistent_.current_term()) {
+        return;  // respuesta obsoleta o ya no somos líder.
+    }
+    if (reply.success) {
+        const Index matched = last_sent_[from];
+        volatile_.set_match_index(from, std::max(volatile_.match_index(from), matched));
+        volatile_.set_next_index(from, volatile_.match_index(from) + 1);
+        advance_commit_index();
+        return;
+    }
+    // Fallo de consistencia: retrocede `next_index` (pista `conflict_index`) y reintenta.
+    const Index hint =
+        reply.conflict_index > 0 ? reply.conflict_index : volatile_.next_index(from) - 1;
+    volatile_.set_next_index(from, std::max<Index>(1, hint));
+    replicate_to(from);
+}
+
+expected<Index> RaftNode::propose(const RecordBatch& batch) {
+    if (role_ != RaftRole::Leader) {
+        return make_error(ErrorCode::Unsupported, "propose: el nodo no es líder");
+    }
+    Buffer encoded;
+    batch.encode(encoded);
+    const ByteSpan bytes = encoded.as_span();
+    const RaftLogEntry entry{.term = persistent_.current_term(),
+                             .index = log_.last_index() + 1,
+                             .type = RaftEntryType::Data,
+                             .payload = std::vector<std::byte>(bytes.begin(), bytes.end())};
+    const std::vector<RaftLogEntry> one{entry};
+    const auto appended = log_.append(one);
+    if (!appended) {
+        return std::unexpected(appended.error());
+    }
+    replicate_all();
+    advance_commit_index();  // cluster de un nodo: confirma de inmediato.
+    return *appended;
 }
 
 std::vector<RaftMessage> RaftNode::take_messages() {

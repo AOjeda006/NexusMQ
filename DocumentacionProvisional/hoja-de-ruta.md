@@ -223,11 +223,19 @@ Harness de benchmark vacío y CI:
   por término mayor, *heartbeats* del líder. RNG sembrado por nodo (election timeout reproducible).
   Tests deterministas (`now` inyectado, mensajes enrutados a mano): auto-elección, elección a 3
   nodos, heartbeat evita elección, denegación por log obsoleto, *step-down*, anexado+commit,
-  `prev_log_index` inexistente. **Pendiente C6:** `propose` + replicación del líder (`match_index`,
-  `advance_commit_index` por mayoría).
-- [ ] **C6** `propose` + replicación del líder (`replicate_to` con `next_index`/retroceso por
-  `conflict_index`, `on_append_entries_reply` → `match_index`, `advance_commit_index` por mayoría
-  del término actual); `commit_index` → high-watermark.
+  `prev_log_index` inexistente.
+- [x] **C6** `propose` + replicación del líder en `raft_node.hpp/.cpp`. `propose(RecordBatch)`
+  (solo líder; `Unsupported` si no): codifica el batch, anexa una entrada del término actual al
+  `RaftLog`, replica a los peers y reevalúa `commit_index`; devuelve el índice asignado. Líder:
+  `replicate_to` envía `AppendEntries` desde el `next_index` del peer (acota a
+  `kMaxEntriesPerAppend=64`; vacío = *heartbeat*) y recuerda el último índice enviado (`last_sent_`);
+  `replicate_all` recorre todos los peers (también la ronda de *heartbeats*). `on_append_entries_reply`:
+  *step-down* por término mayor; en éxito fija `match_index`/`next_index` y llama
+  `advance_commit_index`; en fallo retrocede `next_index` por la pista `conflict_index` y reintenta.
+  `advance_commit_index` confirma el mayor índice replicado en **mayoría** del término actual (§5.4)
+  → `commit_index` es la **high-watermark**. `become_leader`/`tick` replican (heartbeat). Tests:
+  `propose` en no-líder da error, nodo único confirma inmediato, réplica a 3 nodos confirma por
+  mayoría, seguidor atrasado alcanza la cola por retroceso de `next_index`.
 - [ ] **C7** `consensus/election.hpp` — pre-vote, leadership transfer, learners.
 - [ ] **C8** Arnés de **simulación determinista** (`tests/sim/`, reloj/red virtuales): elecciones,
   *splits*, failover; invariantes (un líder por término; sin pérdida de *committed*).

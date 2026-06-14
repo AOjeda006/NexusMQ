@@ -9,10 +9,13 @@
 #include <cstdint>
 #include <optional>
 #include <random>
+#include <unordered_map>
 #include <unordered_set>
 #include <variant>
 #include <vector>
 
+#include "common/error.hpp"
+#include "common/record.hpp"
 #include "common/types.hpp"
 #include "consensus/raft_log.hpp"
 #include "consensus/raft_rpc.hpp"
@@ -51,16 +54,23 @@ struct RaftMessage {
 ///   lo enruta al `on_*_reply` del origen).
 /// @invariant Roles y términos siguen las reglas de Raft (§5): término monótono; a lo sumo un líder
 ///   por término; un voto por término.
-/// @note Esta entrega (C5) cubre **elección + voto + manejo de `AppendEntries` en el seguidor**
-///   (incluido el *log matching* y el avance de `commit_index` por `leader_commit`). La
-///   **propuesta** del líder y la replicación con avance de `commit_index` por mayoría llegan en
-///   C6.
+/// @note Cubre el ciclo completo de réplica: **elección + voto** (§5.2), **manejo de
+///   `AppendEntries` en el seguidor** con *log matching* (§5.3/§7.11 #5), y la **propuesta** del
+///   líder con replicación, retroceso de `next_index` por `conflict_index` y avance de
+///   `commit_index` por mayoría del término actual (§5.4) — `commit_index` es la *high-watermark*.
 class RaftNode {
 public:
     RaftNode(NodeId self, std::vector<NodeId> peers, RaftLog& log, RaftConfig config);
 
     /// @brief Avanza el reloj lógico a @p now: vence *election*/*heartbeat* y dispara transiciones.
     void tick(MonoTime now);
+
+    /// @brief (Solo líder) Propone @p batch como una nueva entrada del log y la replica (§7.11 #1).
+    /// @details Anexa la entrada (término actual) al `RaftLog`, emite `AppendEntries` a los peers y
+    ///   reevalúa el `commit_index`. Devuelve el **índice** asignado; el llamante espera a que
+    ///   `commit_index()` lo alcance para considerar la escritura confirmada (acks=quorum).
+    /// @return `Unsupported` si el nodo no es líder; error de E/S si falla el log.
+    [[nodiscard]] expected<Index> propose(const RecordBatch& batch);
 
     /// @brief Procesa un `RequestVote` recibido y devuelve la respuesta (§5.2/§5.4).
     [[nodiscard]] RequestVoteReply on_request_vote(MonoTime now, const RequestVoteArgs& args);
@@ -71,7 +81,8 @@ public:
     /// @brief Procesa la respuesta a un `RequestVote` (cuenta votos → líder).
     void on_request_vote_reply(MonoTime now, NodeId from, const RequestVoteReply& reply);
 
-    /// @brief Procesa la respuesta a un `AppendEntries` (C5: solo *step-down* por término mayor).
+    /// @brief Procesa la respuesta a un `AppendEntries`: actualiza `match_index`/`next_index`,
+    ///   avanza `commit_index` por mayoría (éxito) o retrocede `next_index` y reintenta (fallo).
     void on_append_entries_reply(MonoTime now, NodeId from, const AppendEntriesReply& reply);
 
     /// @brief Extrae los mensajes proactivos encolados (el emisor los transporta).
@@ -92,7 +103,13 @@ private:
     void reset_election_timer(MonoTime now);
     void reset_heartbeat_timer(MonoTime now);
     void broadcast_request_vote();
-    void broadcast_heartbeat();
+    /// Envía `AppendEntries` a @p peer desde su `next_index` (vacío = *heartbeat*).
+    void replicate_to(NodeId peer);
+    /// Replica a todos los peers (también sirve de ronda de *heartbeats*).
+    void replicate_all();
+    /// (Líder) Avanza `commit_index` al mayor índice replicado en mayoría del término actual
+    /// (§5.4).
+    void advance_commit_index();
     /// Aplica las entradas de un `AppendEntries` (saltar coincidentes, truncar conflicto, anexar).
     [[nodiscard]] bool append_entries_from(const std::vector<RaftLogEntry>& entries);
     /// ¿El log `(last_log_index, last_log_term)` es al menos tan reciente como el mío? (§5.4).
@@ -102,6 +119,9 @@ private:
         return votes * 2 > cluster_size();
     }
     [[nodiscard]] std::chrono::milliseconds random_election_timeout();
+
+    /// Tope de entradas por `AppendEntries` (acota el tamaño del mensaje de replicación).
+    static constexpr std::size_t kMaxEntriesPerAppend = 64;
 
     template <class Payload>
     void send(NodeId to, Payload payload) {
@@ -118,7 +138,10 @@ private:
     RaftVolatileState volatile_;
     Epoch leader_epoch_ = 0;
     std::optional<NodeId> leader_id_;
-    std::unordered_set<NodeId> votes_granted_;  ///< Votantes a favor en la elección en curso.
+    /// Votantes a favor en la elección en curso.
+    std::unordered_set<NodeId> votes_granted_;
+    /// Último índice enviado a cada peer en el último `AppendEntries` (solo líder).
+    std::unordered_map<NodeId, Index> last_sent_;
 
     /// Cuándo, sin contacto del líder, pasar a candidato.
     MonoTime election_deadline_;
