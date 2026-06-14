@@ -249,7 +249,14 @@ Harness de benchmark vacío y CI:
     creemos líder, sin mutar estado. Un nodo aislado nunca sube su término → al reincorporarse no
     fuerza el *step-down* del líder vigente. Tests: el sondeo no sube el término, denegación por
     *lease* vigente, concesión sin líder y con log al día, nodo aislado conserva su término.
-  - [ ] **C7b** leadership transfer (`TimeoutNow` + `transfer_leadership`).
+  - [x] **C7b** **leadership transfer** (§3.10). Nuevo RPC `TimeoutNowArgs{term, leader_id}` (con
+    round-trip sobre el codec) y entrada en la `variant` de `RaftMessage`. `transfer_leadership(target)`
+    (solo líder; `Unsupported`/`InvalidArgument` si no): si el objetivo está al día le envía
+    `TimeoutNow`, si va rezagado lo pone al día (`maybe_transfer_to` reusa `replicate_to` y dispara
+    `TimeoutNow` desde `on_append_entries_reply` al alcanzar la cola). `on_timeout_now` arranca una
+    elección **real** inmediata (salta pre-vote y *lease*): el objetivo, con el log al día, gana y el
+    líder anterior cede al ver el término mayor. Tests: error si no es líder, error si el destino no
+    es peer, transferencia con objetivo al día, y con objetivo rezagado que primero alcanza la cola.
   - [ ] **C7c** learners (miembros no votantes: replican sin contar para quorum ni votar).
 - [ ] **C8** Arnés de **simulación determinista** (`tests/sim/`, reloj/red virtuales): elecciones,
   *splits*, failover; invariantes (un líder por término; sin pérdida de *committed*).

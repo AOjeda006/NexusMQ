@@ -225,6 +225,23 @@ expected<AppendEntriesReply> AppendEntriesReply::decode(Decoder& dec) {
         .term = *term, .success = *success != 0, .conflict_index = *conflict_index};
 }
 
+void TimeoutNowArgs::encode(Encoder& enc) const {
+    enc.put_i64(term);
+    enc.put_i32(leader_id);
+}
+
+expected<TimeoutNowArgs> TimeoutNowArgs::decode(Decoder& dec) {
+    auto term = dec.get_i64();
+    if (!term) {
+        return std::unexpected(term.error());
+    }
+    auto leader_id = dec.get_i32();
+    if (!leader_id) {
+        return std::unexpected(leader_id.error());
+    }
+    return TimeoutNowArgs{.term = *term, .leader_id = *leader_id};
+}
+
 void InstallSnapshotArgs::encode(Encoder& enc) const {
     enc.put_i64(term);
     enc.put_i32(leader_id);

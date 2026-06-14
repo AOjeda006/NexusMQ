@@ -48,6 +48,7 @@ void RaftNode::become_follower(MonoTime now, Term term) {
     role_ = RaftRole::Follower;
     volatile_.clear_leader_progress();
     votes_granted_.clear();
+    transfer_target_.reset();
     reset_election_timer(now);
 }
 
@@ -87,6 +88,7 @@ void RaftNode::become_leader(MonoTime now) {
     leader_epoch_ += 1;
     volatile_.reset_leader_progress(peers_, log_.last_index());
     last_sent_.clear();
+    transfer_target_.reset();
     reset_heartbeat_timer(now);
     replicate_all();  // afirma el liderazgo de inmediato (heartbeats).
 }
@@ -147,6 +149,18 @@ void RaftNode::advance_commit_index() {
     }
 }
 
+void RaftNode::maybe_transfer_to(NodeId peer) {
+    if (!transfer_target_.has_value() || *transfer_target_ != peer) {
+        return;
+    }
+    if (volatile_.match_index(peer) >= log_.last_index()) {
+        send(peer, TimeoutNowArgs{.term = persistent_.current_term(), .leader_id = self_});
+        transfer_target_.reset();  // el objetivo está al día: cede el liderazgo.
+    } else {
+        replicate_to(peer);  // sigue empujando hasta ponerlo al día.
+    }
+}
+
 void RaftNode::tick(MonoTime now) {
     if (!started_) {
         started_ = true;
@@ -202,8 +216,10 @@ RequestVoteReply RaftNode::on_request_vote(MonoTime now, const RequestVoteArgs& 
     if (args.term < persistent_.current_term()) {
         return reply;  // candidato obsoleto.
     }
-    const bool can_vote =
-        !persistent_.voted_for().has_value() || *persistent_.voted_for() == args.candidate_id;
+    // Lee el voto una sola vez: comprobar y desreferenciar la misma copia (no dos llamadas a
+    // `voted_for()`, que devuelve por valor) evita bugprone-unchecked-optional-access.
+    const std::optional<NodeId> voted = persistent_.voted_for();
+    const bool can_vote = !voted.has_value() || *voted == args.candidate_id;
     if (can_vote && log_is_up_to_date(args.last_log_index, args.last_log_term)) {
         persistent_.record_vote(args.candidate_id);
         reset_election_timer(now);  // conceder un voto cuenta como contacto válido.
@@ -314,6 +330,7 @@ void RaftNode::on_append_entries_reply(MonoTime now, NodeId from, const AppendEn
         volatile_.set_match_index(from, std::max(volatile_.match_index(from), matched));
         volatile_.set_next_index(from, volatile_.match_index(from) + 1);
         advance_commit_index();
+        maybe_transfer_to(from);  // si hay transferencia pendiente, avanza/dispara TimeoutNow.
         return;
     }
     // Fallo de consistencia: retrocede `next_index` (pista `conflict_index`) y reintenta.
@@ -342,6 +359,28 @@ expected<Index> RaftNode::propose(const RecordBatch& batch) {
     replicate_all();
     advance_commit_index();  // cluster de un nodo: confirma de inmediato.
     return *appended;
+}
+
+expected<void> RaftNode::transfer_leadership(NodeId target) {
+    if (role_ != RaftRole::Leader) {
+        return make_error(ErrorCode::Unsupported, "transfer_leadership: el nodo no es líder");
+    }
+    if (std::ranges::find(peers_, target) == peers_.end()) {
+        return make_error(ErrorCode::InvalidArgument, "transfer_leadership: destino no es un peer");
+    }
+    transfer_target_ = target;
+    maybe_transfer_to(target);  // al día → TimeoutNow; rezagado → replica y espera el ack.
+    return {};
+}
+
+void RaftNode::on_timeout_now(MonoTime now, const TimeoutNowArgs& args) {
+    if (args.term < persistent_.current_term()) {
+        return;  // orden de un líder obsoleto.
+    }
+    if (args.term > persistent_.current_term()) {
+        become_follower(now, args.term);  // adopta el término antes de postularse.
+    }
+    become_candidate(now);  // elección real inmediata: sin pre-vote ni espera de *lease* (§3.10).
 }
 
 std::vector<RaftMessage> RaftNode::take_messages() {

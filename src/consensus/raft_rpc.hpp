@@ -89,6 +89,21 @@ struct AppendEntriesReply {
     bool operator==(const AppendEntriesReply&) const = default;
 };
 
+/// @brief Orden del líder a un seguidor al día para que arranque una elección de inmediato
+///   (*leadership transfer*, §3.10). Afinidad: INMUTABLE.
+/// @details El objetivo inicia una elección **real** (saltándose el *pre-vote* y el *lease*): como
+///   su log está al día, gana enseguida y el líder anterior cede al observar el término mayor.
+struct TimeoutNowArgs {
+    /// Término del líder que transfiere.
+    Term term = 0;
+    /// Líder que cede el liderazgo.
+    NodeId leader_id = 0;
+
+    void encode(Encoder& enc) const;
+    [[nodiscard]] static expected<TimeoutNowArgs> decode(Decoder& dec);
+    bool operator==(const TimeoutNowArgs&) const = default;
+};
+
 /// @brief Transferencia de un snapshot a un seguidor muy rezagado (§7 del paper). Afinidad:
 ///   INMUTABLE.
 struct InstallSnapshotArgs {

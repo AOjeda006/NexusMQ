@@ -112,6 +112,8 @@ void route_messages(nexus::RaftNode& sender, std::vector<NodeBox*>& cluster, nex
         } else if (const auto* append = std::get_if<nexus::AppendEntriesArgs>(&msg.payload)) {
             const auto reply = target->on_append_entries(now, *append);
             sender.on_append_entries_reply(now, msg.to, reply);
+        } else if (const auto* timeout = std::get_if<nexus::TimeoutNowArgs>(&msg.payload)) {
+            target->on_timeout_now(now, *timeout);  // no lleva respuesta.
         }
     }
 }
@@ -359,6 +361,78 @@ TEST(RaftNode, PreVote_NodoAislado_NoSubeTermino) {
     isolated->node->tick(at(6000));
     EXPECT_EQ(isolated->node->role(), nexus::RaftRole::PreCandidate);
     EXPECT_EQ(isolated->node->current_term(), 0);
+}
+
+TEST(RaftNode, TransferenciaDeLiderazgo_NoLider_DevuelveError) {
+    auto box = make_node(1, {2, 3}, "xfererr");
+    box->node->tick(at(0));  // sigue siendo seguidor.
+    const auto result = box->node->transfer_leadership(2);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code(), nexus::ErrorCode::Unsupported);
+}
+
+TEST(RaftNode, TransferenciaDeLiderazgo_DestinoDesconocido_DevuelveError) {
+    auto box = make_node(1, {}, "xferunk");
+    box->node->tick(at(0));
+    box->node->tick(at(2000));  // nodo único: se vuelve líder.
+    ASSERT_TRUE(box->node->is_leader());
+    const auto result = box->node->transfer_leadership(99);  // 99 no es un peer.
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code(), nexus::ErrorCode::InvalidArgument);
+}
+
+TEST(RaftNode, TransferenciaDeLiderazgo_ObjetivoAlDia_SeConvierteEnLider) {
+    auto a = make_node(1, {2, 3}, "xfer");
+    auto b = make_node(2, {1, 3}, "xfer");
+    auto c = make_node(3, {1, 2}, "xfer");
+    std::vector<NodeBox*> cluster{a.get(), b.get(), c.get()};
+    for (NodeBox* box : cluster) {
+        box->node->tick(at(0));
+    }
+    a->node->tick(at(2000));
+    run_rounds(*a->node, cluster, at(2000), 2);  // 1 es líder, término 1.
+    ASSERT_TRUE(a->node->is_leader());
+    route_messages(*a->node, cluster, at(2000));  // heartbeats: match_index de 2 y 3 al día.
+
+    ASSERT_TRUE(a->node->transfer_leadership(2).has_value());
+    route_messages(*a->node, cluster, at(2000));  // entrega TimeoutNow a 2 → se postula.
+    EXPECT_EQ(b->node->role(), nexus::RaftRole::Candidate);
+
+    run_rounds(*b->node, cluster, at(2000), 1);  // 2 conduce su elección real.
+    EXPECT_TRUE(b->node->is_leader());
+    EXPECT_EQ(b->node->current_term(), 2);
+    EXPECT_FALSE(a->node->is_leader());  // 1 cedió al ver el término mayor.
+}
+
+TEST(RaftNode, TransferenciaDeLiderazgo_ObjetivoAtrasado_EsperaAQueAlcance) {
+    auto a = make_node(1, {2, 3}, "xferlag");
+    auto b = make_node(2, {1, 3}, "xferlag");
+    auto c = make_node(3, {1, 2}, "xferlag");
+    std::vector<NodeBox*> cluster{a.get(), b.get(), c.get()};
+    for (NodeBox* box : cluster) {
+        box->node->tick(at(0));
+    }
+    a->node->tick(at(2000));
+    run_rounds(*a->node, cluster, at(2000), 2);  // 1 es líder, término 1.
+    ASSERT_TRUE(a->node->is_leader());
+
+    // Propone una entrada sin replicarla todavía: 2 y 3 quedan rezagados.
+    ASSERT_TRUE(a->node->propose(make_batch(1)).has_value());
+    // Descarta los AppendEntries de la propuesta para que 2 y 3 queden rezagados.
+    const auto discarded = a->node->take_messages();
+    EXPECT_FALSE(discarded.empty());
+
+    // Transferir a 2 (rezagado): queda pendiente hasta que se ponga al día.
+    ASSERT_TRUE(a->node->transfer_leadership(2).has_value());
+    for (int round = 0; round < 4; ++round) {
+        route_messages(*a->node, cluster, at(2000));  // 2 alcanza la cola y recibe TimeoutNow.
+    }
+    EXPECT_EQ(b->rlog->last_index(), 1);
+    EXPECT_EQ(b->node->role(), nexus::RaftRole::Candidate);
+
+    run_rounds(*b->node, cluster, at(2000), 1);
+    EXPECT_TRUE(b->node->is_leader());
+    EXPECT_EQ(b->node->current_term(), 2);
 }
 
 }  // namespace

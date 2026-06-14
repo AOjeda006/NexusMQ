@@ -42,7 +42,9 @@ struct RaftConfig {
 struct RaftMessage {
     NodeId from = 0;
     NodeId to = 0;
-    std::variant<RequestVoteArgs, RequestVoteReply, AppendEntriesArgs, AppendEntriesReply> payload;
+    std::variant<RequestVoteArgs, RequestVoteReply, AppendEntriesArgs, AppendEntriesReply,
+                 TimeoutNowArgs>
+        payload;
 };
 
 /// @brief Réplica de Raft de una partición como **máquina de estados síncrona sin E/S** (ADR-0015).
@@ -55,10 +57,10 @@ struct RaftMessage {
 /// @invariant Roles y términos siguen las reglas de Raft (§5): término monótono; a lo sumo un líder
 ///   por término; un voto por término.
 /// @note Cubre el ciclo completo de réplica: **elección con pre-vote** (§5.2/§9.6), **voto**,
-///   **manejo de `AppendEntries` en el seguidor** con *log matching* (§5.3/§7.11 #5), y la
+///   **manejo de `AppendEntries` en el seguidor** con *log matching* (§5.3/§7.11 #5), la
 ///   **propuesta** del líder con replicación, retroceso de `next_index` por `conflict_index` y
 ///   avance de `commit_index` por mayoría del término actual (§5.4) — `commit_index` es la
-///   *high-watermark*.
+///   *high-watermark* —, y la **transferencia de liderazgo** ordenada vía `TimeoutNow` (§3.10).
 class RaftNode {
 public:
     RaftNode(NodeId self, std::vector<NodeId> peers, RaftLog& log, RaftConfig config);
@@ -73,11 +75,21 @@ public:
     /// @return `Unsupported` si el nodo no es líder; error de E/S si falla el log.
     [[nodiscard]] expected<Index> propose(const RecordBatch& batch);
 
+    /// @brief (Solo líder) Transfiere el liderazgo a @p target de forma ordenada (§3.10).
+    /// @details Si @p target ya está al día, le envía `TimeoutNow` para que se postule ya; si va
+    ///   rezagado, lo pone al día primero y envía `TimeoutNow` al confirmar que alcanzó la cola. El
+    ///   líder cede al observar el término mayor del nuevo líder.
+    /// @return `Unsupported` si el nodo no es líder; `InvalidArgument` si @p target no es un peer.
+    [[nodiscard]] expected<void> transfer_leadership(NodeId target);
+
     /// @brief Procesa un `RequestVote` recibido y devuelve la respuesta (§5.2/§5.4).
     [[nodiscard]] RequestVoteReply on_request_vote(MonoTime now, const RequestVoteArgs& args);
 
     /// @brief Procesa un `AppendEntries` recibido (§5.3/§7.11 #5) y devuelve la respuesta.
     [[nodiscard]] AppendEntriesReply on_append_entries(MonoTime now, const AppendEntriesArgs& args);
+
+    /// @brief Procesa un `TimeoutNow` recibido: arranca una elección real inmediata (§3.10).
+    void on_timeout_now(MonoTime now, const TimeoutNowArgs& args);
 
     /// @brief Procesa la respuesta a un `RequestVote` (cuenta votos → líder).
     void on_request_vote_reply(MonoTime now, NodeId from, const RequestVoteReply& reply);
@@ -118,6 +130,8 @@ private:
     /// (Líder) Avanza `commit_index` al mayor índice replicado en mayoría del término actual
     /// (§5.4).
     void advance_commit_index();
+    /// (Líder) Envía `TimeoutNow` a @p peer si está al día, o sigue replicando si va rezagado.
+    void maybe_transfer_to(NodeId peer);
     /// Aplica las entradas de un `AppendEntries` (saltar coincidentes, truncar conflicto, anexar).
     [[nodiscard]] bool append_entries_from(const std::vector<RaftLogEntry>& entries);
     /// ¿El log `(last_log_index, last_log_term)` es al menos tan reciente como el mío? (§5.4).
@@ -150,6 +164,8 @@ private:
     std::unordered_set<NodeId> votes_granted_;
     /// Último índice enviado a cada peer en el último `AppendEntries` (solo líder).
     std::unordered_map<NodeId, Index> last_sent_;
+    /// Destino de una transferencia de liderazgo en curso (espera a que se ponga al día).
+    std::optional<NodeId> transfer_target_;
 
     /// Cuándo, sin contacto del líder, pasar a candidato.
     MonoTime election_deadline_;

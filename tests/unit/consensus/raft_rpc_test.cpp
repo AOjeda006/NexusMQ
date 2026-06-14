@@ -80,6 +80,13 @@ TEST(AppendEntriesReply, RoundTrip_PreservaConflictIndex) {
     EXPECT_EQ(*decoded, original);
 }
 
+TEST(TimeoutNowArgs, RoundTrip_PreservaCampos) {
+    const nexus::TimeoutNowArgs original{.term = 5, .leader_id = 2};
+    const auto decoded = round_trip(original);
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(*decoded, original);
+}
+
 TEST(InstallSnapshotArgs, RoundTrip_PreservaSnapshot) {
     nexus::InstallSnapshotArgs original;
     original.term = 8;
