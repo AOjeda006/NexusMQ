@@ -236,7 +236,7 @@ Harness de benchmark vacío y CI:
   → `commit_index` es la **high-watermark**. `become_leader`/`tick` replican (heartbeat). Tests:
   `propose` en no-líder da error, nodo único confirma inmediato, réplica a 3 nodos confirma por
   mayoría, seguidor atrasado alcanza la cola por retroceso de `next_index`.
-- **C7** pre-vote, leadership transfer, learners. **Ajuste del desglose (anotado):** el desglose
+- [x] **C7** pre-vote, leadership transfer, learners. **Ajuste del desglose (anotado):** el desglose
   preveía un `election.hpp/.cpp` con firmas de corrutina/transporte (`task<expected<void>>
   transfer(...)`); ADR-0015 eliminó corrutinas y `RaftTransport` del núcleo de consenso, así que
   estas funciones se integran **dentro de `RaftNode`** (la FSM síncrona) en vez de un módulo aparte
@@ -257,7 +257,13 @@ Harness de benchmark vacío y CI:
     elección **real** inmediata (salta pre-vote y *lease*): el objetivo, con el log al día, gana y el
     líder anterior cede al ver el término mayor. Tests: error si no es líder, error si el destino no
     es peer, transferencia con objetivo al día, y con objetivo rezagado que primero alcanza la cola.
-  - [ ] **C7c** learners (miembros no votantes: replican sin contar para quorum ni votar).
+  - [x] **C7c** **learners** (§4.2.1). El ctor de `RaftNode` acepta `learners` (subconjunto de
+    `peers`): el líder les replica (`replicate_all` no cambia), pero `is_voter` los excluye del
+    quórum (`cluster_size` cuenta solo votantes; `advance_commit_index` ignora su `match_index`), no
+    se les pide voto (`broadcast_request_vote`) ni se cuentan sus votos, un learner-self nunca se
+    postula (`tick`/`on_timeout_now`) y no es destino válido de transferencia. Tests: el learner no
+    se autoelige, recibe replicación pero su ack no confirma (sí lo hace el del votante), y rechazo
+    de transferencia hacia un learner.
 - [ ] **C8** Arnés de **simulación determinista** (`tests/sim/`, reloj/red virtuales): elecciones,
   *splits*, failover; invariantes (un líder por término; sin pérdida de *committed*).
 - [ ] **C9** `nexus-broker`: integrar Raft en `Partition`; `acks=quorum`;

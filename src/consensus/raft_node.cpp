@@ -16,9 +16,11 @@
 
 namespace nexus {
 
-RaftNode::RaftNode(NodeId self, std::vector<NodeId> peers, RaftLog& log, RaftConfig config)
+RaftNode::RaftNode(NodeId self, std::vector<NodeId> peers, RaftLog& log, RaftConfig config,
+                   std::vector<NodeId> learners)
     : self_(self),
       peers_(std::move(peers)),
+      learners_(std::move(learners)),
       log_(log),
       config_(config),
       rng_(static_cast<std::minstd_rand::result_type>(config.random_seed +
@@ -103,7 +105,9 @@ void RaftNode::broadcast_request_vote(bool pre_vote) {
                                .last_log_term = log_.last_term(),
                                .pre_vote = pre_vote};
     for (const NodeId peer : peers_) {
-        send(peer, args);
+        if (is_voter(peer)) {
+            send(peer, args);  // a los learners no se les pide voto (§4.2.1).
+        }
     }
 }
 
@@ -130,16 +134,21 @@ void RaftNode::replicate_all() {
 }
 
 void RaftNode::advance_commit_index() {
-    // Índice replicado en mayoría: ordena los match_index (incluido el propio = last_index) y toma
-    // el de la posición de la mayoría. Solo se confirma si la entrada es del término actual (§5.4).
+    // Índice replicado en mayoría: ordena los match_index de los **votantes** (incluido el propio =
+    // last_index; los learners no cuentan) y toma el de la posición de la mayoría. Solo se confirma
+    // si la entrada es del término actual (§5.4).
     std::vector<Index> matches;
     matches.reserve(cluster_size());
-    matches.push_back(log_.last_index());
+    if (is_voter(self_)) {
+        matches.push_back(log_.last_index());
+    }
     for (const NodeId peer : peers_) {
-        matches.push_back(volatile_.match_index(peer));
+        if (is_voter(peer)) {
+            matches.push_back(volatile_.match_index(peer));
+        }
     }
     std::ranges::sort(matches, std::ranges::greater{});
-    const Index candidate = matches[cluster_size() / 2];
+    const Index candidate = matches[matches.size() / 2];
     if (candidate <= volatile_.commit_index()) {
         return;
     }
@@ -174,8 +183,8 @@ void RaftNode::tick(MonoTime now) {
         }
         return;
     }
-    if (now >= election_deadline_) {
-        start_pre_election(now);  // pre-vote antes de subir el término (§9.6).
+    if (now >= election_deadline_ && is_voter(self_)) {
+        start_pre_election(now);  // pre-vote antes de subir el término (§9.6); los learners no.
     }
 }
 
@@ -235,7 +244,7 @@ void RaftNode::on_request_vote_reply(MonoTime now, NodeId from, const RequestVot
         return;
     }
     if (role_ == RaftRole::PreCandidate) {
-        if (reply.term == persistent_.current_term() && reply.vote_granted) {
+        if (reply.term == persistent_.current_term() && reply.vote_granted && is_voter(from)) {
             votes_granted_.insert(from);
             if (has_majority(votes_granted_.size())) {
                 become_candidate(now);  // pre-votos en mayoría: arranca la elección real.
@@ -246,7 +255,7 @@ void RaftNode::on_request_vote_reply(MonoTime now, NodeId from, const RequestVot
     if (role_ != RaftRole::Candidate || reply.term != persistent_.current_term()) {
         return;  // respuesta obsoleta o ya no somos candidatos.
     }
-    if (reply.vote_granted) {
+    if (reply.vote_granted && is_voter(from)) {
         votes_granted_.insert(from);
         if (has_majority(votes_granted_.size())) {
             become_leader(now);
@@ -368,14 +377,17 @@ expected<void> RaftNode::transfer_leadership(NodeId target) {
     if (std::ranges::find(peers_, target) == peers_.end()) {
         return make_error(ErrorCode::InvalidArgument, "transfer_leadership: destino no es un peer");
     }
+    if (!is_voter(target)) {
+        return make_error(ErrorCode::InvalidArgument, "transfer_leadership: destino es un learner");
+    }
     transfer_target_ = target;
     maybe_transfer_to(target);  // al día → TimeoutNow; rezagado → replica y espera el ack.
     return {};
 }
 
 void RaftNode::on_timeout_now(MonoTime now, const TimeoutNowArgs& args) {
-    if (args.term < persistent_.current_term()) {
-        return;  // orden de un líder obsoleto.
+    if (args.term < persistent_.current_term() || !is_voter(self_)) {
+        return;  // orden de un líder obsoleto, o somos un learner (no nos postulamos).
     }
     if (args.term > persistent_.current_term()) {
         become_follower(now, args.term);  // adopta el término antes de postularse.

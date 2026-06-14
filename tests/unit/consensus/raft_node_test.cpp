@@ -52,7 +52,8 @@ struct NodeBox {
 };
 
 std::unique_ptr<NodeBox> make_node(nexus::NodeId id, std::vector<nexus::NodeId> peers,
-                                   const std::string& tag) {
+                                   const std::string& tag,
+                                   std::vector<nexus::NodeId> learners = {}) {
     auto box = std::make_unique<NodeBox>();
     box->dir = std::make_unique<TempDir>(tag + "_" + std::to_string(id));
     auto plog = nexus::PartitionLog::open(box->dir->log_dir(), nexus::LogConfig{});
@@ -63,7 +64,8 @@ std::unique_ptr<NodeBox> make_node(nexus::NodeId id, std::vector<nexus::NodeId> 
     box->rlog = std::make_unique<nexus::RaftLog>(std::move(*rlog));
     nexus::RaftConfig cfg;
     cfg.random_seed = 7;
-    box->node = std::make_unique<nexus::RaftNode>(id, std::move(peers), *box->rlog, cfg);
+    box->node = std::make_unique<nexus::RaftNode>(id, std::move(peers), *box->rlog, cfg,
+                                                  std::move(learners));
     return box;
 }
 
@@ -433,6 +435,74 @@ TEST(RaftNode, TransferenciaDeLiderazgo_ObjetivoAtrasado_EsperaAQueAlcance) {
     run_rounds(*b->node, cluster, at(2000), 1);
     EXPECT_TRUE(b->node->is_leader());
     EXPECT_EQ(b->node->current_term(), 2);
+}
+
+TEST(RaftNode, Learner_SelfNoSeAutoelige) {
+    auto c = make_node(3, {1, 2}, "learnself", {3});  // el nodo 3 es learner.
+    c->node->tick(at(0));
+    c->node->tick(at(5000));  // un votante se postularía aquí; el learner no.
+    EXPECT_EQ(c->node->role(), nexus::RaftRole::Follower);
+    EXPECT_EQ(c->node->current_term(), 0);
+}
+
+TEST(RaftNode, Learner_RecibeReplicacionPeroNoCuentaParaElQuorum) {
+    // Clúster: votantes {1, 2} y learner {3}. Mayoría = 2 votantes.
+    auto a = make_node(1, {2, 3}, "learnq", {3});
+    auto b = make_node(2, {1, 3}, "learnq", {3});
+    auto c = make_node(3, {1, 2}, "learnq", {3});
+    std::vector<NodeBox*> cluster{a.get(), b.get(), c.get()};
+    for (NodeBox* box : cluster) {
+        box->node->tick(at(0));
+    }
+    a->node->tick(at(2000));
+    run_rounds(*a->node, cluster, at(2000), 2);  // 1 es líder con el voto de 2 (a 3 no se le pide).
+    ASSERT_TRUE(a->node->is_leader());
+    route_messages(*a->node, cluster, at(2000));  // heartbeats: 2 y 3 quedan con match 0.
+
+    ASSERT_TRUE(a->node->propose(make_batch(1)).has_value());
+    const auto msgs = a->node->take_messages();  // AppendEntries pendientes para 2 y 3.
+
+    // Solo el learner (3) confirma: NO debe avanzar el commit (no cuenta para el quórum).
+    for (const nexus::RaftMessage& msg : msgs) {
+        if (msg.to != 3) {
+            continue;
+        }
+        const auto* append = std::get_if<nexus::AppendEntriesArgs>(&msg.payload);
+        ASSERT_NE(append, nullptr);
+        const auto reply = c->node->on_append_entries(at(2010), *append);
+        a->node->on_append_entries_reply(at(2010), 3, reply);
+    }
+    EXPECT_EQ(c->rlog->last_index(), 1);    // el learner sí recibe la replicación.
+    EXPECT_EQ(a->node->commit_index(), 0);  // pero su ack no confirma nada.
+
+    // Ahora confirma el votante (2): se alcanza la mayoría y avanza el commit.
+    for (const nexus::RaftMessage& msg : msgs) {
+        if (msg.to != 2) {
+            continue;
+        }
+        const auto* append = std::get_if<nexus::AppendEntriesArgs>(&msg.payload);
+        ASSERT_NE(append, nullptr);
+        const auto reply = b->node->on_append_entries(at(2010), *append);
+        a->node->on_append_entries_reply(at(2010), 2, reply);
+    }
+    EXPECT_EQ(a->node->commit_index(), 1);
+}
+
+TEST(RaftNode, Learner_NoEsDestinoValidoDeTransferencia) {
+    auto a = make_node(1, {2, 3}, "learnxfer", {3});
+    auto b = make_node(2, {1, 3}, "learnxfer", {3});
+    auto c = make_node(3, {1, 2}, "learnxfer", {3});
+    std::vector<NodeBox*> cluster{a.get(), b.get(), c.get()};
+    for (NodeBox* box : cluster) {
+        box->node->tick(at(0));
+    }
+    a->node->tick(at(2000));
+    run_rounds(*a->node, cluster, at(2000), 2);
+    ASSERT_TRUE(a->node->is_leader());
+
+    const auto result = a->node->transfer_leadership(3);  // 3 es learner.
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code(), nexus::ErrorCode::InvalidArgument);
 }
 
 }  // namespace

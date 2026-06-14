@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -60,10 +61,15 @@ struct RaftMessage {
 ///   **manejo de `AppendEntries` en el seguidor** con *log matching* (§5.3/§7.11 #5), la
 ///   **propuesta** del líder con replicación, retroceso de `next_index` por `conflict_index` y
 ///   avance de `commit_index` por mayoría del término actual (§5.4) — `commit_index` es la
-///   *high-watermark* —, y la **transferencia de liderazgo** ordenada vía `TimeoutNow` (§3.10).
+///   *high-watermark* —, la **transferencia de liderazgo** ordenada vía `TimeoutNow` (§3.10) y
+///   miembros **learner** no votantes (§4.2.1: replican sin contar para el quórum ni votar).
 class RaftNode {
 public:
-    RaftNode(NodeId self, std::vector<NodeId> peers, RaftLog& log, RaftConfig config);
+    /// @param learners Subconjunto de @p peers que son **no votantes** (§4.2.1): el líder les
+    ///   replica el log, pero no cuentan para el quórum, no se les pide voto y, si el propio nodo
+    ///   es learner, nunca se postula.
+    RaftNode(NodeId self, std::vector<NodeId> peers, RaftLog& log, RaftConfig config,
+             std::vector<NodeId> learners = {});
 
     /// @brief Avanza el reloj lógico a @p now: vence *election*/*heartbeat* y dispara transiciones.
     void tick(MonoTime now);
@@ -136,7 +142,18 @@ private:
     [[nodiscard]] bool append_entries_from(const std::vector<RaftLogEntry>& entries);
     /// ¿El log `(last_log_index, last_log_term)` es al menos tan reciente como el mío? (§5.4).
     [[nodiscard]] bool log_is_up_to_date(Index last_log_index, Term last_log_term) const;
-    [[nodiscard]] std::size_t cluster_size() const noexcept { return peers_.size() + 1; }
+    /// ¿@p node es un miembro **votante** (no figura en `learners_`)?
+    [[nodiscard]] bool is_voter(NodeId node) const {
+        return std::ranges::find(learners_, node) == learners_.end();
+    }
+    /// Número de miembros **votantes** del clúster (self + peers, excluyendo learners).
+    [[nodiscard]] std::size_t cluster_size() const noexcept {
+        std::size_t voters = is_voter(self_) ? 1 : 0;
+        for (const NodeId peer : peers_) {
+            voters += is_voter(peer) ? 1 : 0;
+        }
+        return voters;
+    }
     [[nodiscard]] bool has_majority(std::size_t votes) const noexcept {
         return votes * 2 > cluster_size();
     }
@@ -152,6 +169,8 @@ private:
 
     NodeId self_;
     std::vector<NodeId> peers_;
+    /// Peers no votantes (§4.2.1): replican el log pero no cuentan para el quórum ni votan.
+    std::vector<NodeId> learners_;
     RaftLog& log_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     RaftConfig config_;
 
