@@ -188,6 +188,8 @@ private:
 
     /// Cuándo, sin contacto del líder, pasar a candidato.
     MonoTime election_deadline_;
+    /// Último contacto válido de un líder (`AppendEntries`); base del *lease* del pre-vote (§9.6).
+    MonoTime last_leader_contact_;
     /// Cuándo el líder debe emitir el próximo *heartbeat*.
     MonoTime heartbeat_deadline_;
     /// El primer `tick` arma el temporizador sin disparar.

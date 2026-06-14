@@ -264,8 +264,17 @@ Harness de benchmark vacío y CI:
     postula (`tick`/`on_timeout_now`) y no es destino válido de transferencia. Tests: el learner no
     se autoelige, recibe replicación pero su ack no confirma (sí lo hace el del votante), y rechazo
     de transferencia hacia un learner.
-- [ ] **C8** Arnés de **simulación determinista** (`tests/sim/`, reloj/red virtuales): elecciones,
-  *splits*, failover; invariantes (un líder por término; sin pérdida de *committed*).
+- [x] **C8** Arnés de **simulación determinista** (`tests/sim/raft_sim.hpp`): `VirtualClock`
+  (avanza solo bajo control) + `Cluster` con red virtual (latencia fija; las respuestas de `on_*`
+  también viajan por la red) y fallos inyectables (`partition`/`heal`, `crash`/`restart`). En cada
+  paso comprueba invariantes de seguridad: **a lo sumo un líder por término** (§5.2) y **las
+  entradas confirmadas no divergen** (§5.4). Escenarios: elección a 5 nodos converge a un líder;
+  failover al caer el líder (emerge otro en término mayor); propuesta replicada y confirmada en el
+  clúster; partición que aísla a la minoría (con pre-vote no infla su término ni disrumpe; la
+  mayoría conserva su líder; sana y converge). **El arnés detectó un bug real del pre-vote (C7a):**
+  el *lease* se comprobaba contra `election_deadline_` (siempre armado), bloqueando la elección
+  inicial; ahora se rastrea `last_leader_contact_` (solo `AppendEntries` válido) y se concede el
+  pre-voto si no hubo contacto de líder en un *election timeout* — justifica el valor del arnés.
 - [ ] **C9** `nexus-broker`: integrar Raft en `Partition`; `acks=quorum`;
   high-watermark = `commit_index`.
 - [ ] **C10** grupos de consumidores + rebalanceo (`JoinGroup`/`SyncGroup`/`Heartbeat`/`LeaveGroup`).

@@ -205,8 +205,10 @@ RequestVoteReply RaftNode::make_pre_vote_reply(MonoTime now, const RequestVoteAr
     if (role_ == RaftRole::Leader) {
         return reply;  // nos creemos líder: no respaldamos a un retador.
     }
-    if (now < election_deadline_) {
-        return reply;  // *lease*: hubo contacto reciente con el líder, no disrumpir.
+    // *Lease* del líder (§9.6): solo deniega si hubo contacto con un líder dentro del último
+    // election timeout. Si nunca se ha oído a un líder (arranque/failover), se concede el pre-voto.
+    if (now - last_leader_contact_ < config_.election_timeout_min) {
+        return reply;  // contacto reciente con el líder: no disrumpir.
     }
     if (log_is_up_to_date(args.last_log_index, args.last_log_term)) {
         reply.vote_granted = true;
@@ -300,6 +302,7 @@ AppendEntriesReply RaftNode::on_append_entries(MonoTime now, const AppendEntries
     }
     leader_id_ = args.leader_id;
     reset_election_timer(now);
+    last_leader_contact_ = now;  // contacto válido del líder: base del *lease* del pre-vote (§9.6).
     reply.term = persistent_.current_term();
 
     // Chequeo de consistencia del log (§7.11 #5).
