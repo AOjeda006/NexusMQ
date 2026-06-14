@@ -4,9 +4,13 @@
 
 #include "broker/request_router.hpp"
 
+#include <chrono>
 #include <cstddef>
 #include <utility>
+#include <vector>
 
+#include "broker/consumer_group.hpp"
+#include "broker/group_coordinator.hpp"
 #include "broker/partition.hpp"
 #include "broker/topic.hpp"
 #include "common/record.hpp"
@@ -76,6 +80,91 @@ OffsetFetchResponse handle_offset_fetch(const OffsetManager& offsets, Decoder& b
     return resp;
 }
 
+JoinGroupResponse handle_join_group(GroupCoordinator& groups, MonoTime now, Decoder& body) {
+    expected<JoinGroupRequest> req = JoinGroupRequest::decode(body);
+    JoinGroupResponse resp;
+    if (!req) {
+        resp.error_code = WireError::InvalidRequest;
+        return resp;
+    }
+    const expected<JoinResult> result =
+        groups.join(now, req->group, std::move(req->member_id), std::move(req->subscription),
+                    std::chrono::milliseconds{req->session_timeout_ms});
+    if (!result) {
+        resp.error_code = from_error(result.error());
+        return resp;
+    }
+    resp.generation = result->generation;
+    resp.member_id = result->member_id;
+    resp.leader_id = result->leader_id;
+    resp.is_leader = result->is_leader;
+    resp.members.reserve(result->members.size());
+    for (const MemberInfo& member : result->members) {
+        resp.members.push_back(
+            GroupMember{.member_id = member.member_id, .subscription = member.subscription});
+    }
+    return resp;
+}
+
+SyncGroupResponse handle_sync_group(GroupCoordinator& groups, MonoTime now, Decoder& body) {
+    const expected<SyncGroupRequest> req = SyncGroupRequest::decode(body);
+    SyncGroupResponse resp;
+    if (!req) {
+        resp.error_code = WireError::InvalidRequest;
+        return resp;
+    }
+    std::vector<MemberAssignment> assignments;
+    assignments.reserve(req->assignments.size());
+    for (const GroupAssignment& entry : req->assignments) {
+        assignments.push_back(
+            MemberAssignment{.member_id = entry.member_id, .assignment = entry.assignment});
+    }
+    const expected<SyncResult> result =
+        groups.sync(now, req->group, req->member_id, req->generation, assignments);
+    if (!result) {
+        resp.error_code = from_error(result.error());
+        return resp;
+    }
+    if (!result->assigned) {
+        resp.error_code = WireError::RebalanceInProgress;  // el líder aún no repartió: reintentar.
+        return resp;
+    }
+    resp.assignment = result->assignment;
+    return resp;
+}
+
+HeartbeatResponse handle_heartbeat(GroupCoordinator& groups, MonoTime now, Decoder& body) {
+    const expected<HeartbeatRequest> req = HeartbeatRequest::decode(body);
+    HeartbeatResponse resp;
+    if (!req) {
+        resp.error_code = WireError::InvalidRequest;
+        return resp;
+    }
+    const expected<HeartbeatStatus> status =
+        groups.heartbeat(now, req->group, req->member_id, req->generation);
+    if (!status) {
+        resp.error_code = from_error(status.error());
+        return resp;
+    }
+    if (*status == HeartbeatStatus::RebalanceInProgress) {
+        resp.error_code = WireError::RebalanceInProgress;
+    }
+    return resp;
+}
+
+LeaveGroupResponse handle_leave_group(GroupCoordinator& groups, Decoder& body) {
+    const expected<LeaveGroupRequest> req = LeaveGroupRequest::decode(body);
+    LeaveGroupResponse resp;
+    if (!req) {
+        resp.error_code = WireError::InvalidRequest;
+        return resp;
+    }
+    if (const expected<void> left = groups.leave(req->group, req->member_id); !left) {
+        resp.error_code = from_error(left.error());
+    }
+    return resp;
+}
+
 MetadataResponse handle_metadata(TopicManager& topics, NodeId node_id, const std::string& host,
                                  std::uint16_t port, const MetadataRequest& req) {
     MetadataResponse resp;
@@ -115,6 +204,10 @@ std::vector<ApiVersionRange> RequestRouter::supported_versions() {
         ApiVersionRange{.key = ApiKey::DeleteTopic, .min = 0, .max = 0},
         ApiVersionRange{.key = ApiKey::OffsetCommit, .min = 0, .max = 0},
         ApiVersionRange{.key = ApiKey::OffsetFetch, .min = 0, .max = 0},
+        ApiVersionRange{.key = ApiKey::JoinGroup, .min = 0, .max = 0},
+        ApiVersionRange{.key = ApiKey::SyncGroup, .min = 0, .max = 0},
+        ApiVersionRange{.key = ApiKey::Heartbeat, .min = 0, .max = 0},
+        ApiVersionRange{.key = ApiKey::LeaveGroup, .min = 0, .max = 0},
     };
 }
 
@@ -203,11 +296,22 @@ expected<void> RequestRouter::dispatch(ApiKey key, std::uint16_t /*api_version*/
             handle_offset_fetch(offsets_, body).encode(enc);
             return {};
         }
-        case ApiKey::JoinGroup:
-        case ApiKey::SyncGroup:
-        case ApiKey::Heartbeat:
-        case ApiKey::LeaveGroup:
-            return make_error(ErrorCode::Unsupported, "ApiKey aún no soportada en este nodo");
+        case ApiKey::JoinGroup: {
+            handle_join_group(groups_, std::chrono::steady_clock::now(), body).encode(enc);
+            return {};
+        }
+        case ApiKey::SyncGroup: {
+            handle_sync_group(groups_, std::chrono::steady_clock::now(), body).encode(enc);
+            return {};
+        }
+        case ApiKey::Heartbeat: {
+            handle_heartbeat(groups_, std::chrono::steady_clock::now(), body).encode(enc);
+            return {};
+        }
+        case ApiKey::LeaveGroup: {
+            handle_leave_group(groups_, body).encode(enc);
+            return {};
+        }
     }
     return make_error(ErrorCode::InvalidArgument, "ApiKey desconocida");
 }

@@ -233,14 +233,95 @@ TEST(RequestRouter, OffsetFetch_SinCommit_DevuelveMenosUno) {
     EXPECT_EQ(fresp->offset, -1);
 }
 
-TEST(RequestRouter, ApiKeyNoSoportada_DevuelveError) {
+TEST(RequestRouter, JoinSyncHeartbeatLeave_FlujoDeGrupo) {
+    TempDir dir{"group"};
+    nexus::TopicManager topics{dir.path()};
+    nexus::RequestRouter router{topics, 0, "127.0.0.1", 9092};
+
+    // Join: alta de un consumidor nuevo (id vacío) → líder de la generación 1.
+    nexus::Buffer jbody = encode_request(nexus::JoinGroupRequest{
+        .group = "g", .member_id = "", .session_timeout_ms = 30000, .subscription = {}});
+    nexus::Decoder jdec{jbody.as_span()};
+    nexus::Buffer jout;
+    ASSERT_TRUE(router.dispatch(nexus::ApiKey::JoinGroup, 0, jdec, jout).has_value());
+    nexus::Decoder jresp_dec{jout.as_span()};
+    const nexus::expected<nexus::JoinGroupResponse> jresp =
+        nexus::JoinGroupResponse::decode(jresp_dec);
+    ASSERT_TRUE(jresp.has_value());
+    EXPECT_EQ(jresp->error_code, nexus::WireError::None);
+    EXPECT_EQ(jresp->generation, 1);
+    EXPECT_TRUE(jresp->is_leader);
+    EXPECT_EQ(jresp->member_id, "g-1");
+    ASSERT_EQ(jresp->members.size(), 1U);
+
+    // Sync: el líder se reparte una asignación a sí mismo y la recibe de vuelta.
+    nexus::SyncGroupRequest sreq;
+    sreq.group = "g";
+    sreq.member_id = jresp->member_id;
+    sreq.generation = jresp->generation;
+    sreq.assignments.push_back({.member_id = jresp->member_id, .assignment = {std::byte{0x1}}});
+    nexus::Buffer sbody = encode_request(sreq);
+    nexus::Decoder sdec{sbody.as_span()};
+    nexus::Buffer sout;
+    ASSERT_TRUE(router.dispatch(nexus::ApiKey::SyncGroup, 0, sdec, sout).has_value());
+    nexus::Decoder sresp_dec{sout.as_span()};
+    const nexus::expected<nexus::SyncGroupResponse> sresp =
+        nexus::SyncGroupResponse::decode(sresp_dec);
+    ASSERT_TRUE(sresp.has_value());
+    EXPECT_EQ(sresp->error_code, nexus::WireError::None);
+    EXPECT_EQ(sresp->assignment, (std::vector<std::byte>{std::byte{0x1}}));
+
+    // Heartbeat: grupo estable → None.
+    nexus::Buffer hbody = encode_request(nexus::HeartbeatRequest{
+        .group = "g", .member_id = jresp->member_id, .generation = jresp->generation});
+    nexus::Decoder hdec{hbody.as_span()};
+    nexus::Buffer hout;
+    ASSERT_TRUE(router.dispatch(nexus::ApiKey::Heartbeat, 0, hdec, hout).has_value());
+    nexus::Decoder hresp_dec{hout.as_span()};
+    const nexus::expected<nexus::HeartbeatResponse> hresp =
+        nexus::HeartbeatResponse::decode(hresp_dec);
+    ASSERT_TRUE(hresp.has_value());
+    EXPECT_EQ(hresp->error_code, nexus::WireError::None);
+
+    // Leave: baja del único miembro → None.
+    nexus::Buffer lbody =
+        encode_request(nexus::LeaveGroupRequest{.group = "g", .member_id = jresp->member_id});
+    nexus::Decoder ldec{lbody.as_span()};
+    nexus::Buffer lout;
+    ASSERT_TRUE(router.dispatch(nexus::ApiKey::LeaveGroup, 0, ldec, lout).has_value());
+    nexus::Decoder lresp_dec{lout.as_span()};
+    const nexus::expected<nexus::LeaveGroupResponse> lresp =
+        nexus::LeaveGroupResponse::decode(lresp_dec);
+    ASSERT_TRUE(lresp.has_value());
+    EXPECT_EQ(lresp->error_code, nexus::WireError::None);
+}
+
+TEST(RequestRouter, Heartbeat_GrupoDesconocido_DevuelveError) {
+    TempDir dir{"ghost"};
+    nexus::TopicManager topics{dir.path()};
+    nexus::RequestRouter router{topics, 0, "127.0.0.1", 9092};
+
+    nexus::Buffer body = encode_request(
+        nexus::HeartbeatRequest{.group = "fantasma", .member_id = "m", .generation = 1});
+    nexus::Decoder dec{body.as_span()};
+    nexus::Buffer out;
+    ASSERT_TRUE(router.dispatch(nexus::ApiKey::Heartbeat, 0, dec, out).has_value());
+    nexus::Decoder resp_dec{out.as_span()};
+    const nexus::expected<nexus::HeartbeatResponse> resp =
+        nexus::HeartbeatResponse::decode(resp_dec);
+    ASSERT_TRUE(resp.has_value());
+    EXPECT_EQ(resp->error_code, nexus::WireError::UnknownTopicOrPartition);
+}
+
+TEST(RequestRouter, ApiKeyDesconocida_DevuelveError) {
     TempDir dir{"unsup"};
     nexus::TopicManager topics{dir.path()};
     nexus::RequestRouter router{topics, 0, "127.0.0.1", 9092};
     nexus::Buffer body;
     nexus::Decoder dec{body.as_span()};
     nexus::Buffer out;
-    EXPECT_FALSE(router.dispatch(nexus::ApiKey::JoinGroup, 0, dec, out).has_value());
+    const auto unknown = static_cast<nexus::ApiKey>(0xFFFF);
+    EXPECT_FALSE(router.dispatch(unknown, 0, dec, out).has_value());
 }
 
 }  // namespace

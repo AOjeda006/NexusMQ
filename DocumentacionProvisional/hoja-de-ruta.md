@@ -286,8 +286,8 @@ Harness de benchmark vacío y CI:
   reloj y red virtuales: nodo único confirma al proponer; 3 nodos no avanzan el high-watermark hasta
   el quórum y los seguidores se ponen al día; no-líder → `Unsupported`; idempotencia duplicado/hueco.
   El **cambio en caliente** del broker (con transporte real) se difiere a **C11**.
-- [ ] **C10** grupos de consumidores + rebalanceo (`JoinGroup`/`SyncGroup`/`Heartbeat`/`LeaveGroup`).
-  Se subdivide en incrementos pequeños:
+- [x] **C10** grupos de consumidores + rebalanceo (`JoinGroup`/`SyncGroup`/`Heartbeat`/`LeaveGroup`).
+  Se subdividió en incrementos pequeños:
   - [x] **C10a** `broker/consumer_group.{hpp,cpp}` — `ConsumerGroup`, FSM de membresía **síncrona y
     sin E/S** (mismo principio que `RaftNode`, ADR-0015: reloj inyectado `MonoTime now`, expiración de
     sesión en `tick`, deterministas). Protocolo *eager* generacional: estados
@@ -304,8 +304,16 @@ Harness de benchmark vacío y CI:
     `MemberAssignment` del dominio). `encode`/`decode` sobre el codec (suscripciones/asignaciones como
     `bytes`; listas con `varint`+elementos; `error_code:i16`). Tests de round-trip (con miembros y
     asignaciones) y de `decode` truncado en `messages_test.cpp`.
-  - [ ] **C10c** `GroupCoordinator` (posee los grupos por id) + cableado en `RequestRouter`
-    (traducción wire↔dominio en el borde) + e2e de cliente.
+  - [x] **C10c** `broker/group_coordinator.{hpp,cpp}` — `GroupCoordinator` (REACTOR-LOCAL): mapa
+    `group_id → ConsumerGroup`; `join` **crea** el grupo (alta del primer consumidor), el resto exige
+    grupo existente (`NotFound`); `tick(now)` expira sesiones de todos los grupos. Cableado en
+    `RequestRouter` (lo **posee**, como a `OffsetManager`): despacha `JoinGroup`/`SyncGroup`/
+    `Heartbeat`/`LeaveGroup` traduciendo wire↔dominio en el borde — `GroupMember`/`GroupAssignment`
+    ↔ `MemberInfo`/`MemberAssignment`, errores con `from_error`, y `RebalanceInProgress`/seguidor sin
+    asignación → `WireError::RebalanceInProgress`. El reloj se toma del `steady_clock` en el borde
+    (Fase 1b síncrona; el reactor lo inyectará y conducirá `tick` en C11). Tests: flujo
+    join→sync→heartbeat→leave en el router, heartbeat a grupo desconocido, `ApiKey` desconocida, y
+    unidades del coordinador (crea en join, `NotFound`, expiración por `tick`).
 - [ ] **C11** cross-core message passing / routing de particiones multi-reactor.
 - [ ] **C12** Tests **chaos** (`tc netem`) → failover y postura **CP**; cierre de Fase 2.
 

@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "broker/group_coordinator.hpp"
 #include "broker/offset_manager.hpp"
 #include "broker/topic_manager.hpp"
 #include "common/bytes.hpp"
@@ -47,6 +48,8 @@ private:
     std::uint16_t port_;
     /// Offsets confirmados por grupo (REACTOR-LOCAL: uno por router/reactor; ver `OffsetManager`).
     OffsetManager offsets_;
+    /// Membresía de los grupos de consumidores (REACTOR-LOCAL; ver `GroupCoordinator`).
+    GroupCoordinator groups_;
 };
 
 }  // namespace nexus
