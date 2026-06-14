@@ -176,13 +176,43 @@ Harness de benchmark vacío y CI:
 
 ---
 
-## Fase 2 — Distribución (Raft por partición) *(no empezar hasta cerrar 1b)*
+## Fase 2 — Distribución (Raft por partición) *(EN CURSO)*
 
-> Targets: `nexus-consensus`; `nexus-broker` distribuido. Tests: sim/chaos.
+> Targets: `nexus-consensus` (Raft); `nexus-broker` distribuido. Tests: unit/property/sim/chaos.
+> Deps de `nexus-consensus` (desglose §4.6): common, storage, protocol.
+>
+> **Convenciones fijadas en C1 (vinculantes para la fase):** índices de Raft **1-based** con
+> centinela `0` ("antes de la primera entrada"; casa con el pseudocódigo §7.11 #5
+> `log[prevLogIndex]`); el mapeo a `Offset` 0-based del `PartitionLog` es `offset = index - 1` y
+> vive en `RaftLog` (C3). `RaftLogEntry` **posee** su `payload` (tipo de valor, como `RecordBatch`;
+> el desglose preveía `ByteSpan`). `RaftRole` se eleva a `raft_state.hpp` (vocabulario compartido).
 
-- [ ] `nexus-consensus`: `RaftPersistentState`/`RaftVolatileState`/`RaftLogEntry`/`Snapshot`; `raft_rpc` (RequestVote/AppendEntries/InstallSnapshot); `RaftLog` (sobre PartitionLog); `RaftNode` (FSM, `propose`/`on_append_entries`/`on_request_vote`/`tick`); `election` (pre-vote, leadership transfer, learners).
-- [ ] `nexus-broker`: integrar Raft en `Partition`; `acks=quorum`; high-watermark = commitIndex; grupos de consumidores + rebalanceo; cross-core message passing.
-- [ ] Tests: **simulación determinista** (reloj/red virtuales) de elecciones y *splits*; **chaos** (`tc netem`) → failover y postura **CP**.
+- [x] **C1** `consensus/raft_state.hpp/.cpp` — tipos de estado de Raft: `RaftRole`
+  (`Follower`/`Candidate`/`Leader`), `RaftEntryType` (`Data`/`Config`), `RaftLogEntry`
+  (`term,index,type,payload` propietario), `Snapshot` (`last_included_index/_term, state`),
+  `RaftPersistentState` (`current_term`/`voted_for` con invariantes: término monótono, un voto por
+  término — `advance_term` resetea el voto) y `RaftVolatileState` (`commit_index`/`last_applied` +
+  progreso de líder `next_index`/`match_index` por peer). Nuevo target `nexus-consensus` (STATIC).
+  Tests unit de los invariantes. **Persistencia en disco (`persist`/`load`) diferida** a un
+  incremento posterior (la simulación determinista opera en memoria).
+- [ ] **C2** `consensus/raft_rpc.hpp` — `RequestVoteArgs/Reply`, `AppendEntriesArgs/Reply`,
+  `InstallSnapshotArgs/Reply` con `encode`/`decode` sobre el codec de `nexus-protocol`
+  (round-trip property-based).
+- [ ] **C3** `consensus/raft_log.hpp/.cpp` — `RaftLog` (vista `(term,index)` sobre `PartitionLog`):
+  `append`/`truncate_from`/`term_at`/`last_index`/`last_term`/`entries_from`.
+- [ ] **C4** `consensus/raft_node.hpp/.cpp` — `RaftNode` FSM: elección (`tick`, `become_*`),
+  `on_request_vote`, `on_append_entries`; puerto `RaftTransport`. Tests deterministas (reloj
+  virtual + transporte doble).
+- [ ] **C5** `propose` + replicación (`replicate_to`, `advance_commit_index`, `apply_committed`);
+  `commit_index` → high-watermark.
+- [ ] **C6** `consensus/election.hpp` — pre-vote, leadership transfer, learners.
+- [ ] **C7** Arnés de **simulación determinista** (`tests/sim/`, reloj/red virtuales): elecciones,
+  *splits*, failover; invariantes (un líder por término; sin pérdida de *committed*).
+- [ ] **C8** `nexus-broker`: integrar Raft en `Partition`; `acks=quorum`;
+  high-watermark = `commit_index`.
+- [ ] **C9** grupos de consumidores + rebalanceo (`JoinGroup`/`SyncGroup`/`Heartbeat`/`LeaveGroup`).
+- [ ] **C10** cross-core message passing / routing de particiones multi-reactor.
+- [ ] **C11** Tests **chaos** (`tc netem`) → failover y postura **CP**; cierre de Fase 2.
 
 ---
 

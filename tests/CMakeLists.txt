@@ -43,6 +43,7 @@ add_executable(nexus-tests
   unit/broker/offset_manager_test.cpp
   unit/broker/credit_window_test.cpp
   unit/broker/request_router_test.cpp
+  unit/consensus/raft_state_test.cpp
   e2e/broker_e2e_test.cpp
   e2e/client_e2e_test.cpp
   crash/partition_crash_test.cpp)
@@ -63,6 +64,7 @@ target_link_libraries(nexus-tests PRIVATE
   nexus::protocol
   nexus::wire
   nexus::reactor
+  nexus::consensus
   nexus::broker
   nexus::client
   nexus::server)
