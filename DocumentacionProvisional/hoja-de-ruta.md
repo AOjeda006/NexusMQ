@@ -287,6 +287,21 @@ Harness de benchmark vacío y CI:
   el quórum y los seguidores se ponen al día; no-líder → `Unsupported`; idempotencia duplicado/hueco.
   El **cambio en caliente** del broker (con transporte real) se difiere a **C11**.
 - [ ] **C10** grupos de consumidores + rebalanceo (`JoinGroup`/`SyncGroup`/`Heartbeat`/`LeaveGroup`).
+  Se subdivide en incrementos pequeños:
+  - [x] **C10a** `broker/consumer_group.{hpp,cpp}` — `ConsumerGroup`, FSM de membresía **síncrona y
+    sin E/S** (mismo principio que `RaftNode`, ADR-0015: reloj inyectado `MonoTime now`, expiración de
+    sesión en `tick`, deterministas). Protocolo *eager* generacional: estados
+    `Empty→PreparingRebalance→CompletingRebalance→Stable` (+`Dead`); un cambio de membresía (`join`
+    nuevo, `leave`, sesión expirada) abre un rebalanceo en el que **todos** reingresan, el primero es
+    el **líder** y reparte en `sync`; la `generation` numera cada ronda y descarta peticiones
+    obsoletas. `join` (id vacío ⇒ id generado), `sync` (líder reparte → `Stable`; seguidor recibe su
+    asignación, opaca), `heartbeat` (`Ok`/`RebalanceInProgress`), `leave`, `tick(now)`. Nuevo alias
+    `Generation` en `common/types.hpp`. 15 tests: alta/líder, reparto, rebalanceo al entrar/salir,
+    heartbeat en rebalanceo, expiración por `tick`, generación obsoleta, miembro desconocido.
+  - [ ] **C10b** mensajes de protocolo `JoinGroup`/`SyncGroup`/`Heartbeat`/`LeaveGroup` (encode/decode
+    + round-trip) sobre el codec.
+  - [ ] **C10c** `GroupCoordinator` (posee los grupos por id) + cableado en `RequestRouter`
+    (traducción wire↔dominio en el borde) + e2e de cliente.
 - [ ] **C11** cross-core message passing / routing de particiones multi-reactor.
 - [ ] **C12** Tests **chaos** (`tc netem`) → failover y postura **CP**; cierre de Fase 2.
 

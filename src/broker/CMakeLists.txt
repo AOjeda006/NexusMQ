@@ -4,6 +4,7 @@
 add_library(nexus-broker
   partition.cpp
   replicated_partition.cpp
+  consumer_group.cpp
   topic_manager.cpp
   offset_manager.cpp
   request_router.cpp)

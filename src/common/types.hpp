@@ -22,6 +22,7 @@ using Crc = std::uint32_t;         ///< Checksum CRC32C.
 using Epoch = std::int32_t;        ///< Época de liderazgo de partición.
 using ProducerId = std::int64_t;   ///< Identificador de productor idempotente (§5.9).
 using Sequence = std::int32_t;     ///< Secuencia por (productor, partición), monótona (§5.9).
+using Generation = std::int32_t;  ///< Generación de un grupo de consumidores (sube por rebalanceo).
 
 /// Instante en el reloj monótono (deadlines de temporizadores; inmune a saltos del reloj de pared).
 using MonoTime = std::chrono::steady_clock::time_point;
