@@ -177,6 +177,75 @@ expected<Offset> Segment::recover() {
     return last_valid;
 }
 
+expected<std::size_t> Segment::position_of(Offset target) const {
+    if (target == base_offset_) {
+        return std::size_t{0};  // frontera del primer batch: se vacía el segmento entero.
+    }
+    std::size_t position = 0;
+    std::array<std::byte, RecordBatch::kHeaderSize> header{};
+    while (position < size_bytes_) {
+        const auto read_header = log_.read_at(header, position);
+        if (!read_header) {
+            return std::unexpected(read_header.error());
+        }
+        if (*read_header < header.size()) {
+            break;  // cabecera incompleta: trata el resto como inexistente.
+        }
+        const auto view = RecordBatch::peek(header);
+        if (!view) {
+            break;
+        }
+        if (view->base_offset == target) {
+            return position;
+        }
+        if (view->base_offset > target) {
+            break;  // target cae dentro del batch anterior: no es frontera.
+        }
+        position += view->encoded_size;
+    }
+    return make_error(ErrorCode::InvalidArgument, "truncate_to: el offset no es frontera de batch");
+}
+
+expected<void> Segment::rebuild_index() {
+    if (const auto cleared = index_.reset(); !cleared) {
+        return std::unexpected(cleared.error());
+    }
+    std::size_t scan = 0;
+    std::array<std::byte, RecordBatch::kHeaderSize> header{};
+    while (scan < size_bytes_) {
+        const auto read_header = log_.read_at(header, scan);
+        if (!read_header || *read_header < header.size()) {
+            break;
+        }
+        const auto view = RecordBatch::peek(header);
+        if (!view) {
+            break;
+        }
+        index_.maybe_append(view->base_offset, static_cast<std::uint32_t>(scan),
+                            view->encoded_size);
+        scan += view->encoded_size;
+    }
+    return index_.flush();
+}
+
+expected<void> Segment::truncate_to(Offset target) {
+    const auto position = position_of(target);
+    if (!position) {
+        return std::unexpected(position.error());
+    }
+    if (*position < size_bytes_) {
+        if (const auto truncated = log_.truncate(*position); !truncated) {
+            return std::unexpected(truncated.error());
+        }
+        size_bytes_ = *position;
+    }
+    if (const auto reindexed = rebuild_index(); !reindexed) {
+        return std::unexpected(reindexed.error());
+    }
+    state_ = State::Active;
+    return {};
+}
+
 expected<void> Segment::sync() {
     if (const auto flushed = index_.flush(); !flushed) {
         return flushed;

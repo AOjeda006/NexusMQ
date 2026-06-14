@@ -246,4 +246,48 @@ TEST(Segment, Append_EnSegmentoSellado_DevuelveInvalidArgument) {
     EXPECT_EQ(off.error().code(), nexus::ErrorCode::InvalidArgument);
 }
 
+TEST(Segment, TruncateTo_FronteraDeBatch_RecortaCola) {
+    const TempDir dir("trunc_frontera");
+    auto seg = filled_segment(dir.path());        // base offsets 0,3,6,9 (4 batches de 46 bytes)
+    ASSERT_TRUE(seg.truncate_to(6).has_value());  // descarta b2 (6..8) y b3 (9..11)
+    EXPECT_EQ(seg.size_bytes(), 2U * 46U);        // quedan b0 y b1
+    EXPECT_EQ(seg.state(), nexus::Segment::State::Active);
+    // Tras el corte no queda nada en el offset 6.
+    const auto fr = seg.read(6, 100000);
+    ASSERT_TRUE(fr.has_value());
+    EXPECT_TRUE(fr->batches.empty());
+}
+
+TEST(Segment, TruncateTo_BaseOffset_VaciaElSegmento) {
+    const TempDir dir("trunc_vacia");
+    auto seg = filled_segment(dir.path());
+    ASSERT_TRUE(seg.truncate_to(0).has_value());
+    EXPECT_EQ(seg.size_bytes(), 0U);
+}
+
+TEST(Segment, TruncateTo_MitadDeBatch_DevuelveInvalidArgument) {
+    const TempDir dir("trunc_media");
+    auto seg = filled_segment(dir.path());
+    const auto bad = seg.truncate_to(4);  // 4 cae dentro de b1 (3..5): no es frontera
+    ASSERT_FALSE(bad.has_value());
+    EXPECT_EQ(bad.error().code(), nexus::ErrorCode::InvalidArgument);
+}
+
+TEST(Segment, TruncateTo_MitadDelUltimoBatch_DevuelveInvalidArgument) {
+    const TempDir dir("trunc_ultimo");
+    auto seg = filled_segment(dir.path());
+    const auto bad = seg.truncate_to(10);  // 10 cae dentro de b3 (9..11): no es frontera
+    ASSERT_FALSE(bad.has_value());
+    EXPECT_EQ(bad.error().code(), nexus::ErrorCode::InvalidArgument);
+}
+
+TEST(Segment, TruncateThenAppend_ContinuaDesdeElCorte) {
+    const TempDir dir("trunc_append");
+    auto seg = filled_segment(dir.path());
+    ASSERT_TRUE(seg.truncate_to(6).has_value());
+    const auto off = seg.append(make_batch(6, 1, 10));  // reanuda en el offset del corte
+    ASSERT_TRUE(off.has_value());
+    EXPECT_EQ(*off, 6);
+}
+
 }  // namespace

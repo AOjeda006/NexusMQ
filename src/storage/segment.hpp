@@ -69,6 +69,14 @@ public:
     /// @return El último offset válido (o `base_offset() - 1` si el segmento queda vacío).
     [[nodiscard]] expected<Offset> recover();
 
+    /// @brief Trunca el segmento eliminando los batches con offset >= @p target (resolución de
+    ///   conflictos de Raft, §7.11 #5).
+    /// @details @p target debe coincidir con la **frontera** de un batch (su `base_offset`) o con
+    ///   `base_offset()` (vacía el segmento). Trunca el `.log` justo antes de ese batch,
+    ///   reconstruye el índice con los restantes y deja el segmento **Active**. `InvalidArgument`
+    ///   si @p target cae dentro de un batch (no es frontera).
+    [[nodiscard]] expected<void> truncate_to(Offset target);
+
     /// @brief Fuerza la durabilidad: persiste el índice y hace `fsync` del `.log`.
     /// @details No cambia de estado (a diferencia de `seal`): el segmento sigue activo.
     [[nodiscard]] expected<void> sync();
@@ -87,6 +95,12 @@ public:
 
 private:
     Segment(Offset base_offset, File log, SparseIndex index, std::size_t size_bytes);
+
+    /// Byte donde empieza el batch con `base_offset == target`; `InvalidArgument` si no es
+    /// frontera.
+    [[nodiscard]] expected<std::size_t> position_of(Offset target) const;
+    /// Reconstruye el `.index` recorriendo los batches actuales del `.log`.
+    [[nodiscard]] expected<void> rebuild_index();
 
     Offset base_offset_;      ///< Offset base del segmento.
     File log_;                ///< Fichero `.log` (RAII).

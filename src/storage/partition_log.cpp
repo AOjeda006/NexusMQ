@@ -131,6 +131,44 @@ expected<Offset> PartitionLog::append(const RecordBatch& batch) {
     return *last;
 }
 
+expected<void> PartitionLog::truncate_to(Offset offset) {
+    if (offset == log_end_offset_) {
+        return {};  // nada que truncar.
+    }
+    if (offset > log_end_offset_) {
+        return make_error(ErrorCode::OutOfRange, "truncate_to por encima de log_end_offset");
+    }
+    if (offset < log_start_offset_) {
+        return make_error(ErrorCode::OutOfRange, "truncate_to por debajo de log_start_offset");
+    }
+    // Segmento que contiene `offset`: el último con base_offset <= offset.
+    const auto upper = std::ranges::upper_bound(
+        segments_, offset, std::ranges::less{},
+        [](const std::unique_ptr<Segment>& seg) { return seg->base_offset(); });
+    const auto target = std::prev(upper);
+
+    // Borra los segmentos posteriores al objetivo (cierra fds al borrar del vector, luego
+    // ficheros).
+    std::vector<Offset> dropped;
+    for (auto seg = std::next(target); seg != segments_.end(); ++seg) {
+        dropped.push_back((*seg)->base_offset());
+    }
+    segments_.erase(std::next(target), segments_.end());
+    for (const Offset base : dropped) {
+        std::error_code ec;
+        std::filesystem::remove(seg_path(dir_, base, ".log"), ec);
+        std::filesystem::remove(seg_path(dir_, base, ".index"), ec);
+    }
+    // Trunca dentro del segmento objetivo, que queda como activo.
+    if (const auto truncated = segments_.back()->truncate_to(offset); !truncated) {
+        return std::unexpected(truncated.error());
+    }
+    log_end_offset_ = offset;
+    recovery_point_ = std::min(recovery_point_, offset);
+    bytes_since_sync_ = 0;
+    return {};
+}
+
 expected<void> PartitionLog::sync() {
     if (const auto synced = active()->sync(); !synced) {
         return synced;

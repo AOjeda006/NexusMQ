@@ -349,4 +349,88 @@ TEST(PartitionLog, EnforceRetention_SinLimites_NoBorraNada) {
     EXPECT_EQ(plog.log_start_offset(), 0);
 }
 
+TEST(PartitionLog, TruncateTo_DentroDeUnSegmento_RetrocedeLogEnd) {
+    const TempDir dir("trunc_uno");
+    auto plog = nexus::PartitionLog::open(dir.path(), nexus::LogConfig{});  // segmento grande
+    ASSERT_TRUE(plog.has_value());
+    ASSERT_TRUE(plog->append(make_batch(3, 10)).has_value());  // 0..2
+    ASSERT_TRUE(plog->append(make_batch(2, 10)).has_value());  // 3..4
+    ASSERT_TRUE(plog->append(make_batch(5, 10)).has_value());  // 5..9
+    ASSERT_EQ(plog->log_end_offset(), 10);
+
+    ASSERT_TRUE(plog->truncate_to(5).has_value());  // descarta el tercer batch (5..9)
+    EXPECT_EQ(plog->log_end_offset(), 5);
+    const auto fr = plog->read(0, 100000);
+    ASSERT_TRUE(fr.has_value());
+    EXPECT_EQ(fr->next_offset, 5);  // solo quedan los dos primeros batches
+}
+
+TEST(PartitionLog, TruncateThenAppend_OffsetsContinuanDesdeElCorte) {
+    const TempDir dir("trunc_append");
+    auto plog = nexus::PartitionLog::open(dir.path(), nexus::LogConfig{});
+    ASSERT_TRUE(plog.has_value());
+    ASSERT_TRUE(plog->append(make_batch(3, 10)).has_value());  // 0..2
+    ASSERT_TRUE(plog->append(make_batch(2, 10)).has_value());  // 3..4
+    ASSERT_TRUE(plog->truncate_to(3).has_value());             // descarta el segundo batch (3..4)
+    EXPECT_EQ(plog->log_end_offset(), 3);
+    const auto last = plog->append(make_batch(4, 10));  // reanuda en el offset 3
+    ASSERT_TRUE(last.has_value());
+    EXPECT_EQ(*last, 6);  // base 3 -> last 6
+    EXPECT_EQ(plog->log_end_offset(), 7);
+}
+
+TEST(PartitionLog, TruncateTo_CruzaSegmentos_BorraSegmentosPosteriores) {
+    const TempDir dir("trunc_cruza");
+    auto plog = three_segments(dir.path());  // segmentos base 0,2,4; offsets 0..5
+    ASSERT_EQ(plog.segment_count(), 3U);
+
+    ASSERT_TRUE(plog.truncate_to(2).has_value());  // vacía el seg base 2 y borra el seg base 4
+    EXPECT_EQ(plog.segment_count(), 2U);
+    EXPECT_EQ(plog.log_end_offset(), 2);
+    EXPECT_EQ(plog.log_start_offset(), 0);
+    EXPECT_FALSE(std::filesystem::exists(seg_log_path(dir.path(), 4)));  // fichero borrado
+    const auto fr = plog.read(0, 100000);
+    ASSERT_TRUE(fr.has_value());
+    EXPECT_EQ(fr->next_offset, 2);  // solo offsets 0 y 1
+}
+
+TEST(PartitionLog, TruncateTo_LogEndOffset_EsNoOp) {
+    const TempDir dir("trunc_noop");
+    auto plog = three_segments(dir.path());
+    const auto count_before = plog.segment_count();
+    ASSERT_TRUE(plog.truncate_to(plog.log_end_offset()).has_value());
+    EXPECT_EQ(plog.segment_count(), count_before);
+    EXPECT_EQ(plog.log_end_offset(), 6);
+}
+
+TEST(PartitionLog, TruncateTo_MitadDeBatch_DevuelveInvalidArgument) {
+    const TempDir dir("trunc_media");
+    auto plog = nexus::PartitionLog::open(dir.path(), nexus::LogConfig{});
+    ASSERT_TRUE(plog.has_value());
+    ASSERT_TRUE(plog->append(make_batch(3, 10)).has_value());  // 0..2
+    const auto bad = plog->truncate_to(1);                     // 1 cae dentro del batch (0..2)
+    ASSERT_FALSE(bad.has_value());
+    EXPECT_EQ(bad.error().code(), nexus::ErrorCode::InvalidArgument);
+}
+
+TEST(PartitionLog, TruncateTo_PorEncimaDeLogEnd_DevuelveOutOfRange) {
+    const TempDir dir("trunc_over");
+    auto plog = three_segments(dir.path());
+    const auto bad = plog.truncate_to(99);
+    ASSERT_FALSE(bad.has_value());
+    EXPECT_EQ(bad.error().code(), nexus::ErrorCode::OutOfRange);
+}
+
+TEST(PartitionLog, TruncateTo_ReabreYPreservaElCorte) {
+    const TempDir dir("trunc_reopen");
+    {
+        auto plog = three_segments(dir.path());
+        ASSERT_TRUE(plog.truncate_to(3).has_value());  // deja offsets 0..2
+        EXPECT_EQ(plog.log_end_offset(), 3);
+    }
+    auto reopened = nexus::PartitionLog::open(dir.path(), small_segments());
+    ASSERT_TRUE(reopened.has_value());
+    EXPECT_EQ(reopened->log_end_offset(), 3);
+}
+
 }  // namespace

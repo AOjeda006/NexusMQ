@@ -183,8 +183,8 @@ Harness de benchmark vacío y CI:
 >
 > **Convenciones fijadas en C1 (vinculantes para la fase):** índices de Raft **1-based** con
 > centinela `0` ("antes de la primera entrada"; casa con el pseudocódigo §7.11 #5
-> `log[prevLogIndex]`); el mapeo a `Offset` 0-based del `PartitionLog` es `offset = index - 1` y
-> vive en `RaftLog` (C3). `RaftLogEntry` **posee** su `payload` (tipo de valor, como `RecordBatch`;
+> `log[prevLogIndex]`); el mapeo exacto índice↔`Offset` del `PartitionLog` se fija en `RaftLog`
+> (C4, **ADR-0014**). `RaftLogEntry` **posee** su `payload` (tipo de valor, como `RecordBatch`;
 > el desglose preveía `ByteSpan`). `RaftRole` se eleva a `raft_state.hpp` (vocabulario compartido).
 
 - [x] **C1** `consensus/raft_state.hpp/.cpp` — tipos de estado de Raft: `RaftRole`
@@ -195,24 +195,32 @@ Harness de benchmark vacío y CI:
   progreso de líder `next_index`/`match_index` por peer). Nuevo target `nexus-consensus` (STATIC).
   Tests unit de los invariantes. **Persistencia en disco (`persist`/`load`) diferida** a un
   incremento posterior (la simulación determinista opera en memoria).
-- [ ] **C2** `consensus/raft_rpc.hpp` — `RequestVoteArgs/Reply`, `AppendEntriesArgs/Reply`,
-  `InstallSnapshotArgs/Reply` con `encode`/`decode` sobre el codec de `nexus-protocol`
-  (round-trip property-based).
-- [ ] **C3** `consensus/raft_log.hpp/.cpp` — `RaftLog` (vista `(term,index)` sobre `PartitionLog`):
-  `append`/`truncate_from`/`term_at`/`last_index`/`last_term`/`entries_from`.
-- [ ] **C4** `consensus/raft_node.hpp/.cpp` — `RaftNode` FSM: elección (`tick`, `become_*`),
+- [x] **C2** `consensus/raft_rpc.hpp/.cpp` — `RequestVoteArgs/Reply`, `AppendEntriesArgs/Reply`,
+  `InstallSnapshotArgs/Reply` con `encode`/`decode` defensivo sobre el codec de `nexus-protocol`
+  (helpers `encode_entry`/`decode_entry`/`encode_snapshot`/`decode_snapshot`; contador de `entries`
+  acotado anti-DoS). Tests round-trip + entrada truncada + tipo inválido.
+- [x] **C3** `storage` — `Segment::truncate_to(offset)` + `PartitionLog::truncate_to(offset)`:
+  truncado del log por **frontera de batch** (capacidad que necesita la resolución de conflictos de
+  Raft, `truncate_from`, §7.11 #5). Multi-segmento (borra los posteriores, ficheros incluidos),
+  retrocede `log_end_offset`/`recovery_point`, deja el segmento objetivo activo; `InvalidArgument`
+  si cae a mitad de un batch, `OutOfRange` fuera de `[log_start, log_end]`. Tests unit (Segment +
+  PartitionLog: corte en/entre segmentos, mitad de batch, no-op, reapertura).
+- [ ] **C4** ADR-0014 + `consensus/raft_log.hpp/.cpp` — `RaftLog` (vista `(term,index)` sobre
+  `PartitionLog`): `append`/`truncate_from`/`term_at`/`last_index`/`last_term`/`entries_from`.
+  Fija el mapeo índice↔`Offset` y la persistencia del término.
+- [ ] **C5** `consensus/raft_node.hpp/.cpp` — `RaftNode` FSM: elección (`tick`, `become_*`),
   `on_request_vote`, `on_append_entries`; puerto `RaftTransport`. Tests deterministas (reloj
   virtual + transporte doble).
-- [ ] **C5** `propose` + replicación (`replicate_to`, `advance_commit_index`, `apply_committed`);
+- [ ] **C6** `propose` + replicación (`replicate_to`, `advance_commit_index`, `apply_committed`);
   `commit_index` → high-watermark.
-- [ ] **C6** `consensus/election.hpp` — pre-vote, leadership transfer, learners.
-- [ ] **C7** Arnés de **simulación determinista** (`tests/sim/`, reloj/red virtuales): elecciones,
+- [ ] **C7** `consensus/election.hpp` — pre-vote, leadership transfer, learners.
+- [ ] **C8** Arnés de **simulación determinista** (`tests/sim/`, reloj/red virtuales): elecciones,
   *splits*, failover; invariantes (un líder por término; sin pérdida de *committed*).
-- [ ] **C8** `nexus-broker`: integrar Raft en `Partition`; `acks=quorum`;
+- [ ] **C9** `nexus-broker`: integrar Raft en `Partition`; `acks=quorum`;
   high-watermark = `commit_index`.
-- [ ] **C9** grupos de consumidores + rebalanceo (`JoinGroup`/`SyncGroup`/`Heartbeat`/`LeaveGroup`).
-- [ ] **C10** cross-core message passing / routing de particiones multi-reactor.
-- [ ] **C11** Tests **chaos** (`tc netem`) → failover y postura **CP**; cierre de Fase 2.
+- [ ] **C10** grupos de consumidores + rebalanceo (`JoinGroup`/`SyncGroup`/`Heartbeat`/`LeaveGroup`).
+- [ ] **C11** cross-core message passing / routing de particiones multi-reactor.
+- [ ] **C12** Tests **chaos** (`tc netem`) → failover y postura **CP**; cierre de Fase 2.
 
 ---
 

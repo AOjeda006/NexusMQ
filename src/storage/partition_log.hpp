@@ -49,6 +49,15 @@ public:
     ///   es anterior a `log_start_offset()`, o error de E/S.
     [[nodiscard]] expected<FetchResult> read(Offset offset, std::size_t max_bytes) const;
 
+    /// @brief Trunca el log eliminando todo lo de offset >= @p offset (resolución de conflictos
+    ///   de Raft, §7.11 #5: un seguidor descarta su cola divergente antes de aceptar la del líder).
+    /// @details @p offset debe ser una **frontera de batch** (o `log_end_offset()`, que es no-op).
+    ///   Borra los segmentos posteriores (ficheros incluidos), trunca el segmento que lo contiene
+    ///   (que pasa a ser el activo) y retrocede `log_end_offset`/`recovery_point`. `OutOfRange` si
+    ///   @p offset cae fuera de `[log_start_offset, log_end_offset]`; `InvalidArgument` si no es
+    ///   frontera de batch.
+    [[nodiscard]] expected<void> truncate_to(Offset offset);
+
     /// @brief Fuerza la durabilidad del segmento activo (`fsync`) y avanza `recovery_point`.
     [[nodiscard]] expected<void> sync();
 
