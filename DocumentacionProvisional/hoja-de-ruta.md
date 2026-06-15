@@ -11,9 +11,18 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** **FASE 1b COMPLETA ✅** (R1–R7, P1–P6, B1–B6, CLI, SRV, e2e). Sobre el motor de log de Fase 1 se añade el **reactor thread-per-core** (Proactor + backend io_uring propio sin liburing, corrutinas `task<T>`, scheduler, colas lock-free, mailbox cross-core, arena, `ReactorPool`), el **protocolo binario** (`nexus-protocol` puro: codec/frame/mensajes/errores/versionado + `nexus-wire` para el framing-sobre-conexión async), el **broker mono-nodo** (`Partition`/`Topic`/`TopicManager`/`RequestRouter`/`ProducerSession`/`OffsetManager`/`CreditWindow`), el **cliente nativo** (`Client`/`Producer`/`Consumer` bloqueante) y el **servidor** (`nexusd`: `serve_connection` + `Server` + señales). **212 tests** verdes en GCC/libstdc++, Clang/libc++, **ASan/UBSan** y **TSan**; CI verde. El lazo **producir→broker→consumir** funciona end-to-end por socket (e2e crudo + e2e de cliente). Siguiente fase: **Fase 2 — Distribución (Raft por partición)**.
+**Estado actual:** **FASE 2 COMPLETA ✅** (C1–C12). Sobre el broker *thread-per-core* de Fase 1b se
+añade el **consenso Raft por partición** (`nexus-consensus`: estado/log/RPC, `RaftNode` como máquina de
+estados síncrona sin E/S con pre-vote, replicación, *high-watermark* por mayoría, transferencia de
+liderazgo y learners; ADR-0014/0015), la **integración en el broker** (`ReplicatedPartition`, ADR-0016),
+los **grupos de consumidores** (FSM generacional + Join/Sync/Heartbeat/Leave + `GroupCoordinator`), el
+**routing cross-core multi-reactor** (`call_on` + `PartitionRouter`) y un **arnés de simulación
+determinista** que verifica elección, failover, partición y **chaos** (Leader Completeness,
+anti-split-brain, reinicios rodantes) comprobando las invariantes de seguridad. **319 tests** verdes en
+GCC/libstdc++, Clang/libc++, **ASan/UBSan** y **TSan**; CI verde. Siguiente fase: **Fase 3 — Ingress +
+operación**.
 
-> **Resumen de cierre de Fase 1b.** Entregable: broker de un nodo *thread-per-core* que publica y consume con un cliente nativo, hablando el protocolo binario propio sobre io_uring. Targets nuevos/cerrados: `nexus-reactor`, `nexus-protocol`, `nexus-wire` (ADR-0013), `nexus-broker`, `nexus-client`, `nexus-server` (+ `Socket`/`Listener` async en `nexus-io`). Modelo de errores `expected<T>` en el núcleo y traducción wire↔núcleo en el borde (`from_error`/`to_error`); RAII; TDD; sin Raft. **Ajustes de diseño respecto al desglose (anotados por hito):** `task<T>` reubicado a `common/`; backend io_uring directo sobre el uapi (ADR-0012); framing en `nexus-wire` con protocolo puro (ADR-0013); broker **síncrono** en 1b (E/S de almacenamiento bloqueante; la versión async llega con Raft); `Connection`→corrutina libre `serve_connection`; cliente síncrono de un solo nodo; `CreditWindow` reubicado de protocol a broker. **Diferido a Fase 2 (decisiones de fasing, no deuda):** `File` async + ruta de almacenamiento async, *multi-reactor* con routing por partición, grupos de consumidores (Join/Sync/Heartbeat + rebalanceo), persistencia del topic de offsets, y el cableado end-to-end de créditos en la ruta de *push*.
+> **Resumen de cierre de Fase 1b.** (histórico) Entregable: broker de un nodo *thread-per-core* que publica y consume con un cliente nativo, hablando el protocolo binario propio sobre io_uring. Targets nuevos/cerrados: `nexus-reactor`, `nexus-protocol`, `nexus-wire` (ADR-0013), `nexus-broker`, `nexus-client`, `nexus-server` (+ `Socket`/`Listener` async en `nexus-io`). Modelo de errores `expected<T>` en el núcleo y traducción wire↔núcleo en el borde (`from_error`/`to_error`); RAII; TDD; sin Raft. **Ajustes de diseño respecto al desglose (anotados por hito):** `task<T>` reubicado a `common/`; backend io_uring directo sobre el uapi (ADR-0012); framing en `nexus-wire` con protocolo puro (ADR-0013); broker **síncrono** en 1b (E/S de almacenamiento bloqueante; la versión async llega con Raft); `Connection`→corrutina libre `serve_connection`; cliente síncrono de un solo nodo; `CreditWindow` reubicado de protocol a broker. **Diferido a Fase 2 (decisiones de fasing, no deuda):** `File` async + ruta de almacenamiento async, *multi-reactor* con routing por partición, grupos de consumidores (Join/Sync/Heartbeat + rebalanceo), persistencia del topic de offsets, y el cableado end-to-end de créditos en la ruta de *push*.
 
 ---
 
@@ -176,10 +185,29 @@ Harness de benchmark vacío y CI:
 
 ---
 
-## Fase 2 — Distribución (Raft por partición) *(EN CURSO)*
+## Fase 2 — Distribución (Raft por partición) *(COMPLETA ✅)*
 
 > Targets: `nexus-consensus` (Raft); `nexus-broker` distribuido. Tests: unit/property/sim/chaos.
 > Deps de `nexus-consensus` (desglose §4.6): common, storage, protocol.
+>
+> **Resumen de cierre de Fase 2.** Entregable: consenso **Raft por partición** completo y verificado
+> por simulación determinista. Target nuevo `nexus-consensus` (`RaftLogEntry`/estado, RPC con
+> (de)serialización sobre el codec, `RaftLog` sobre `PartitionLog` (ADR-0014), `RaftNode` como
+> **máquina de estados síncrona sin E/S** (ADR-0015) con elección **pre-vote** (§9.6), replicación y
+> avance de `commit_index`=*high-watermark* por mayoría del término (§5.4), transferencia de liderazgo
+> vía `TimeoutNow` (§3.10) y **learners** no votantes (§4.2.1)). Integración en el broker:
+> `ReplicatedPartition` como tipo paralelo a `Partition` (ADR-0016). **Grupos de consumidores**
+> (FSM de membresía generacional + mensajes Join/Sync/Heartbeat/Leave en el protocolo + `GroupCoordinator`
+> cableado en el `RequestRouter`). **Routing cross-core multi-reactor**: `call_on` (petición/respuesta
+> entre núcleos) y `PartitionRouter` (`partición → núcleo dueño` por módulo, enruta vía `call_on`).
+> Verificación: **arnés de simulación** (reloj + red virtuales) con escenarios de elección, failover,
+> partición y **chaos** (Leader Completeness, anti-split-brain, reinicios rodantes), comprobando las
+> invariantes de seguridad en cada paso. **319 tests** verdes en GCC/libstdc++, Clang/libc++,
+> **ASan/UBSan** y **TSan**; CI verde. **Diferido (decisiones de fasing, no deuda):** el *swap-in* en
+> caliente del stack Raft/multi-reactor en el `Server` vivo (con transporte real) — la infraestructura
+> (`ReplicatedPartition`, `call_on`, `PartitionRouter`) queda lista como bloque de construcción;
+> persistencia en disco del estado persistente de Raft (`persist`/`load`); snapshots/compactación de
+> log. Siguiente fase: **Fase 3 — Ingress + operación**.
 >
 > **Convenciones fijadas en C1 (vinculantes para la fase):** índices de Raft **1-based** con
 > centinela `0` ("antes de la primera entrada"; casa con el pseudocódigo §7.11 #5
@@ -332,7 +360,19 @@ Harness de benchmark vacío y CI:
     SPSC). Tests deterministas con dos reactores conducidos paso a paso: reparto por módulo de
     núcleos, asignación de offsets por partición devuelta al llamante, y comprobación de que el estado
     de cada partición vive **solo** en su núcleo dueño (sin solaparse pares/impares).
-- [ ] **C12** Tests **chaos** (`tc netem`) → failover y postura **CP**; cierre de Fase 2.
+- [x] **C12** Tests **chaos**/failover deterministas → postura **CP**; cierre de Fase 2. Sobre el
+  arnés de simulación (C8: reloj + red virtuales) se añaden tres escenarios que estresan la postura
+  **CP** sin depender de la red real: (1) **Leader Completeness** (§5.4) — una entrada confirmada
+  antes de la caída del líder está en el nuevo líder y sigue confirmada (lo confirmado no se pierde en
+  el failover); (2) **anti-split-brain** — el líder aislado en minoría (1 de 5) anexa local pero **no
+  confirma**, la mayoría elige otro líder y confirma, y al sanar la red el viejo líder cede y **trunca
+  su cola no confirmada** adoptando el log de la mayoría; (3) **caos** — reinicios rodantes (a lo sumo
+  un nodo caído, siempre con quórum) con propuestas que mantienen el progreso y, al final, convergen
+  todos los logs. **Ajuste de diseño:** el chaos NO usa `tc netem` (requeriría root/netns y sería
+  *flaky*, contra la norma de tests deterministas): se modela como **fallos inyectados en la red
+  virtual** (`partition`/`heal`, `crash`/`restart`), reproducible por semilla. En cada paso el arnés
+  verifica las invariantes de seguridad (a lo sumo un líder por término; las entradas confirmadas no
+  divergen). Tests verdes en GCC/Clang/**ASan**.
 
 ---
 
