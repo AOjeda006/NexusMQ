@@ -314,7 +314,7 @@ Harness de benchmark vacío y CI:
     (Fase 1b síncrona; el reactor lo inyectará y conducirá `tick` en C11). Tests: flujo
     join→sync→heartbeat→leave en el router, heartbeat a grupo desconocido, `ApiKey` desconocida, y
     unidades del coordinador (crea en join, `NotFound`, expiración por `tick`).
-- [ ] **C11** cross-core message passing / routing de particiones multi-reactor. La infraestructura
+- [x] **C11** cross-core message passing / routing de particiones multi-reactor. La infraestructura
   de reactores ya existía (`Reactor::submit_to`/`spawn`, `CrossCoreMailbox` SPSC, `ReactorPool` con
   `reactor_for(partition) = partition % size()`). Se subdivide en incrementos pequeños:
   - [x] **C11a** `reactor/cross_core_call.hpp` — `call_on(self, target, fn)`: primitivo de
@@ -325,8 +325,13 @@ Harness de benchmark vacío y CI:
     núcleo y devuelve la respuesta al núcleo que atiende la conexión. Tests deterministas con dos
     reactores conducidos paso a paso (`poll_once`): ejecuta en destino y reanuda con resultado,
     transporta el valor calculado, y no se resuelve sin drenar al destino.
-  - [ ] **C11b** `PartitionRouter`: mapea `(topic, partición) → núcleo dueño` (`reactor_for`) y enruta
-    la operación al dueño vía `call_on`; test multi-reactor de enrutado.
+  - [x] **C11b** `reactor/partition_router.hpp` — `PartitionRouter` (header-only): mapea
+    `partición → núcleo dueño` (`owner_core(p) = p % core_count`, la misma regla que
+    `ReactorPool::reactor_for`) y enruta la operación al dueño vía `call_on`, reanudando al llamante
+    con el resultado (viaje local si el dueño es su propio reactor; si no, cruza núcleos por el buzón
+    SPSC). Tests deterministas con dos reactores conducidos paso a paso: reparto por módulo de
+    núcleos, asignación de offsets por partición devuelta al llamante, y comprobación de que el estado
+    de cada partición vive **solo** en su núcleo dueño (sin solaparse pares/impares).
 - [ ] **C12** Tests **chaos** (`tc netem`) → failover y postura **CP**; cierre de Fase 2.
 
 ---
