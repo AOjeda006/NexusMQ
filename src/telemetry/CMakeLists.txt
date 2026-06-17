@@ -2,7 +2,8 @@
 # más adelante, logger JSON estructurado. Capa baja: depende solo de nexus-common, de modo que
 # cualquier capa (broker, reactor, ingress, server) pueda registrar o exponer sin ciclos.
 add_library(nexus-telemetry
-  metrics.cpp)
+  metrics.cpp
+  logging.cpp)
 add_library(nexus::telemetry ALIAS nexus-telemetry)
 
 target_include_directories(nexus-telemetry PUBLIC ${PROJECT_SOURCE_DIR}/src)

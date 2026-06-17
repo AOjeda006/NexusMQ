@@ -428,7 +428,13 @@ Harness de benchmark vacío y CI:
   protege solo la estructura**; las actualizaciones de valor son lock-free (ADR-0017). Tests:
   get-or-create idempotente, series por etiquetas, orden de etiquetas irrelevante, gauge set/inc/dec,
   histograma acumulativo+sum+count, HELP/TYPE, escapado, cubos de latencia por defecto.
-- [ ] **I6** logs estructurados JSON + *correlation IDs* (`common/logging.hpp`).
+- [x] **I6** `telemetry/logging.{hpp,cpp}` — `Logger` estructurado JSON (THREAD-SAFE): una **línea
+  JSON por registro** (`ts` RFC 3339 UTC + `level` + `msg` + contexto + campos) escrita
+  atómicamente bajo *mutex* (no se entrelazan reactores). **Reloj inyectado** (determinista);
+  niveles `Trace..Error` con mínimo ajustable en caliente (atómico); `Field` tipado
+  (string/int/double/bool) con constructores `field(...)` que evitan la ambigüedad `const char*`→`bool`
+  del `variant`; **contexto base** (`add_context`) en cada línea; *correlation id* como campo por
+  petición; escapado JSON (comillas, barra, control). Tests deterministas con reloj fijo.
 
 ### Bloque I.C — HTTP + REST admin
 - [ ] **I7** HTTP/1.1: `HttpRequest`/`HttpResponse` + parser defensivo (TDD + fuzzing).
