@@ -411,8 +411,12 @@ Harness de benchmark vacío y CI:
   **Ajuste del desglose:** `pick` no-`const`. Tests: ciclo RR, mínimo en least-conn + release sin
   bajar de cero, hash estable por clave, mínima perturbación al quitar un no-dueño, reubicación al
   quitar el dueño, y reparto entre varios nodos.
-- [ ] **I4** `ingress/health_check.{hpp,cpp}` — `HealthChecker` (activo: ping periódico; pasivo:
-  errores reales; alimenta `/readyz`).
+- [x] **I4** `ingress/health_check.hpp` — `HealthChecker` (header-only, REACTOR-LOCAL): rastrea la
+  salud de los nodos combinando **sondeo activo** (ping que dispara el reactor) y **observación
+  pasiva** (resultados reales), ambos vía `observe(node, ok)`, con **histéresis** (`failure_threshold`
+  fallos para caer, `success_threshold` éxitos para recuperarse; un resultado opuesto reinicia el
+  contador contrario). FSM sin E/S ni reloj; nodo no visto = sano (optimista). Alimentará `/readyz`
+  y los *health checks* del proxy (§7.5). Tests deterministas de caída, reinicio y recuperación.
 
 ### Bloque I.B — Observabilidad (`nexus-server`)
 - [ ] **I5** `MetricsRegistry` (contadores/gauges/histogramas + exposición Prometheus `/metrics`).

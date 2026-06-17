@@ -52,6 +52,7 @@ add_executable(nexus-tests
   unit/ingress/rate_limiter_test.cpp
   unit/ingress/circuit_breaker_test.cpp
   unit/ingress/load_balancer_test.cpp
+  unit/ingress/health_check_test.cpp
   unit/consensus/raft_rpc_test.cpp
   unit/consensus/raft_log_test.cpp
   unit/consensus/raft_node_test.cpp
