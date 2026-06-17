@@ -418,8 +418,16 @@ Harness de benchmark vacío y CI:
   contador contrario). FSM sin E/S ni reloj; nodo no visto = sano (optimista). Alimentará `/readyz`
   y los *health checks* del proxy (§7.5). Tests deterministas de caída, reinicio y recuperación.
 
-### Bloque I.B — Observabilidad (`nexus-server`)
-- [ ] **I5** `MetricsRegistry` (contadores/gauges/histogramas + exposición Prometheus `/metrics`).
+### Bloque I.B — Observabilidad (`nexus-telemetry`, ADR-0017)
+- [x] **I5** **ADR-0017** + `telemetry/metrics.{hpp,cpp}` — nuevo target **`nexus-telemetry`** (dep
+  solo `common`, bajo broker/ingress/server para evitar ciclos). `MetricsRegistry` (THREAD-SAFE):
+  `Counter` (atómico monótono), `Gauge` (atómico sube/baja), `Histogram` (cubos acumulativos `le` +
+  `sum` por CAS sobre bits, sin `atomic<double>`); `counter`/`gauge`/`histogram` crean/recuperan
+  series por `(nombre, etiquetas)` con etiquetas **canonicalizadas**; `render_prometheus()` produce
+  el formato de texto Prometheus determinista (`# HELP`/`# TYPE`, escapado de valores). **El mutex
+  protege solo la estructura**; las actualizaciones de valor son lock-free (ADR-0017). Tests:
+  get-or-create idempotente, series por etiquetas, orden de etiquetas irrelevante, gauge set/inc/dec,
+  histograma acumulativo+sum+count, HELP/TYPE, escapado, cubos de latencia por defecto.
 - [ ] **I6** logs estructurados JSON + *correlation IDs* (`common/logging.hpp`).
 
 ### Bloque I.C — HTTP + REST admin

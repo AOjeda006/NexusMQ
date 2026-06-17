@@ -53,6 +53,7 @@ add_executable(nexus-tests
   unit/ingress/circuit_breaker_test.cpp
   unit/ingress/load_balancer_test.cpp
   unit/ingress/health_check_test.cpp
+  unit/telemetry/metrics_test.cpp
   unit/consensus/raft_rpc_test.cpp
   unit/consensus/raft_log_test.cpp
   unit/consensus/raft_node_test.cpp
@@ -80,6 +81,7 @@ target_link_libraries(nexus-tests PRIVATE
   nexus::consensus
   nexus::broker
   nexus::ingress
+  nexus::telemetry
   nexus::client
   nexus::server)
 
