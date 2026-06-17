@@ -437,7 +437,14 @@ Harness de benchmark vacío y CI:
   petición; escapado JSON (comillas, barra, control). Tests deterministas con reloj fijo.
 
 ### Bloque I.C — HTTP + REST admin
-- [ ] **I7** HTTP/1.1: `HttpRequest`/`HttpResponse` + parser defensivo (TDD + fuzzing).
+- [x] **I7** `ingress/http.{hpp,cpp}` — tipos y parser **HTTP/1.1**: `HttpMethod`, `HttpRequest`
+  (`method`/`target`/`version`/`headers`/`body` + `path()`/`query()` + `header()` case-insensitive),
+  `HttpResponse` (`serialize()` añade `Content-Length`, `set_header` case-insensitive) y
+  `parse_request` **defensivo** (`expected`): valida línea de petición, versión `HTTP/x.y`, formato de
+  cabeceras y `Content-Length`, con `HttpParseLimits` anti-DoS (línea/cabeceras/cuerpo). Parser de
+  mensaje completo (la conexión acumula); refactor en helpers para acotar la complejidad. Tests:
+  GET/POST, path+query, cabeceras, cuerpo por Content-Length, método desconocido, serialización, y
+  rechazos (malformado, sin fin de cabeceras, Content-Length inválido, cuerpo incompleto/excedido).
 - [ ] **I8** RFC 7807 `ProblemDetail` + paginación (`page`/`size`) + helpers de JSON para DTOs.
 - [ ] **I9** `common`: SHA-256 + HMAC-SHA256 a mano (*known-answer tests* de RFC/NIST).
 - [ ] **I10** `JwtVerifier` (HS256, base64url, `exp`/`nbf`/`iat` con reloj inyectado).
