@@ -403,8 +403,14 @@ Harness de benchmark vacío y CI:
   hasta `half_open_probes` sondas y cierra si todas tienen éxito o reabre al primer fallo. `nexus-ingress`
   pasa a **STATIC**. Tests deterministas: no dispara con pocas muestras, dispara por tasa de error,
   rechaza en el timeout, acota sondas en HalfOpen, cierra al recuperarse, reabre si una sonda falla.
-- [ ] **I3** `ingress/load_balancer.{hpp,cpp}` — `LoadBalancer` (round-robin / least-connections /
-  consistent-hashing por *partition key*).
+- [x] **I3** `ingress/load_balancer.{hpp,cpp}` — `LoadBalancer` (REACTOR-LOCAL): tres estrategias
+  deterministas — **round-robin** (turnos sobre el conjunto ordenado), **least-connections** (el de
+  menos conexiones activas que el llamante contabiliza con `on_acquire`/`on_release`, desempate por
+  menor id) y **consistent-hashing** (anillo con `vnodes` nodos virtuales/nodo; hash **FNV-1a 64**
+  estable entre plataformas, no `std::hash`). `pick(key)` (no-`const`: RR avanza un cursor).
+  **Ajuste del desglose:** `pick` no-`const`. Tests: ciclo RR, mínimo en least-conn + release sin
+  bajar de cero, hash estable por clave, mínima perturbación al quitar un no-dueño, reubicación al
+  quitar el dueño, y reparto entre varios nodos.
 - [ ] **I4** `ingress/health_check.{hpp,cpp}` — `HealthChecker` (activo: ping periódico; pasivo:
   errores reales; alimenta `/readyz`).
 
