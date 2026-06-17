@@ -50,6 +50,7 @@ add_executable(nexus-tests
   unit/broker/request_router_test.cpp
   unit/consensus/raft_state_test.cpp
   unit/ingress/rate_limiter_test.cpp
+  unit/ingress/circuit_breaker_test.cpp
   unit/consensus/raft_rpc_test.cpp
   unit/consensus/raft_log_test.cpp
   unit/consensus/raft_node_test.cpp
@@ -76,6 +77,7 @@ target_link_libraries(nexus-tests PRIVATE
   nexus::reactor
   nexus::consensus
   nexus::broker
+  nexus::ingress
   nexus::client
   nexus::server)
 

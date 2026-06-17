@@ -396,8 +396,13 @@ Harness de benchmark vacío y CI:
   recorta a la nueva capacidad. Nuevo target `nexus-ingress` (INTERFACE hasta la primera `.cpp`).
   Tests deterministas: ráfaga inicial, rechazo al agotar, relleno con el tiempo, tope de capacidad,
   coste variable, reloj anterior no acredita, reconfiguración.
-- [ ] **I2** `ingress/circuit_breaker.{hpp,cpp}` — `CircuitBreaker` (Closed/Open/HalfOpen + ventana
-  deslizante de errores; reloj inyectado).
+- [x] **I2** `ingress/circuit_breaker.{hpp,cpp}` — `CircuitBreaker` (Nygard, REACTOR-LOCAL): tres
+  estados `Closed/Open/HalfOpen` con **ventana deslizante** de resultados (anillo de `window_size`,
+  contador de fallos incremental) y reloj inyectado. Closed dispara a Open al alcanzar `failure_ratio`
+  con `>= min_samples`; Open rechaza hasta `open_timeout` y entonces pasa a HalfOpen; HalfOpen admite
+  hasta `half_open_probes` sondas y cierra si todas tienen éxito o reabre al primer fallo. `nexus-ingress`
+  pasa a **STATIC**. Tests deterministas: no dispara con pocas muestras, dispara por tasa de error,
+  rechaza en el timeout, acota sondas en HalfOpen, cierra al recuperarse, reabre si una sonda falla.
 - [ ] **I3** `ingress/load_balancer.{hpp,cpp}` — `LoadBalancer` (round-robin / least-connections /
   consistent-hashing por *partition key*).
 - [ ] **I4** `ingress/health_check.{hpp,cpp}` — `HealthChecker` (activo: ping periódico; pasivo:
