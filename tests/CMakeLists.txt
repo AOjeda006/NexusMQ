@@ -49,6 +49,7 @@ add_executable(nexus-tests
   unit/broker/credit_window_test.cpp
   unit/broker/request_router_test.cpp
   unit/consensus/raft_state_test.cpp
+  unit/ingress/rate_limiter_test.cpp
   unit/consensus/raft_rpc_test.cpp
   unit/consensus/raft_log_test.cpp
   unit/consensus/raft_node_test.cpp

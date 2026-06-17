@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** **FASE 2 COMPLETA ✅** (C1–C12). Sobre el broker *thread-per-core* de Fase 1b se
+**Estado actual:** **FASE 3 EN CURSO** (Ingress + operación). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
 añade el **consenso Raft por partición** (`nexus-consensus`: estado/log/RPC, `RaftNode` como máquina de
 estados síncrona sin E/S con pre-vote, replicación, *high-watermark* por mayoría, transferencia de
 liderazgo y learners; ADR-0014/0015), la **integración en el broker** (`ReplicatedPartition`, ADR-0016),
@@ -376,14 +376,61 @@ Harness de benchmark vacío y CI:
 
 ---
 
-## Fase 3 — Ingress + operación *(no empezar hasta cerrar 2)*
+## Fase 3 — Ingress + operación *(EN CURSO)*
 
-> Targets: `nexus-ingress`, `nexus-cli`; observabilidad; `deploy/`.
+> Targets: `nexus-ingress`, `nexus-cli`; observabilidad (`nexus-server`); `deploy/`.
+> Deps de `nexus-ingress` (desglose §4.8): common, io, protocol, wire.
+>
+> **Convenciones fijadas (vinculantes para la fase):** las primitivas con noción de tiempo
+> (`TokenBucket`, `CircuitBreaker`, `HealthChecker`) reciben el **reloj inyectado** (`MonoTime now`
+> por parámetro), no lo leen internamente — igual que la FSM de Raft (ADR-0015) — para pruebas
+> deterministas y para que el reactor controle el tiempo (**ajuste del desglose**, que mostraba
+> `allow(cost)` sin `now`). El HTTP, JWT y la criptografía de soporte (SHA-256/HMAC) se implementan
+> **a mano** (núcleo de aprendizaje, deterministas, *property/known-answer tests*); OpenSSL se reserva
+> para el transporte TLS (I17) y se compila **condicionalmente** (como io_uring), sin bloquear el resto.
 
-- [ ] `nexus-ingress`: `TlsContext`/`TlsConnection` (TLS 1.3, mTLS), `TokenBucket`, `CircuitBreaker`, `LoadBalancer`, `HealthChecker`, `RestGateway` (`/api/v1`, RFC 7807, paginación, JWT, OpenAPI), `Proxy`.
-- [ ] `nexus-server`: `AdminApi`, `MetricsRegistry` (`/metrics` Prometheus), `/healthz`/`/readyz`, logs JSON, tracing.
-- [ ] `nexus-cli`: subcomandos `topic`/`group`/`partitions`/`diagnostics`.
-- [ ] `deploy/`: `Dockerfile` (multi-stage → distroless, no-root, HEALTHCHECK → `/readyz`), `docker-compose.yml` (3 nodos + Prometheus/Grafana), `k8s/` (probes).
+### Bloque I.A — Primitivas de resiliencia (`nexus-ingress`, deterministas, sin deps externas)
+- [x] **I1** `ingress/rate_limiter.hpp` — `TokenBucket` (header-only, REACTOR-LOCAL): cubo de fichas
+  con **relleno perezoso** (`rate` fichas/s, tope `burst`, arranca lleno) y reloj inyectado;
+  `allow(now, cost=1)` admite/rechaza descontando, `available(now)` consulta, `configure(rate, burst)`
+  recorta a la nueva capacidad. Nuevo target `nexus-ingress` (INTERFACE hasta la primera `.cpp`).
+  Tests deterministas: ráfaga inicial, rechazo al agotar, relleno con el tiempo, tope de capacidad,
+  coste variable, reloj anterior no acredita, reconfiguración.
+- [ ] **I2** `ingress/circuit_breaker.{hpp,cpp}` — `CircuitBreaker` (Closed/Open/HalfOpen + ventana
+  deslizante de errores; reloj inyectado).
+- [ ] **I3** `ingress/load_balancer.{hpp,cpp}` — `LoadBalancer` (round-robin / least-connections /
+  consistent-hashing por *partition key*).
+- [ ] **I4** `ingress/health_check.{hpp,cpp}` — `HealthChecker` (activo: ping periódico; pasivo:
+  errores reales; alimenta `/readyz`).
+
+### Bloque I.B — Observabilidad (`nexus-server`)
+- [ ] **I5** `MetricsRegistry` (contadores/gauges/histogramas + exposición Prometheus `/metrics`).
+- [ ] **I6** logs estructurados JSON + *correlation IDs* (`common/logging.hpp`).
+
+### Bloque I.C — HTTP + REST admin
+- [ ] **I7** HTTP/1.1: `HttpRequest`/`HttpResponse` + parser defensivo (TDD + fuzzing).
+- [ ] **I8** RFC 7807 `ProblemDetail` + paginación (`page`/`size`) + helpers de JSON para DTOs.
+- [ ] **I9** `common`: SHA-256 + HMAC-SHA256 a mano (*known-answer tests* de RFC/NIST).
+- [ ] **I10** `JwtVerifier` (HS256, base64url, `exp`/`nbf`/`iat` con reloj inyectado).
+- [ ] **I11** `AdminApi` sobre `TopicManager`/`GroupCoordinator` (create/delete/describe/list/reassign).
+- [ ] **I12** `RestGateway` (`/api/v1/...` → `AdminApi`, RFC 7807, paginación, autenticación JWT).
+- [ ] **I13** `/healthz` + `/readyz` (checks disk/raft/replicationLag/startup, JSON).
+- [ ] **I14** Cableado en `nexus-server`: puerto HTTP de admin (RestGateway + Metrics + health).
+
+### Bloque I.D — CLI
+- [ ] **I15** `nexus-cli`: esqueleto + parseo de args + subcomandos `topic` (create/list/describe/delete).
+- [ ] **I16** `nexus-cli`: subcomandos `group` / `partitions` / `diagnostics`.
+
+### Bloque I.E — TLS + modos de ingress
+- [ ] **I17** OpenSSL (condicional) + `TlsContext`/`TlsConnection` (TLS 1.3, mTLS; e2e loopback con
+  certs autofirmados, *skip* si no hay OpenSSL).
+- [ ] **I18** `Proxy` (modo proxy: enruta clientes "tontos" al líder por *consistent-hash*) +
+  `ConnectionState`.
+
+### Bloque I.F — Despliegue + documentación
+- [ ] **I19** `deploy/`: `Dockerfile` (multi-stage → distroless, no-root, `HEALTHCHECK` → `/readyz`),
+  `docker-compose.yml` (3 nodos + Prometheus/Grafana), `k8s/` (probes), `.dockerignore`.
+- [ ] **I20** `docs/openapi.yaml` (contrato REST) + `docs/protocol.md` (protocolo binario) + cierre de Fase 3.
 
 ---
 
