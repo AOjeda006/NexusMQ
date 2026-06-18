@@ -474,8 +474,14 @@ Harness de benchmark vacío y CI:
     de basura tras el valor raíz y límite de anidamiento `kJsonMaxDepth` (anti-DoS). Tests: tipos
     básicos, arrays/anidamiento, números (fracción/exponente), escapes, Unicode (BMP y subrogado),
     espacios, rechazos de gramática y profundidad excesiva.
-  - [ ] **I10c** `JwtVerifier` (HS256, `exp`/`nbf`/`iat` con reloj inyectado, comparación de firma en
-    tiempo constante).
+  - [x] **I10c** `ingress/jwt.{hpp,cpp}` — `JwtVerifier` HS256 (RFC 7515/7519) sin dependencias
+    externas, sobre `hmac_sha256` (I9), `base64url` (I10a) y `parse_json` (I10b). `Principal`
+    (`sub`/`roles`) y `JwtOptions` (`issuer`/`audience`/`leeway`/`require_exp`). `verify(token,
+    now_unix_seconds)`: trocea `header.payload.signature`, exige `alg=HS256` (rechaza `none` y
+    asimétricos), compara la firma en **tiempo constante** y valida `exp`/`nbf`/`iat`/`iss`/`aud` con
+    el instante **inyectado**. Tests: token válido, secreto/firma incorrectos, expiración, `nbf`,
+    `leeway`, `require_exp`, `iss`/`aud`, ataque `alg:none`, formato inválido e interoperabilidad con
+    un token real de jwt.io.
 - [ ] **I11** `AdminApi` sobre `TopicManager`/`GroupCoordinator` (create/delete/describe/list/reassign).
 - [ ] **I12** `RestGateway` (`/api/v1/...` → `AdminApi`, RFC 7807, paginación, autenticación JWT).
 - [ ] **I13** `/healthz` + `/readyz` (checks disk/raft/replicationLag/startup, JSON).
