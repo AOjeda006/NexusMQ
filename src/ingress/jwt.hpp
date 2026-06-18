@@ -23,10 +23,14 @@ struct Principal {
 
 /// @brief Política de validación del `JwtVerifier`. Afinidad: INMUTABLE (configuración).
 struct JwtOptions {
-    std::string issuer;               ///< Si no vacío, exige `iss` == issuer.
-    std::string audience;             ///< Si no vacío, exige que `aud` lo incluya (cadena o array).
-    std::int64_t leeway_seconds = 0;  ///< Tolerancia de desfase de reloj para `exp`/`nbf`/`iat`.
-    bool require_exp = true;          ///< Si true, rechaza tokens sin `exp` (no caducan nunca).
+    /// Si no vacío, exige `iss` == issuer.
+    std::string issuer;
+    /// Si no vacío, exige que `aud` lo incluya (cadena o array).
+    std::string audience;
+    /// Tolerancia de desfase de reloj para `exp`/`nbf`/`iat`.
+    std::int64_t leeway_seconds = 0;
+    /// Si true, rechaza tokens sin `exp` (no caducan nunca).
+    bool require_exp = true;
 };
 
 /// @brief Verifica JWT firmados con **HS256** (HMAC-SHA256), sin dependencias externas.
