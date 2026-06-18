@@ -13,6 +13,7 @@ add_executable(nexus-tests
   unit/common/error_test.cpp
   unit/common/record_test.cpp
   unit/common/varint_test.cpp
+  unit/common/sha256_test.cpp
   unit/common/task_test.cpp
   unit/io/file_test.cpp
   unit/io/socket_test.cpp

@@ -454,7 +454,12 @@ Harness de benchmark vacío y CI:
   **defensivo** (`expected`): defaults `page=1`/`size=20`, límite `max_size`, rechazo de `page=0`,
   `size` fuera de rango y valores no numéricos. Tests: JSON plano/anidado/escapado/null, mapeo de
   códigos, JSON RFC 7807, respuesta con content-type, y paginación (defaults, parseo, rechazos).
-- [ ] **I9** `common`: SHA-256 + HMAC-SHA256 a mano (*known-answer tests* de RFC/NIST).
+- [x] **I9** `common/sha256.{hpp,cpp}` — **SHA-256** (FIPS 180-4) y **HMAC-SHA256** (RFC 2104) a mano,
+  base de la verificación JWT HS256 (I10) sin dependencias externas. `Sha256` incremental
+  (`update`/`finish`/`reset`, bloques de 512 bits, padding + longitud big-endian); `sha256(span)`,
+  `hmac_sha256(key, msg)` (normaliza la clave por hash si excede el bloque) y `to_hex`. *Known-answer
+  tests*: vectores FIPS 180-4 (vacío, "abc", 448 bits, millón de 'a' multibloque), igualdad
+  incremental↔una-llamada y HMAC RFC 4231 (casos 1, 2 y 6 con clave mayor que el bloque).
 - [ ] **I10** `JwtVerifier` (HS256, base64url, `exp`/`nbf`/`iat` con reloj inyectado).
 - [ ] **I11** `AdminApi` sobre `TopicManager`/`GroupCoordinator` (create/delete/describe/list/reassign).
 - [ ] **I12** `RestGateway` (`/api/v1/...` → `AdminApi`, RFC 7807, paginación, autenticación JWT).
