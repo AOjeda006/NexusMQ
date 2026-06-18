@@ -7,7 +7,8 @@ add_library(nexus-common
   bytes.cpp
   record.cpp
   varint.cpp
-  sha256.cpp)
+  sha256.cpp
+  base64.cpp)
 add_library(nexus::common ALIAS nexus-common)
 
 # La raíz de inclusión es src/, de modo que se incluye como "common/version.hpp".

@@ -460,7 +460,16 @@ Harness de benchmark vacío y CI:
   `hmac_sha256(key, msg)` (normaliza la clave por hash si excede el bloque) y `to_hex`. *Known-answer
   tests*: vectores FIPS 180-4 (vacío, "abc", 448 bits, millón de 'a' multibloque), igualdad
   incremental↔una-llamada y HMAC RFC 4231 (casos 1, 2 y 6 con clave mayor que el bloque).
-- [ ] **I10** `JwtVerifier` (HS256, base64url, `exp`/`nbf`/`iat` con reloj inyectado).
+- **I10** `JwtVerifier` (HS256). *Ajuste de desglose:* se divide en tres incrementos atómicos
+  (base64url → parser JSON → verificador), porque el JWT necesita un codec y un lector JSON que el
+  desglose no detallaba y que el REST admin reutiliza:
+  - [x] **I10a** `common/base64.{hpp,cpp}` — codec **base64url** sin relleno (RFC 4648 §5, alfabeto
+    URL-safe `-`/`_`). `base64url_encode` (sin `=`) y `base64url_decode` defensivo (`expected`):
+    tolera relleno opcional, rechaza caracteres fuera del alfabeto y longitudes `% 4 == 1`. Tests:
+    vectores RFC 4648, distinción URL-safe (`+/`→`-_`), round-trip y rechazos.
+  - [ ] **I10b** parser JSON (`JsonValue` + `parse_json`) acompañando al `JsonWriter` (I8).
+  - [ ] **I10c** `JwtVerifier` (HS256, `exp`/`nbf`/`iat` con reloj inyectado, comparación de firma en
+    tiempo constante).
 - [ ] **I11** `AdminApi` sobre `TopicManager`/`GroupCoordinator` (create/delete/describe/list/reassign).
 - [ ] **I12** `RestGateway` (`/api/v1/...` → `AdminApi`, RFC 7807, paginación, autenticación JWT).
 - [ ] **I13** `/healthz` + `/readyz` (checks disk/raft/replicationLag/startup, JSON).
