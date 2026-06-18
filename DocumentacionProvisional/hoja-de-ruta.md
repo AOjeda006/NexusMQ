@@ -467,7 +467,13 @@ Harness de benchmark vacío y CI:
     URL-safe `-`/`_`). `base64url_encode` (sin `=`) y `base64url_decode` defensivo (`expected`):
     tolera relleno opcional, rechaza caracteres fuera del alfabeto y longitudes `% 4 == 1`. Tests:
     vectores RFC 4648, distinción URL-safe (`+/`→`-_`), round-trip y rechazos.
-  - [ ] **I10b** parser JSON (`JsonValue` + `parse_json`) acompañando al `JsonWriter` (I8).
+  - [x] **I10b** `ingress/json_value.{hpp,cpp}` — lector JSON (RFC 8259) que acompaña al `JsonWriter`
+    (I8). `JsonValue` (árbol inmutable sobre `variant`; objetos con orden de inserción; números como
+    `double`; `find`/`as_*`) y `parse_json` **defensivo** (`expected`): parser recursivo descendente
+    con escapes (`\uXXXX` + pares subrogados → UTF-8), validación de la gramática de números, rechazo
+    de basura tras el valor raíz y límite de anidamiento `kJsonMaxDepth` (anti-DoS). Tests: tipos
+    básicos, arrays/anidamiento, números (fracción/exponente), escapes, Unicode (BMP y subrogado),
+    espacios, rechazos de gramática y profundidad excesiva.
   - [ ] **I10c** `JwtVerifier` (HS256, `exp`/`nbf`/`iat` con reloj inyectado, comparación de firma en
     tiempo constante).
 - [ ] **I11** `AdminApi` sobre `TopicManager`/`GroupCoordinator` (create/delete/describe/list/reassign).

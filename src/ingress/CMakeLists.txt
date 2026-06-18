@@ -6,6 +6,7 @@ add_library(nexus-ingress
   load_balancer.cpp
   http.cpp
   json.cpp
+  json_value.cpp
   problem_detail.cpp
   pagination.cpp)
 add_library(nexus::ingress ALIAS nexus-ingress)
