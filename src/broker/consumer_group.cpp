@@ -10,6 +10,22 @@
 
 namespace nexus {
 
+std::string_view group_state_name(GroupState state) noexcept {
+    switch (state) {
+        case GroupState::Empty:
+            return "Empty";
+        case GroupState::PreparingRebalance:
+            return "PreparingRebalance";
+        case GroupState::CompletingRebalance:
+            return "CompletingRebalance";
+        case GroupState::Stable:
+            return "Stable";
+        case GroupState::Dead:
+            return "Dead";
+    }
+    return "Unknown";
+}
+
 void ConsumerGroup::begin_rebalance() {
     state_ = GroupState::PreparingRebalance;
     leader_id_.clear();  // el primero en reincorporarse será el nuevo líder.

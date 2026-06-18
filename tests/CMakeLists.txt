@@ -73,6 +73,7 @@ add_executable(nexus-tests
   sim/raft_sim_test.cpp
   e2e/broker_e2e_test.cpp
   e2e/client_e2e_test.cpp
+  e2e/admin_http_e2e_test.cpp
   crash/partition_crash_test.cpp)
 
 # LatencyHistogram es header-only en tools/bench; el test lo incluye directamente.

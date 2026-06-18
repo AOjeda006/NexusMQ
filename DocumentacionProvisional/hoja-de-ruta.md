@@ -520,8 +520,19 @@ Harness de benchmark vacío y CI:
   REST (200/404) y reloj inyectado aplicado al JWT (401 sin token). *Ajuste:* I14 se parte en
   **I14a** (enrutador, testeable sin sockets) y **I14b** (servicio HTTP sobre socket + cableado en
   `Server` + e2e).
-- [ ] **I14b** Cableado en `nexus-server`: listener del puerto de admin, lectura HTTP sobre socket,
-  inyección de *probes* (disco) y del *group lister*, e2e del puerto de operación.
+- [x] **I14b** `server/admin_http.{hpp,cpp}` + cableado en `Server` — **plano de operación** de
+  extremo a extremo. `read_http_request` lee un mensaje HTTP/1.1 completo sobre `Socket` (acumula
+  cabeceras hasta `\r\n\r\n`, resuelve `Content-Length` y el cuerpo, con límites anti-DoS);
+  `serve_admin_connection` sirve **una** petición vía `AdminRouter` y cierra (`Connection: close`),
+  con `400` para mensajes malformados. `Server` gana `Config{admin_port?, jwt_secret,
+  min_free_disk_bytes}`, posee `MetricsRegistry`/`HealthMonitor`/`AdminApi`/`RestGateway`/
+  `AdminRouter`, enlaza un **segundo listener** (admin) y lanza su `accept_loop` en el mismo reactor;
+  `run()` marca `set_started(true)` y `stop()` `set_live(false)` (drenado). El *group lister* se
+  inyecta leyendo `RequestRouter::group_coordinator().list_groups()` (REACTOR-LOCAL, mismo hilo) y se
+  registra el `disk_space_probe` si hay umbral. Soporte broker: `GroupCoordinator::list_groups()`
+  (ordenado por id) + `group_state_name()`. Tests: unit de `list_groups`/`group_state_name`; **e2e**
+  del puerto de operación (`/healthz`, `/readyz`, `/metrics`, `GET/POST /api/v1/topics`, 404)
+  contra un `Server` real por socket.
 
 ### Bloque I.D — CLI
 - [ ] **I15** `nexus-cli`: esqueleto + parseo de args + subcomandos `topic` (create/list/describe/delete).

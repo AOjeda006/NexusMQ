@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <vector>
 
 #include "broker/consumer_group.hpp"
 #include "common/error.hpp"
@@ -40,6 +41,36 @@ TEST(GroupCoordinator, Leave_GrupoDesconocido_DevuelveNotFound) {
     const nexus::expected<void> result = coordinator.leave("fantasma", "m");
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code(), nexus::ErrorCode::NotFound);
+}
+
+TEST(GroupCoordinator, ListGroups_OrdenadosPorIdConEstado) {
+    nexus::GroupCoordinator coordinator;
+    const nexus::MonoTime t0{};
+    ASSERT_TRUE(coordinator.join(t0, "zeta", "", {}, 30s).has_value());
+    ASSERT_TRUE(coordinator.join(t0, "alfa", "", {}, 30s).has_value());
+
+    const std::vector<nexus::GroupDigest> digests = coordinator.list_groups();
+    ASSERT_EQ(digests.size(), 2U);
+    EXPECT_EQ(digests[0].group_id, "alfa");  // ordenados por id.
+    EXPECT_EQ(digests[1].group_id, "zeta");
+    EXPECT_EQ(digests[0].member_count, 1U);
+    // Un único miembro completa la ronda de reincorporación: el grupo espera el sync del líder.
+    EXPECT_EQ(nexus::group_state_name(digests[0].state), "CompletingRebalance");
+    EXPECT_EQ(digests[0].generation, 1);
+}
+
+TEST(GroupCoordinator, ListGroups_VacioSinGrupos) {
+    const nexus::GroupCoordinator coordinator;
+    EXPECT_TRUE(coordinator.list_groups().empty());
+}
+
+TEST(GroupCoordinator, GroupStateName_CubreTodosLosEstados) {
+    EXPECT_EQ(nexus::group_state_name(nexus::GroupState::Empty), "Empty");
+    EXPECT_EQ(nexus::group_state_name(nexus::GroupState::PreparingRebalance), "PreparingRebalance");
+    EXPECT_EQ(nexus::group_state_name(nexus::GroupState::CompletingRebalance),
+              "CompletingRebalance");
+    EXPECT_EQ(nexus::group_state_name(nexus::GroupState::Stable), "Stable");
+    EXPECT_EQ(nexus::group_state_name(nexus::GroupState::Dead), "Dead");
 }
 
 TEST(GroupCoordinator, Tick_ExpiraSesionesEnVariosGrupos) {

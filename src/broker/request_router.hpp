@@ -41,6 +41,10 @@ public:
     /// Rangos de versión que soporta este servidor (para `ApiVersions` y la negociación).
     [[nodiscard]] static std::vector<ApiVersionRange> supported_versions();
 
+    /// @brief Coordinador de grupos de este reactor (plano de control: lo lee el puerto de admin).
+    /// @details REACTOR-LOCAL: el llamante debe estar en el hilo del reactor del router.
+    [[nodiscard]] const GroupCoordinator& group_coordinator() const noexcept { return groups_; }
+
 private:
     TopicManager& topics_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     NodeId node_id_;

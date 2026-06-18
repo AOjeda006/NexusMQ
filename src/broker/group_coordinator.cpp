@@ -4,6 +4,7 @@
 
 #include "broker/group_coordinator.hpp"
 
+#include <algorithm>
 #include <string>
 #include <utility>
 
@@ -12,6 +13,19 @@ namespace nexus {
 ConsumerGroup* GroupCoordinator::find(std::string_view group_id) {
     const auto it = groups_.find(std::string{group_id});
     return it == groups_.end() ? nullptr : &it->second;
+}
+
+std::vector<GroupDigest> GroupCoordinator::list_groups() const {
+    std::vector<GroupDigest> digests;
+    digests.reserve(groups_.size());
+    for (const auto& [id, group] : groups_) {
+        digests.push_back(GroupDigest{.group_id = group.group_id(),
+                                      .state = group.state(),
+                                      .generation = group.generation(),
+                                      .member_count = group.member_count()});
+    }
+    std::ranges::sort(digests, {}, &GroupDigest::group_id);
+    return digests;
 }
 
 expected<JoinResult> GroupCoordinator::join(MonoTime now, const std::string& group_id,

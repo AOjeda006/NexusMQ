@@ -5,7 +5,8 @@ add_library(nexus-server
   server.cpp
   connection.cpp
   admin_api.cpp
-  admin_router.cpp)
+  admin_router.cpp
+  admin_http.cpp)
 add_library(nexus::server ALIAS nexus-server)
 
 target_include_directories(nexus-server PUBLIC ${PROJECT_SOURCE_DIR}/src)

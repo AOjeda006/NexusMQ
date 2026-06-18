@@ -18,6 +18,14 @@
 
 namespace nexus {
 
+/// @brief Resumen de un grupo para el plano de control (operación/observabilidad). INMUTABLE.
+struct GroupDigest {
+    std::string group_id;      ///< Identificador del grupo.
+    GroupState state;          ///< Estado de la FSM.
+    Generation generation;     ///< Generación vigente.
+    std::size_t member_count;  ///< Número de miembros.
+};
+
 /// @brief Coordinador de grupos de consumidores: un mapa `group_id → ConsumerGroup`. Afinidad:
 ///   REACTOR-LOCAL (vive en el `RequestRouter` de su reactor; sin sincronización).
 /// @details Delega en el `ConsumerGroup` correspondiente: `join` **crea el grupo** si no existe
@@ -53,6 +61,9 @@ public:
     [[nodiscard]] std::size_t group_count() const noexcept { return groups_.size(); }
     /// Acceso al grupo (observabilidad/pruebas); `nullptr` si no existe.
     [[nodiscard]] ConsumerGroup* find(std::string_view group_id);
+
+    /// @brief Enumera los grupos (plano de control), **ordenados por `group_id`** (determinista).
+    [[nodiscard]] std::vector<GroupDigest> list_groups() const;
 
 private:
     std::unordered_map<std::string, ConsumerGroup> groups_;

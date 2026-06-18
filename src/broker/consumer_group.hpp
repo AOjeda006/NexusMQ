@@ -29,6 +29,9 @@ enum class GroupState : std::uint8_t {
     Dead,
 };
 
+/// @brief Nombre estable de un `GroupState` (para metadata/observabilidad; p. ej. `"Stable"`).
+[[nodiscard]] std::string_view group_state_name(GroupState state) noexcept;
+
 /// @brief Resultado de un `heartbeat`: liveness aceptada o señal de re-incorporación.
 enum class HeartbeatStatus : std::uint8_t {
     Ok,                  ///< Grupo estable: latido aceptado.
