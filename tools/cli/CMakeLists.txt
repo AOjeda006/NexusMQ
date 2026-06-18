@@ -4,7 +4,10 @@
 add_library(nexus-cli-core
   cli.cpp
   http_admin_client.cpp
-  topic_commands.cpp)
+  topic_commands.cpp
+  group_commands.cpp
+  partition_commands.cpp
+  admin_commands.cpp)
 add_library(nexus::cli ALIAS nexus-cli-core)
 
 # "cli/..." resuelve bajo tools/; "common/..."/"ingress/..." vienen de las libs enlazadas.

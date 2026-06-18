@@ -545,7 +545,15 @@ Harness de benchmark vacío y CI:
   exit), `parse_global_options` (defaults, separado/pegado, errores) y **e2e** del `HttpAdminClient`
   real contra un `Server` con puerto de operación. *Ajuste:* el CLI habla **REST admin** (no el
   protocolo binario); deps reales: `common` + `ingress` (`json_value`).
-- [ ] **I16** `nexus-cli`: subcomandos `group` / `partitions` / `diagnostics`.
+- [x] **I16** `nexus-cli`: subcomandos `group` / `partitions` / `metrics` / `diagnostics`.
+  `run_group` (list/describe; describe filtra el listado, ya que el REST aún no expone
+  `/groups/{id}`), `run_partitions <topic>` (tabula las particiones vía `GET /api/v1/topics/{name}`),
+  `run_metrics` (vuelca `/metrics` Prometheus) y `run_diagnostics` (consulta `/healthz`+`/readyz` y
+  resume liveness/readiness; exit 0 solo si vivo y listo). Helpers de render compartidos en
+  `cli/render.hpp` (`json_int`/`json_str`/`fail`), reutilizados por `topic_commands`. *Ajuste:*
+  `partitions reassign` (mutación) es multi-nodo y queda para Fase 4. Tests con doble de
+  `AdminClient` (group list/describe, partitions, metrics, diagnostics vivo/no-listo) y **e2e**
+  ampliado (`group list`, `diagnostics`, `metrics` contra un `Server` real).
 
 ### Bloque I.E — TLS + modos de ingress
 - [ ] **I17** OpenSSL (condicional) + `TlsContext`/`TlsConnection` (TLS 1.3, mTLS; e2e loopback con

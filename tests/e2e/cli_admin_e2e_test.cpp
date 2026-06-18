@@ -11,6 +11,8 @@
 #include <thread>
 #include <vector>
 
+#include "cli/admin_commands.hpp"
+#include "cli/group_commands.hpp"
 #include "cli/http_admin_client.hpp"
 #include "cli/topic_commands.hpp"
 #include "server/server.hpp"
@@ -86,6 +88,26 @@ TEST(CliAdminE2E, HttpClientContraServerReal) {
         const std::vector<std::string_view> args{"list"};
         EXPECT_EQ(nexus::cli::run_topic(client, args, out, err), 0);
         EXPECT_NE(out.str().find("events"), std::string::npos);
+    }
+
+    // `group list` responde (sin grupos) y `diagnostics`/`metrics` ven el nodo sano.
+    {
+        std::ostringstream out;
+        std::ostringstream err;
+        const std::vector<std::string_view> args{"list"};
+        EXPECT_EQ(nexus::cli::run_group(client, args, out, err), 0);
+        EXPECT_NE(out.str().find("GROUP"), std::string::npos);
+    }
+    {
+        std::ostringstream out;
+        std::ostringstream err;
+        EXPECT_EQ(nexus::cli::run_diagnostics(client, out, err), 0) << err.str();
+        EXPECT_NE(out.str().find("readiness:"), std::string::npos);
+    }
+    {
+        std::ostringstream out;
+        std::ostringstream err;
+        EXPECT_EQ(nexus::cli::run_metrics(client, out, err), 0);
     }
 
     server->stop();

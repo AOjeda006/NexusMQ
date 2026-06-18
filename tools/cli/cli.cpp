@@ -8,7 +8,10 @@
 #include <string>
 #include <utility>
 
+#include "cli/admin_commands.hpp"
+#include "cli/group_commands.hpp"
 #include "cli/http_admin_client.hpp"
+#include "cli/partition_commands.hpp"
 #include "cli/topic_commands.hpp"
 
 namespace nexus::cli {
@@ -33,7 +36,12 @@ void print_usage(std::ostream& out) {
         << "  topic list                      lista los topics\n"
         << "  topic create <name> [-p N] [-r R]  crea un topic\n"
         << "  topic describe <name>           describe un topic\n"
-        << "  topic delete <name>             borra un topic\n";
+        << "  topic delete <name>             borra un topic\n"
+        << "  group list                      lista los grupos de consumidores\n"
+        << "  group describe <id>             describe un grupo\n"
+        << "  partitions <topic>              lista las particiones de un topic\n"
+        << "  metrics                         vuelca /metrics (Prometheus)\n"
+        << "  diagnostics                     resumen de liveness/readiness\n";
 }
 
 }  // namespace
@@ -116,16 +124,24 @@ int run_cli(std::span<const std::string_view> args, std::ostream& out, std::ostr
         print_usage(out);
         return 0;
     }
-    if (command == "topic") {
+    if (command == "topic" || command == "group" || command == "partitions" ||
+        command == "metrics" || command == "diagnostics") {
         HttpAdminClient client{HttpAdminClient::Options{.host = parsed->options.host,
                                                         .port = parsed->options.port,
                                                         .bearer_token = parsed->options.token}};
-        return run_topic(client, rest, out, err);
-    }
-    if (command == "group" || command == "partitions" || command == "diagnostics" ||
-        command == "metrics") {
-        err << "comando '" << command << "' aún no implementado (I16)\n";
-        return 1;
+        if (command == "topic") {
+            return run_topic(client, rest, out, err);
+        }
+        if (command == "group") {
+            return run_group(client, rest, out, err);
+        }
+        if (command == "partitions") {
+            return run_partitions(client, rest, out, err);
+        }
+        if (command == "metrics") {
+            return run_metrics(client, out, err);
+        }
+        return run_diagnostics(client, out, err);
     }
     err << "comando desconocido: " << command << '\n';
     print_usage(err);

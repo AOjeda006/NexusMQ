@@ -8,6 +8,7 @@
 #include <ios>
 #include <string>
 
+#include "cli/render.hpp"
 #include "ingress/json_value.hpp"
 
 namespace nexus::cli {
@@ -15,28 +16,6 @@ namespace nexus::cli {
 namespace {
 
 constexpr std::string_view kTopicsPath = "/api/v1/topics";
-
-/// Lee un entero @p key de un objeto JSON (0 si falta o no es número).
-std::int64_t json_int(const JsonValue& object, std::string_view key) {
-    const JsonValue* value = object.find(key);
-    return (value != nullptr && value->is_number()) ? value->as_int64() : 0;
-}
-
-/// Lee una cadena @p key de un objeto JSON (vacía si falta o no es cadena).
-std::string json_str(const JsonValue& object, std::string_view key) {
-    const JsonValue* value = object.find(key);
-    return (value != nullptr && value->is_string()) ? value->as_string() : std::string{};
-}
-
-/// Imprime el cuerpo de error (problem+json o texto) y devuelve 1.
-int fail(std::ostream& err, const ClientResponse& response) {
-    err << "error (HTTP " << response.status << ")";
-    if (!response.body.empty()) {
-        err << ": " << response.body;
-    }
-    err << '\n';
-    return 1;
-}
 
 /// `topic list`: GET /topics e imprime una tabla.
 int list(AdminClient& client, std::ostream& out, std::ostream& err) {
