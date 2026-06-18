@@ -648,7 +648,7 @@ Resumen de las estructuras nucleares con sus campos; alimenta directamente el de
 
 ### 6.7 Catálogo de ADRs
 
-Ver §9. Índice rápido: ADR-0001 (plataforma), ADR-0002 (I/O), ADR-0003 (replicación: **Raft por partición**, *aceptado*), ADR-0004 (protocolo: **binario propio + REST**, *aceptado*), ADR-0005 (concurrencia: ***shared-nothing thread-per-core***, *aceptado*), ADR-0006 (*ingress* dos modos, *aceptado*), ADR-0007 (consistencia CP/PACELC, *aceptado*), ADR-0008 (coste cero, *aceptado*), ADR-0009 (manejo de errores por capa, *aceptado*), ADR-0010 (IDE: migración a **VS Code** sobre WSL, *aceptado*), ADR-0011 (estándar **C++23** + libc++ en Clang, *aceptado*), ADR-0012 (backend io_uring directo sobre el uapi, sin liburing, *aceptado*), ADR-0013 (capa **`nexus-wire`** para el framing sobre conexión; `nexus-protocol` queda puro, *aceptado*), ADR-0014 (modelo del **log de Raft**: índice = ordinal de entrada, término en sidecar; `RecordBatch` intacto, *aceptado*), ADR-0015 (`RaftNode` como **máquina de estados síncrona sin E/S** —entradas→cola de salidas—, para simulación determinista, *aceptado*), ADR-0016 (`ReplicatedPartition` como **tipo paralelo** a `Partition`, *aceptado*), ADR-0017 (target **`nexus-telemetry`** para observabilidad bajo el broker, *aceptado*).
+Ver §9. Índice rápido: ADR-0001 (plataforma), ADR-0002 (I/O), ADR-0003 (replicación: **Raft por partición**, *aceptado*), ADR-0004 (protocolo: **binario propio + REST**, *aceptado*), ADR-0005 (concurrencia: ***shared-nothing thread-per-core***, *aceptado*), ADR-0006 (*ingress* dos modos, *aceptado*), ADR-0007 (consistencia CP/PACELC, *aceptado*), ADR-0008 (coste cero, *aceptado*), ADR-0009 (manejo de errores por capa, *aceptado*), ADR-0010 (IDE: migración a **VS Code** sobre WSL, *aceptado*), ADR-0011 (estándar **C++23** + libc++ en Clang, *aceptado*), ADR-0012 (backend io_uring directo sobre el uapi, sin liburing, *aceptado*), ADR-0013 (capa **`nexus-wire`** para el framing sobre conexión; `nexus-protocol` queda puro, *aceptado*), ADR-0014 (modelo del **log de Raft**: índice = ordinal de entrada, término en sidecar; `RecordBatch` intacto, *aceptado*), ADR-0015 (`RaftNode` como **máquina de estados síncrona sin E/S** —entradas→cola de salidas—, para simulación determinista, *aceptado*), ADR-0016 (`ReplicatedPartition` como **tipo paralelo** a `Partition`, *aceptado*), ADR-0017 (target **`nexus-telemetry`** para observabilidad bajo el broker, *aceptado*), ADR-0018 (REST admin por **puerto/adaptador**: `AdminService` en ingress, `AdminApi` en server, *aceptado*).
 
 ---
 
@@ -1230,6 +1230,26 @@ Procedimientos de operación que el diseño debe soportar (se concretan en Fase 
 - **`metrics` en `nexus-server` (desglose literal):** imposible que las bibliotecas inferiores registren métricas (un *exe* no es dependencia); descartado.
 - **`metrics` en `nexus-ingress`:** crea el ciclo de capas `broker → ingress`; descartado.
 - **`metrics` en `nexus-common`:** mete infraestructura con estado (mutex, familias, render) en la capa de vocabulario mínimo; descartado por cohesión.
+
+---
+
+### ADR-0018: REST admin por **puerto/adaptador** (`AdminService` en ingress, `AdminApi` en server)
+
+- **Estado:** aceptado
+- **Fecha:** 2026-06-18
+
+> **Refina el desglose** (no cambia ninguna decisión de arquitectura previa): el desglose detallado (§4.9) ubicaba `admin_api.{hpp,cpp}` dentro de `nexus-server` y, a la vez (§4.8), hacía que `RestGateway` (en `nexus-ingress`) tuviera un `AdminApi&`. Eso crea un **ciclo de capas** `ingress → server` (la pasarela usa la API) y `server → ingress` (el `Server` posee la `Ingress`). Este ADR rompe el ciclo con **inversión de dependencias**, igual que ADR-0017 hizo con la telemetría.
+
+**Contexto.** El `RestGateway` (plano de ingress) traduce HTTP↔dominio y necesita ejecutar operaciones de administración (crear/borrar/describir/listar topics y grupos). La lógica de esas operaciones vive sobre `TopicManager`/`GroupCoordinator`, que son del **broker** (capa inferior a server, pero `ingress` **no** depende de broker en el grafo: `ingress → common, io, protocol, wire`). Si el gateway dependiera de un `AdminApi` concreto alojado en `nexus-server`, `ingress` dependería de `server` (que ya depende de `ingress`): ciclo.
+
+**Decisión.** Definir el **puerto** `AdminService` (interfaz abstracta) y sus **DTOs** (`CreateTopicSpec`, `TopicSummary`, `PartitionInfo`, `TopicDescription`, `GroupSummary`) en **`nexus-ingress`** (`ingress/admin_service.hpp`), como tipos de datos planos sin dependencia del broker. El `RestGateway` depende solo de `AdminService&`. El **adaptador** concreto `AdminApi` (en **`nexus-server`**, `server/admin_api.{hpp,cpp}`) **implementa** `AdminService` sobre `TopicManager&` y un *group lister* inyectado (`std::function`), traduciendo los tipos del broker a los DTOs del puerto. La enumeración de grupos es **reactor-local** (cada `GroupCoordinator` vive en su reactor), así que se inyecta como función desde el cableado del server (I14), no se acopla al puerto. Se añade a `TopicManager` un accesor de observabilidad `list_metadata()` (control-plane).
+
+**Consecuencias.** (+) Grafo **acíclico**: `ingress` define el puerto (sin nuevas dependencias), `server` implementa el adaptador (ya depende de `ingress` y `broker`). (+) `RestGateway` es **testeable** con un doble de `AdminService` sin levantar broker. (+) Los DTOs del REST quedan **desacoplados** de los tipos internos (ADR-0009: traducción en el borde). (−) Una capa de traducción DTO↔dominio en el adaptador. (−) El listado de grupos cross-core real se materializa en el cableado (I14), no en el puerto.
+
+**Alternativas consideradas.**
+- **`AdminApi` concreto en `nexus-server`, referenciado por `ingress` (desglose literal):** crea el ciclo `ingress ↔ server`; descartado.
+- **`AdminApi` en `nexus-broker`:** tendría que implementar la interfaz `AdminService` de `ingress` ⇒ `broker → ingress` (dependencia **ascendente**, prohibida); descartado.
+- **`RestGateway` como router genérico de *handlers* (`std::function`):** rompe el ciclo, pero diluye el contrato de administración en *callbacks* sin tipado; el puerto explícito documenta mejor la API y es más fiel al desglose.
 
 ---
 

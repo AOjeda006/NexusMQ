@@ -89,6 +89,16 @@ std::vector<TopicMeta> TopicManager::describe(NodeId leader_node_id) const {
     return result;
 }
 
+std::vector<TopicMetadata> TopicManager::list_metadata() const {
+    const std::scoped_lock lock{mutex_};
+    std::vector<TopicMetadata> result;
+    result.reserve(topics_.size());
+    for (const auto& [name, topic] : topics_) {
+        result.push_back(topic->meta());
+    }
+    return result;
+}
+
 std::size_t TopicManager::topic_count() const {
     const std::scoped_lock lock{mutex_};
     return topics_.size();

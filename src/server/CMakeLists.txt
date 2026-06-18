@@ -3,16 +3,19 @@
 # `nexusd` solo añade el main (parseo de args + señales).
 add_library(nexus-server
   server.cpp
-  connection.cpp)
+  connection.cpp
+  admin_api.cpp)
 add_library(nexus::server ALIAS nexus-server)
 
 target_include_directories(nexus-server PUBLIC ${PROJECT_SOURCE_DIR}/src)
+# nexus::ingress aporta el puerto AdminService (ADR-0018), que AdminApi implementa.
 target_link_libraries(nexus-server PUBLIC
   nexus::common
   nexus::io
   nexus::reactor
   nexus::wire
   nexus::broker
+  nexus::ingress
   nexus_options)
 
 add_executable(nexusd main.cpp)

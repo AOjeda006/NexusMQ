@@ -53,6 +53,9 @@ public:
     /// Construye los `TopicMeta` para una `MetadataResponse` (líder = @p leader_node_id en 1b).
     [[nodiscard]] std::vector<TopicMeta> describe(NodeId leader_node_id) const;
 
+    /// @brief Devuelve los metadatos de todos los topics (control-plane; admin/observabilidad).
+    [[nodiscard]] std::vector<TopicMetadata> list_metadata() const;
+
     [[nodiscard]] std::size_t topic_count() const;
 
 private:

@@ -482,7 +482,16 @@ Harness de benchmark vacío y CI:
     el instante **inyectado**. Tests: token válido, secreto/firma incorrectos, expiración, `nbf`,
     `leeway`, `require_exp`, `iss`/`aud`, ataque `alg:none`, formato inválido e interoperabilidad con
     un token real de jwt.io.
-- [ ] **I11** `AdminApi` sobre `TopicManager`/`GroupCoordinator` (create/delete/describe/list/reassign).
+- [x] **I11** **REST admin por puerto/adaptador (ADR-0018)** — rompe el ciclo `ingress↔server` con
+  inversión de dependencias. `ingress/admin_service.hpp`: puerto `AdminService` (interfaz) + DTOs
+  planos sin dependencia del broker (`CreateTopicSpec`, `TopicSummary`, `PartitionInfo`,
+  `TopicDescription`, `GroupSummary`). `server/admin_api.{hpp,cpp}`: adaptador `AdminApi` que
+  implementa el puerto sobre `TopicManager&` + un *group lister* inyectado (la enumeración de grupos
+  es reactor-local; se cablea en I14), traduciendo tipos del broker↔DTOs (ADR-0009). Operaciones:
+  create/delete/describe/list-topics (ordenadas y paginadas) y list-groups. Se añade
+  `TopicManager::list_metadata()` (accesor de control-plane). Tests: creación (resumen, nombre
+  vacío, duplicado), borrado, describe (particiones + 404), listado ordenado/paginado y grupos vía
+  *lister* (con y sin). *Nota:* `reassign_partitions` queda diferido (multi-nodo, Fase 2/4).
 - [ ] **I12** `RestGateway` (`/api/v1/...` → `AdminApi`, RFC 7807, paginación, autenticación JWT).
 - [ ] **I13** `/healthz` + `/readyz` (checks disk/raft/replicationLag/startup, JSON).
 - [ ] **I14** Cableado en `nexus-server`: puerto HTTP de admin (RestGateway + Metrics + health).

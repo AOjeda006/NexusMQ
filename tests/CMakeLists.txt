@@ -50,6 +50,7 @@ add_executable(nexus-tests
   unit/broker/offset_manager_test.cpp
   unit/broker/credit_window_test.cpp
   unit/broker/request_router_test.cpp
+  unit/server/admin_api_test.cpp
   unit/consensus/raft_state_test.cpp
   unit/ingress/rate_limiter_test.cpp
   unit/ingress/circuit_breaker_test.cpp
