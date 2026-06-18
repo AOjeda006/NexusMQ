@@ -68,7 +68,7 @@ enable_testing()
 # Los subdirectorios se incorporan a medida que existen: el árbol crece por hito
 # (M1 cimientos → M2 common/storage → … ). Mientras una carpeta no tenga su
 # CMakeLists, se omite sin romper la configuración.
-foreach(_dir IN ITEMS src tools/bench tests)
+foreach(_dir IN ITEMS src tools/bench tools/cli tests)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_dir}/CMakeLists.txt")
     add_subdirectory(${_dir})
   endif()

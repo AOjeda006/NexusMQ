@@ -67,6 +67,8 @@ add_executable(nexus-tests
   unit/ingress/pagination_test.cpp
   unit/telemetry/metrics_test.cpp
   unit/telemetry/logging_test.cpp
+  unit/cli/topic_commands_test.cpp
+  unit/cli/cli_options_test.cpp
   unit/consensus/raft_rpc_test.cpp
   unit/consensus/raft_log_test.cpp
   unit/consensus/raft_node_test.cpp
@@ -74,6 +76,7 @@ add_executable(nexus-tests
   e2e/broker_e2e_test.cpp
   e2e/client_e2e_test.cpp
   e2e/admin_http_e2e_test.cpp
+  e2e/cli_admin_e2e_test.cpp
   crash/partition_crash_test.cpp)
 
 # LatencyHistogram es header-only en tools/bench; el test lo incluye directamente.
@@ -97,7 +100,8 @@ target_link_libraries(nexus-tests PRIVATE
   nexus::ingress
   nexus::telemetry
   nexus::client
-  nexus::server)
+  nexus::server
+  nexus::cli)
 
 # Registra cada TEST(...) como un test de CTest (los descubre del binario).
 gtest_discover_tests(nexus-tests)

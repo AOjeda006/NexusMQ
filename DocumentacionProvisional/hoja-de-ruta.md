@@ -535,7 +535,16 @@ Harness de benchmark vacío y CI:
   contra un `Server` real por socket.
 
 ### Bloque I.D — CLI
-- [ ] **I15** `nexus-cli`: esqueleto + parseo de args + subcomandos `topic` (create/list/describe/delete).
+- [x] **I15** `tools/cli/` — `nexus-cli`: esqueleto + parseo de opciones globales + subcomandos
+  `topic`. La lógica vive en la librería `nexus::cli` (testeable sin red): `AdminClient` (puerto) +
+  `HttpAdminClient` (HTTP/1.1 bloqueante con `getaddrinfo`, `Authorization: Bearer` opcional);
+  `parse_global_options` (`--host`/`--port`/`--token`, soporta `--flag=valor`); `run_topic`
+  (list/create/describe/delete) traduce a `GET/POST/DELETE /api/v1/topics`, parsea el JSON con
+  `parse_json`, imprime tabla/detalle y mapea HTTP `>= 400` → exit 1. `main.cpp` solo cablea
+  `argv → run_cli`. Tests: `run_topic` con un **doble de `AdminClient`** (ruta/método/cuerpo, salida,
+  exit), `parse_global_options` (defaults, separado/pegado, errores) y **e2e** del `HttpAdminClient`
+  real contra un `Server` con puerto de operación. *Ajuste:* el CLI habla **REST admin** (no el
+  protocolo binario); deps reales: `common` + `ingress` (`json_value`).
 - [ ] **I16** `nexus-cli`: subcomandos `group` / `partitions` / `diagnostics`.
 
 ### Bloque I.E — TLS + modos de ingress
