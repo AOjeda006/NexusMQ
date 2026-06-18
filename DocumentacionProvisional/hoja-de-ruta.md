@@ -511,7 +511,17 @@ Harness de benchmark vacío y CI:
   min_free_bytes)` de fábrica (cf. `ErrorCode::OutOfSpace`). Tests: liveness ok/drenando, readiness
   antes de arrancar (503), arrancado sin probes (200), probe sano (200), probe no sano con detalle
   (503), disco con/sin espacio.
-- [ ] **I14** Cableado en `nexus-server`: puerto HTTP de admin (RestGateway + Metrics + health).
+- [x] **I14a** `server/admin_router.{hpp,cpp}` — `AdminRouter`: multiplexa el **puerto de
+  operación** por ruta — `/metrics` (exposición Prometheus, `text/plain; version=0.0.4`),
+  `/healthz` (liveness) y `/readyz` (readiness) **sin autenticación** (los consumen el *scraper* y
+  el orquestador); el resto se delega al `RestGateway` (auth Bearer JWT + `/api/v1`). El «ahora» del
+  JWT lo aporta un reloj **inyectable** (`Clock`), para pruebas deterministas. Tests con
+  `RestGateway` real + doble de `AdminService`: métricas (200/405), health (200/503), delegación
+  REST (200/404) y reloj inyectado aplicado al JWT (401 sin token). *Ajuste:* I14 se parte en
+  **I14a** (enrutador, testeable sin sockets) y **I14b** (servicio HTTP sobre socket + cableado en
+  `Server` + e2e).
+- [ ] **I14b** Cableado en `nexus-server`: listener del puerto de admin, lectura HTTP sobre socket,
+  inyección de *probes* (disco) y del *group lister*, e2e del puerto de operación.
 
 ### Bloque I.D — CLI
 - [ ] **I15** `nexus-cli`: esqueleto + parseo de args + subcomandos `topic` (create/list/describe/delete).

@@ -4,11 +4,13 @@
 add_library(nexus-server
   server.cpp
   connection.cpp
-  admin_api.cpp)
+  admin_api.cpp
+  admin_router.cpp)
 add_library(nexus::server ALIAS nexus-server)
 
 target_include_directories(nexus-server PUBLIC ${PROJECT_SOURCE_DIR}/src)
-# nexus::ingress aporta el puerto AdminService (ADR-0018), que AdminApi implementa.
+# nexus::ingress aporta el puerto AdminService (ADR-0018), que AdminApi implementa, y la pasarela
+# REST/health; nexus::telemetry, el registro de métricas que expone /metrics (ADR-0017).
 target_link_libraries(nexus-server PUBLIC
   nexus::common
   nexus::io
@@ -16,6 +18,7 @@ target_link_libraries(nexus-server PUBLIC
   nexus::wire
   nexus::broker
   nexus::ingress
+  nexus::telemetry
   nexus_options)
 
 add_executable(nexusd main.cpp)
