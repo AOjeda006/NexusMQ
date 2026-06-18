@@ -60,6 +60,7 @@ add_executable(nexus-tests
   unit/ingress/json_test.cpp
   unit/ingress/json_value_test.cpp
   unit/ingress/jwt_test.cpp
+  unit/ingress/rest_gateway_test.cpp
   unit/ingress/problem_detail_test.cpp
   unit/ingress/pagination_test.cpp
   unit/telemetry/metrics_test.cpp

@@ -8,6 +8,7 @@ add_library(nexus-ingress
   json.cpp
   json_value.cpp
   jwt.cpp
+  rest_gateway.cpp
   problem_detail.cpp
   pagination.cpp)
 add_library(nexus::ingress ALIAS nexus-ingress)

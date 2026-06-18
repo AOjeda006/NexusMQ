@@ -492,7 +492,16 @@ Harness de benchmark vacío y CI:
   `TopicManager::list_metadata()` (accesor de control-plane). Tests: creación (resumen, nombre
   vacío, duplicado), borrado, describe (particiones + 404), listado ordenado/paginado y grupos vía
   *lister* (con y sin). *Nota:* `reassign_partitions` queda diferido (multi-nodo, Fase 2/4).
-- [ ] **I12** `RestGateway` (`/api/v1/...` → `AdminApi`, RFC 7807, paginación, autenticación JWT).
+- [x] **I12** `ingress/rest_gateway.{hpp,cpp}` — `RestGateway`: enruta `/api/v1/...` al puerto
+  `AdminService` (ADR-0018). Endpoints: `GET/POST /topics`, `GET/DELETE /topics/{name}`,
+  `GET /groups`. Autenticación **Bearer JWT** opcional (401 si falta/!válido), **paginación**
+  (`page`/`size`), parseo de cuerpos con `parse_json`, serialización de DTOs a JSON (camelCase, sin
+  exponer tipos internos) y traducción de `Error`→**RFC 7807** (`application/problem+json`); 201 +
+  `Location` al crear, 204 al borrar, 404/405 donde corresponde. *Ajuste:* `handle` es síncrono (el
+  puerto es síncrono THREAD-SAFE); el «ahora» del JWT se inyecta. Tests con un **doble de
+  `AdminService`** (sin broker): listados, creación (con/!name, body !JSON, error→7807), describe
+  (200/404), borrado (204/404), paginación inválida (400), método (405), ruta (404), grupos y auth
+  (sin token→401, token válido→200, expirado→401).
 - [ ] **I13** `/healthz` + `/readyz` (checks disk/raft/replicationLag/startup, JSON).
 - [ ] **I14** Cableado en `nexus-server`: puerto HTTP de admin (RestGateway + Metrics + health).
 
