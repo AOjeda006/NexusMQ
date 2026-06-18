@@ -502,7 +502,15 @@ Harness de benchmark vacío y CI:
   `AdminService`** (sin broker): listados, creación (con/!name, body !JSON, error→7807), describe
   (200/404), borrado (204/404), paginación inválida (400), método (405), ruta (404), grupos y auth
   (sin token→401, token válido→200, expirado→401).
-- [ ] **I13** `/healthz` + `/readyz` (checks disk/raft/replicationLag/startup, JSON).
+- [x] **I13** `ingress/health_monitor.{hpp,cpp}` — `HealthMonitor` (THREAD-SAFE): sirve `/healthz`
+  (**liveness**: 200 vivo / 503 **drenando** al apagar, vía `set_live`) y `/readyz` (**readiness**:
+  200 si el arranque terminó —`set_started`— y todos los *probes* registrados están sanos; si no,
+  503), con cuerpo JSON `{status, checks:[{name,healthy,detail}]}`. Los *probes* (`Probe =
+  function<HealthCheckResult()>`) se **inyectan** en el cableado (I14), de modo que el monitor no
+  depende del broker; se incluye un check sintético `startup` y un `disk_space_probe(path,
+  min_free_bytes)` de fábrica (cf. `ErrorCode::OutOfSpace`). Tests: liveness ok/drenando, readiness
+  antes de arrancar (503), arrancado sin probes (200), probe sano (200), probe no sano con detalle
+  (503), disco con/sin espacio.
 - [ ] **I14** Cableado en `nexus-server`: puerto HTTP de admin (RestGateway + Metrics + health).
 
 ### Bloque I.D — CLI

@@ -9,6 +9,7 @@ add_library(nexus-ingress
   json_value.cpp
   jwt.cpp
   rest_gateway.cpp
+  health_monitor.cpp
   problem_detail.cpp
   pagination.cpp)
 add_library(nexus::ingress ALIAS nexus-ingress)
