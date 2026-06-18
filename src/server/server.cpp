@@ -52,12 +52,16 @@ Server::Server(Config config)
     : config_(std::move(config)),
       topics_(config_.data_dir),
       reactor_(/*core_id=*/0, /*num_cores=*/1, std::make_unique<IoUringBackend>(kRingDepth)) {
+    const JwtVerifier* verifier = nullptr;
     if (!config_.jwt_secret.empty()) {
-        jwt_.emplace(config_.jwt_secret);
+        verifier = &jwt_.emplace(config_.jwt_secret);
     }
-    admin_api_.emplace(topics_, config_.node_id, [this](Page page) { return list_groups(page); });
-    rest_.emplace(*admin_api_, jwt_ ? &*jwt_ : nullptr);
-    admin_router_.emplace(*rest_, health_, metrics_);
+    // `emplace` devuelve la referencia al objeto construido: la usamos directamente para no
+    // desreferenciar el `optional` recién poblado (bugprone-unchecked-optional-access en tidy-18).
+    AdminApi& api = admin_api_.emplace(topics_, config_.node_id,
+                                       [this](Page page) { return list_groups(page); });
+    RestGateway& rest = rest_.emplace(api, verifier);
+    admin_router_.emplace(rest, health_, metrics_);
     if (config_.min_free_disk_bytes > 0) {
         health_.register_readiness("disk",
                                    disk_space_probe(config_.data_dir, config_.min_free_disk_bytes));
