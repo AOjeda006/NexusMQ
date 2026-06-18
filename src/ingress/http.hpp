@@ -60,6 +60,10 @@ struct HttpParseLimits {
     std::size_t max_body = std::size_t{1} << 20;  ///< 1 MiB.
 };
 
+/// @brief Frase de estado HTTP estándar para @p status (p. ej. 404 → "Not Found"; "" si
+/// desconocido).
+[[nodiscard]] std::string_view http_reason(int status) noexcept;
+
 /// @brief Parsea un **mensaje HTTP/1.1 completo** (línea de petición + cabeceras + cuerpo).
 /// @details Defensivo (`expected`): valida la línea de petición, la versión `HTTP/x.y`, el formato
 /// de

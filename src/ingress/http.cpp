@@ -184,6 +184,45 @@ std::string HttpResponse::serialize() const {
     return out;
 }
 
+std::string_view http_reason(int status) noexcept {
+    switch (status) {
+        case 200:
+            return "OK";
+        case 201:
+            return "Created";
+        case 202:
+            return "Accepted";
+        case 204:
+            return "No Content";
+        case 400:
+            return "Bad Request";
+        case 401:
+            return "Unauthorized";
+        case 403:
+            return "Forbidden";
+        case 404:
+            return "Not Found";
+        case 405:
+            return "Method Not Allowed";
+        case 409:
+            return "Conflict";
+        case 422:
+            return "Unprocessable Entity";
+        case 429:
+            return "Too Many Requests";
+        case 500:
+            return "Internal Server Error";
+        case 501:
+            return "Not Implemented";
+        case 503:
+            return "Service Unavailable";
+        case 507:
+            return "Insufficient Storage";
+        default:
+            return "";
+    }
+}
+
 expected<HttpRequest> parse_request(std::string_view raw, const HttpParseLimits& limits) {
     const std::size_t line_end = raw.find("\r\n");
     if (line_end == std::string_view::npos) {

@@ -4,7 +4,10 @@
 add_library(nexus-ingress
   circuit_breaker.cpp
   load_balancer.cpp
-  http.cpp)
+  http.cpp
+  json.cpp
+  problem_detail.cpp
+  pagination.cpp)
 add_library(nexus::ingress ALIAS nexus-ingress)
 
 target_include_directories(nexus-ingress PUBLIC ${PROJECT_SOURCE_DIR}/src)

@@ -445,7 +445,15 @@ Harness de benchmark vacío y CI:
   mensaje completo (la conexión acumula); refactor en helpers para acotar la complejidad. Tests:
   GET/POST, path+query, cabeceras, cuerpo por Content-Length, método desconocido, serialización, y
   rechazos (malformado, sin fin de cabeceras, Content-Length inválido, cuerpo incompleto/excedido).
-- [ ] **I8** RFC 7807 `ProblemDetail` + paginación (`page`/`size`) + helpers de JSON para DTOs.
+- [x] **I8** `ingress/json.{hpp,cpp}`, `ingress/problem_detail.{hpp,cpp}`, `ingress/pagination.{hpp,cpp}`
+  — DTOs del REST admin (§7.6/ADR-0009). `JsonWriter`: construcción incremental con comas y escapado
+  correctos (objetos/arrays anidados; `string`/`int`/`double`/`bool`/`null`; `field(key,v)`).
+  `ProblemDetail` **RFC 7807**: `http_status_for(ErrorCode)` (mapeo borde→HTTP), `problem_from_error`
+  (título por código, `detail` = mensaje del `Error`) y `to_response()` con
+  `Content-Type: application/problem+json`. `Page`/`PaginationLimits` + `parse_pagination(query)`
+  **defensivo** (`expected`): defaults `page=1`/`size=20`, límite `max_size`, rechazo de `page=0`,
+  `size` fuera de rango y valores no numéricos. Tests: JSON plano/anidado/escapado/null, mapeo de
+  códigos, JSON RFC 7807, respuesta con content-type, y paginación (defaults, parseo, rechazos).
 - [ ] **I9** `common`: SHA-256 + HMAC-SHA256 a mano (*known-answer tests* de RFC/NIST).
 - [ ] **I10** `JwtVerifier` (HS256, base64url, `exp`/`nbf`/`iat` con reloj inyectado).
 - [ ] **I11** `AdminApi` sobre `TopicManager`/`GroupCoordinator` (create/delete/describe/list/reassign).

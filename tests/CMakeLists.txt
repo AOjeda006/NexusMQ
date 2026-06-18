@@ -54,6 +54,9 @@ add_executable(nexus-tests
   unit/ingress/load_balancer_test.cpp
   unit/ingress/health_check_test.cpp
   unit/ingress/http_test.cpp
+  unit/ingress/json_test.cpp
+  unit/ingress/problem_detail_test.cpp
+  unit/ingress/pagination_test.cpp
   unit/telemetry/metrics_test.cpp
   unit/telemetry/logging_test.cpp
   unit/consensus/raft_rpc_test.cpp
