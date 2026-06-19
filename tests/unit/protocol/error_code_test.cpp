@@ -17,6 +17,7 @@ TEST(WireError, IsRetryable_TransitoriosSiPermanentesNo) {
     EXPECT_FALSE(nexus::is_retryable(nexus::WireError::OffsetOutOfRange));
     EXPECT_FALSE(nexus::is_retryable(nexus::WireError::CorruptMessage));
     EXPECT_FALSE(nexus::is_retryable(nexus::WireError::Unauthorized));
+    EXPECT_FALSE(nexus::is_retryable(nexus::WireError::InvalidProducerEpoch));
 }
 
 TEST(WireError, FromError_TraduceLosCodigosDelNucleo) {
@@ -31,6 +32,12 @@ TEST(WireError, FromError_TraduceLosCodigosDelNucleo) {
     EXPECT_EQ(nexus::from_error(Error{ErrorCode::InvalidArgument, ""}), WireError::InvalidRequest);
     EXPECT_EQ(nexus::from_error(Error{ErrorCode::IoError, ""}), WireError::LeaderNotAvailable);
     EXPECT_EQ(nexus::from_error(Error{ErrorCode::Shutdown, ""}), WireError::LeaderNotAvailable);
+    EXPECT_EQ(nexus::from_error(Error{ErrorCode::Fenced, ""}), WireError::InvalidProducerEpoch);
+}
+
+TEST(WireError, RoundTrip_InvalidProducerEpoch_VuelveAFenced) {
+    EXPECT_EQ(nexus::to_error(nexus::WireError::InvalidProducerEpoch).code(),
+              nexus::ErrorCode::Fenced);
 }
 
 }  // namespace

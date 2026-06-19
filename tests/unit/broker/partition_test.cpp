@@ -46,10 +46,10 @@ nexus::Partition open_partition(const TempDir& dir) {
 
 // Batch con campos de idempotencia explícitos y un payload de `count*4` bytes.
 nexus::RecordBatch make_batch(nexus::ProducerId producer_id, nexus::Sequence base_seq,
-                              std::int32_t count) {
+                              std::int32_t count, std::int16_t epoch = 0) {
     nexus::RecordBatchHeader header;
     header.producer_id = producer_id;
-    header.producer_epoch = 0;
+    header.producer_epoch = epoch;
     header.base_sequence = base_seq;
     header.record_count = count;
     return nexus::RecordBatch{
@@ -90,6 +90,49 @@ TEST(Partition, Produce_Idempotente_Duplicado_NoReanexa) {
     const nexus::expected<nexus::Offset> dup = partition.produce(make_batch(1, 0, 3));
     ASSERT_TRUE(dup.has_value());                      // se reconoce sin error
     EXPECT_EQ(partition.high_watermark(), hw_before);  // no re-anexa
+}
+
+TEST(Partition, Produce_Idempotente_Duplicado_DevuelveOffsetOriginal) {
+    TempDir dir{"idem_dup_off"};
+    nexus::Partition partition = open_partition(dir);
+
+    // Dos batches del mismo productor: [0,2] → offsets [0,2]; [3,4] → offsets [3,4].
+    ASSERT_TRUE(partition.produce(make_batch(1, 0, 3)).has_value());
+    const nexus::expected<nexus::Offset> second = partition.produce(make_batch(1, 3, 2));
+    ASSERT_TRUE(second.has_value());
+    EXPECT_EQ(*second, 4);
+    // Reintento del último batch: devuelve su último offset original (4), no el final del log.
+    const nexus::expected<nexus::Offset> dup = partition.produce(make_batch(1, 3, 2));
+    ASSERT_TRUE(dup.has_value());
+    EXPECT_EQ(*dup, 4);
+}
+
+TEST(Partition, Produce_EpocaObsoleta_DevuelveFenced) {
+    TempDir dir{"fenced"};
+    nexus::Partition partition = open_partition(dir);
+
+    // El productor 1 escribe con época 5.
+    ASSERT_TRUE(partition.produce(make_batch(1, 0, 3, /*epoch=*/5)).has_value());
+    const nexus::Offset hw_before = partition.high_watermark();
+    // Un zombi con época anterior queda expulsado: no escribe aunque la secuencia continúe.
+    const nexus::expected<nexus::Offset> fenced =
+        partition.produce(make_batch(1, 3, 1, /*epoch=*/4));
+    ASSERT_FALSE(fenced.has_value());
+    EXPECT_EQ(fenced.error().code(), nexus::ErrorCode::Fenced);
+    EXPECT_EQ(partition.high_watermark(), hw_before);  // nada anexado
+}
+
+TEST(Partition, Produce_NuevaEpoca_ReiniciaSecuencia) {
+    TempDir dir{"epoch_bump"};
+    nexus::Partition partition = open_partition(dir);
+
+    ASSERT_TRUE(partition.produce(make_batch(1, 0, 3, /*epoch=*/0)).has_value());
+    // Encarnación nueva (época 1) tras reinicio del productor: su secuencia arranca en 0 de nuevo.
+    const nexus::expected<nexus::Offset> resumed =
+        partition.produce(make_batch(1, 0, 2, /*epoch=*/1));
+    ASSERT_TRUE(resumed.has_value());
+    EXPECT_EQ(*resumed, 4);  // se anexa tras el batch previo: offsets [3,4]
+    EXPECT_EQ(partition.high_watermark(), 5);
 }
 
 TEST(Partition, Produce_Idempotente_Hueco_DevuelveOutOfRange) {

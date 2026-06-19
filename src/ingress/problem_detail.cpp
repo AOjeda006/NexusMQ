@@ -23,6 +23,8 @@ int http_status_for(ErrorCode code) noexcept {
             return 507;
         case ErrorCode::Shutdown:
             return 503;
+        case ErrorCode::Fenced:
+            return 409;  // conflicto de estado: el productor fue expulsado por otra encarnación.
         case ErrorCode::Corrupt:
         case ErrorCode::IoError:
             return 500;

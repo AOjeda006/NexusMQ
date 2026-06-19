@@ -33,6 +33,7 @@ enum class WireError : std::int16_t {
     UnsupportedVersion,
     Unauthorized,
     InvalidRequest,
+    InvalidProducerEpoch,  ///< Productor expulsado: su época es obsoleta (§5.9, fencing).
 };
 
 /// @brief ¿Debería el cliente reintentar ante @p error? (condiciones transitorias).

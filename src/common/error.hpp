@@ -24,6 +24,7 @@ enum class ErrorCode : std::uint8_t {
     OutOfRange,       ///< Offset o índice fuera de rango.
     Unsupported,      ///< Operación o versión no soportada.
     Shutdown,         ///< El componente se está apagando.
+    Fenced,           ///< Productor con época obsoleta (expulsado por una encarnación posterior).
 };
 
 /// @brief Error del núcleo: un código + mensaje de contexto. Afinidad: INMUTABLE

@@ -19,16 +19,19 @@ expected<Offset> Partition::produce(const RecordBatch& batch) {
         return log_.append(batch);
     }
 
-    // Idempotencia (§5.9): clasifica la secuencia del batch frente a la sesión del productor.
+    // Idempotencia *effectively-once* (§5.9): clasifica (época, secuencia) frente a la sesión.
     ProducerSession& session =
         producers_.try_emplace(header.producer_id, header.producer_id, header.producer_epoch)
             .first->second;
-    switch (session.check(header.base_sequence, header.record_count)) {
-        case ProducerSession::SeqCheck::Duplicate:
-            // Reintento ya aplicado: se reconoce sin re-anexar. 1b: devolvemos el último offset del
-            // log (no se rastrea el offset original por secuencia; pendiente para una capa
-            // superior).
-            return log_.log_end_offset() - 1;
+    switch (session.check(header.producer_epoch, header.base_sequence, header.record_count)) {
+        case ProducerSession::SeqCheck::Fenced:
+            return make_error(ErrorCode::Fenced, "época de productor obsoleta (fenced)");
+        case ProducerSession::SeqCheck::Duplicate: {
+            // Reintento ya aplicado: se reconoce sin re-anexar y se devuelve el offset **original**
+            // del batch (si lo recordamos; si no, el final del log).
+            const Offset dup_base = session.duplicate_base_offset(header.base_sequence);
+            return dup_base >= 0 ? dup_base + header.record_count - 1 : log_.log_end_offset() - 1;
+        }
         case ProducerSession::SeqCheck::Gap:
             return make_error(ErrorCode::OutOfRange,
                               "secuencia idempotente fuera de orden (hueco)");
@@ -40,7 +43,8 @@ expected<Offset> Partition::produce(const RecordBatch& batch) {
     if (!last) {
         return last;
     }
-    session.advance(header.base_sequence + header.record_count - 1);
+    session.accept(header.producer_epoch, header.base_sequence, header.record_count,
+                   *last - header.record_count + 1);
     return last;
 }
 

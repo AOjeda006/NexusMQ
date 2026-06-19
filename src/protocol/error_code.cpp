@@ -24,6 +24,7 @@ bool is_retryable(WireError error) noexcept {
         case WireError::UnsupportedVersion:
         case WireError::Unauthorized:
         case WireError::InvalidRequest:
+        case WireError::InvalidProducerEpoch:
             return false;
     }
     return false;
@@ -49,6 +50,8 @@ Error to_error(WireError error) {
             return Error{ErrorCode::InvalidArgument, "no autorizado"};
         case WireError::InvalidRequest:
             return Error{ErrorCode::InvalidArgument, "petición inválida"};
+        case WireError::InvalidProducerEpoch:
+            return Error{ErrorCode::Fenced, "época de productor obsoleta (fenced)"};
         // Condiciones transitorias del servidor: el líder cambió/no está, timeout, falta quórum,
         // throttling o rebalanceo. Sin código de núcleo dedicado: se reportan como E/S transitoria.
         case WireError::NotLeaderForPartition:
@@ -81,6 +84,8 @@ WireError from_error(const Error& error) noexcept {
             return WireError::UnsupportedVersion;
         case ErrorCode::InvalidArgument:
             return WireError::InvalidRequest;
+        case ErrorCode::Fenced:
+            return WireError::InvalidProducerEpoch;
         // Fallos del lado del servidor (almacenamiento, espacio, apagado): la partición no es
         // servible aquí ahora; el cliente reintenta en otro réplica/momento.
         case ErrorCode::IoError:

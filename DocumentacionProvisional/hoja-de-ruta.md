@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** **FASE 3 COMPLETA** (Ingress + operación: I1–I20). Siguiente: **Fase 4 — Stretch** (opcional). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
+**Estado actual:** **FASE 4 EN CURSO** (Stretch, serie F): hecho **F1** (productor *effectively-once* + *fencing* por época). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
 añade el **consenso Raft por partición** (`nexus-consensus`: estado/log/RPC, `RaftNode` como máquina de
 estados síncrona sin E/S con pre-vote, replicación, *high-watermark* por mayoría, transferencia de
 liderazgo y learners; ADR-0014/0015), la **integración en el broker** (`ReplicatedPartition`, ADR-0016),
@@ -635,14 +635,37 @@ Harness de benchmark vacío y CI:
 
 ---
 
-## Fase 4 — Stretch *(opcional, tras 3)*
+## Fase 4 — Stretch *(EN CURSO 🚧)*
 
-- [ ] Productor idempotente *effectively-once* por partición; DLQ; compactación por clave.
-- [ ] Compresión LZ4/Zstd por batch (anti *decompression bomb*).
-- [ ] *Direct I/O* (`O_DIRECT`) + caché/readahead propios.
-- [ ] Subconjunto **Kafka-compatible** (`ApiVersions`/`Metadata`/`Produce`/`Fetch`) → habla con `kcat`.
-- [ ] *Binding* Python (pybind11); tracing distribuido.
-- [ ] Backend **IOCP** (Windows) en `nexus-io`; preset `windows-msvc`.
+> Funcionalidades avanzadas, interoperabilidad y portabilidad (§4.5, ADR-0004). Es un **menú de
+> *stretch goals* en gran parte independientes**; se abordan en incrementos pequeños (serie **F**),
+> con la misma puerta de calidad. **Limitación del entorno (anotada):** el backend **IOCP** (F10) es
+> Windows-only y **no puede compilarse ni testearse** en este entorno Linux/WSL (la puerta de calidad
+> exige los dos compiladores + sanitizers en Linux); se aborda al final y se documenta su estado.
+
+- [x] **F1** Productor idempotente *effectively-once* por partición — ***fencing* por época**.
+  `ProducerSession` pasa de comprobar solo la secuencia a clasificar **(época, secuencia)**: una época
+  entrante **inferior** a la registrada es de una encarnación obsoleta (productor reiniciado/expulsado)
+  y se **rechaza** (`SeqCheck::Fenced`); una época **superior** es una encarnación nueva y **reinicia**
+  la secuencia (el primer batch debe empezar en `0`); con la misma época, dedup por secuencia como
+  antes. Además, un duplicado ya no devuelve el final del log: `ProducerSession` **memoriza el offset
+  base** del último batch aceptado y `Partition`/`ReplicatedPartition` responden al reintento con su
+  **offset original** (`duplicate_base_offset`) — entrega *effectively-once* real. Nuevo error de
+  núcleo `ErrorCode::Fenced` y de wire **`WireError::InvalidProducerEpoch`** (código **16**, no
+  reintentable; mapeo `from_error`/`to_error`/`is_retryable`; REST → **409 Conflict**). Cierra el
+  *fencing por epoch* que B2 dejó diferido. Tests: unit de `ProducerSession` (fenced, reinicio por
+  época, offset de duplicado), `Partition` (fenced/nueva época/offset original), `error_code`
+  (round-trip del nuevo código). `docs/protocol.md` añade el código 16. Verde en GCC/Clang/ASan.
+- [ ] **F2** Codec por **record** (`Record` con key/value/headers, varint/zigzag) + `RecordBatchBuilder`
+  (prerequisito de compactación por clave, DLQ por clave y subconjunto Kafka).
+- [ ] **F3** Compactación **por clave** (`LogCompactor` + *tombstones*).
+- [ ] **F4** DLQ (*dead-letter queue*) — reencaminado de records irrecuperables.
+- [ ] **F5** Compresión LZ4/Zstd por batch (dep condicional, anti *decompression bomb*).
+- [ ] **F6** *Direct I/O* (`O_DIRECT`) + caché/readahead propios (con *fallback* a *buffered*).
+- [ ] **F7** Subconjunto **Kafka-compatible** (`ApiVersions`/`Metadata`/`Produce`/`Fetch`) → habla con `kcat`.
+- [ ] **F8** Tracing distribuido (propagación de contexto de traza).
+- [ ] **F9** *Binding* Python (pybind11) *(si el entorno lo soporta)*.
+- [ ] **F10** Backend **IOCP** (Windows) en `nexus-io`; preset `windows-msvc` *(no verificable en este entorno)*.
 
 ---
 

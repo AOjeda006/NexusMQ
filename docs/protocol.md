@@ -92,6 +92,7 @@ Las respuestas acarrean un `errorCode:i16` (`WireError`) como contrato externo d
 | 13     | `UnsupportedVersion`      | no             |
 | 14     | `Unauthorized`            | no             |
 | 15     | `InvalidRequest`          | no             |
+| 16     | `InvalidProducerEpoch`    | no             |
 
 La política exacta de reintento (`is_retryable`) y la traducción `WireError`↔`Error` viven en
 [`src/protocol/error_code.hpp`](../src/protocol/error_code.hpp).
