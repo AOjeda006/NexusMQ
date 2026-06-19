@@ -80,6 +80,7 @@ add_executable(nexus-tests
   unit/consensus/raft_node_test.cpp
   sim/raft_sim_test.cpp
   e2e/broker_e2e_test.cpp
+  unit/client/dead_letter_test.cpp
   e2e/client_e2e_test.cpp
   e2e/admin_http_e2e_test.cpp
   e2e/cli_admin_e2e_test.cpp

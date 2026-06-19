@@ -4,7 +4,8 @@
 add_library(nexus-client
   client.cpp
   producer.cpp
-  consumer.cpp)
+  consumer.cpp
+  dead_letter.cpp)
 add_library(nexus::client ALIAS nexus-client)
 
 target_include_directories(nexus-client PUBLIC ${PROJECT_SOURCE_DIR}/src)

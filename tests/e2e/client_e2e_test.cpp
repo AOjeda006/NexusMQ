@@ -17,6 +17,7 @@
 
 #include "client/client.hpp"
 #include "client/consumer.hpp"
+#include "client/dead_letter.hpp"
 #include "client/endpoint.hpp"
 #include "client/producer.hpp"
 #include "common/bytes.hpp"
@@ -222,6 +223,62 @@ TEST(ClientE2E, SendKeyedYTombstone_RoundTripDeClaveYBorrado) {
     ASSERT_TRUE((*records)[1].key.has_value());
     EXPECT_EQ(as_text(*(*records)[1].key), "user-1");
     EXPECT_FALSE((*records)[1].value.has_value());
+}
+
+TEST(ClientE2E, DeadLetterRouter_ReencaminaConMetadatos) {
+    TempDir dir{"dlq"};
+    std::optional<ServerFixture> fixture;
+    try {
+        fixture.emplace(dir.path());
+    } catch (const std::system_error& ex) {
+        GTEST_SKIP() << "io_uring no disponible en este entorno: " << ex.what();
+    }
+    ASSERT_TRUE(fixture->start());
+
+    nexus::expected<nexus::Client> client_exp =
+        nexus::Client::connect(nexus::Endpoint{.host = "127.0.0.1", .port = fixture->port()});
+    ASSERT_TRUE(client_exp.has_value());
+    nexus::Client& client = *client_exp;
+    ASSERT_TRUE(client.create_topic("orders.DLQ", 1).has_value());
+
+    // Un record que "falló" al procesarse: se reencamina a la DLQ.
+    const nexus::ByteSpan fk = bytes_of("order-1");
+    const nexus::ByteSpan fv = bytes_of("corrupto");
+    nexus::ConsumedRecord failed;
+    failed.key = std::vector<std::byte>{fk.begin(), fk.end()};
+    failed.value = std::vector<std::byte>{fv.begin(), fv.end()};
+    failed.offset = 9;
+
+    nexus::Producer producer = client.producer();
+    nexus::DeadLetterRouter router{producer, "orders.DLQ"};
+    const nexus::DeadLetterContext ctx{.source_topic = "orders",
+                                       .source_partition = 2,
+                                       .source_offset = 9,
+                                       .error = "valor corrupto",
+                                       .attempts = 3};
+    ASSERT_TRUE(router.route(failed, ctx).has_value());
+
+    // Consumir la DLQ y comprobar payload + metadatos en headers.
+    nexus::Consumer consumer = client.consumer("orders.DLQ", 0);
+    const nexus::expected<std::vector<nexus::ConsumedRecord>> dlq = consumer.poll();
+    ASSERT_TRUE(dlq.has_value());
+    ASSERT_EQ(dlq->size(), 1U);
+    const nexus::ConsumedRecord& dead = (*dlq)[0];
+    EXPECT_EQ(value_text(dead), "corrupto");
+
+    auto header_text = [&](std::string_view name) -> std::string_view {
+        for (const nexus::RecordHeader& h : dead.headers) {
+            if (h.key == name && h.value.has_value()) {
+                return as_text(*h.value);
+            }
+        }
+        return {};
+    };
+    EXPECT_EQ(header_text(nexus::kDlqTopicHeader), "orders");
+    EXPECT_EQ(header_text(nexus::kDlqPartitionHeader), "2");
+    EXPECT_EQ(header_text(nexus::kDlqOffsetHeader), "9");
+    EXPECT_EQ(header_text(nexus::kDlqErrorHeader), "valor corrupto");
+    EXPECT_EQ(header_text(nexus::kDlqAttemptsHeader), "3");
 }
 
 TEST(ClientE2E, Metadata_ListaBrokerYTopic) {
