@@ -66,6 +66,8 @@ add_executable(nexus-tests
   unit/ingress/problem_detail_test.cpp
   unit/ingress/pagination_test.cpp
   unit/ingress/tls_test.cpp
+  unit/ingress/connection_state_test.cpp
+  unit/ingress/proxy_test.cpp
   unit/telemetry/metrics_test.cpp
   unit/telemetry/logging_test.cpp
   unit/cli/topic_commands_test.cpp

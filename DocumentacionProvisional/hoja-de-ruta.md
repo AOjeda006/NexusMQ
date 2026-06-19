@@ -570,8 +570,23 @@ Harness de benchmark vacío y CI:
   y las fábricas `accept`/`connect` (el desglose solo listaba `server(...)`), necesarias para el
   extremo cliente (loopback/mTLS y, más adelante, el proxy de I18). Validado en GCC/Clang/ASan +
   clang-format/clang-tidy.
-- [ ] **I18** `Proxy` (modo proxy: enruta clientes "tontos" al líder por *consistent-hash*) +
-  `ConnectionState`.
+- [x] **I18** `ingress/connection_state.hpp` + `ingress/proxy.{hpp,cpp}`. **`ConnectionState`**
+  (REACTOR-LOCAL, header-only): estado por conexión — `conn_id`, versiones negociadas por `ApiKey`,
+  principal autenticado opcional (mTLS/JWT), `CreditWindow` (backpressure) y mapa de peticiones en
+  vuelo por `correlation_id` (`begin_request`/`complete_request`). No copiable ni movible (anclado al
+  reactor; la `CreditWindow` guarda un handle de corrutina). **`Proxy`** (REACTOR-LOCAL): `route(key)`
+  elige el líder con el anillo *consistent-hashing* del `LoadBalancer`; `forward(client, upstream)`
+  releva el bucle **petición/respuesta a nivel de trama** (lee del cliente → reenvía al líder → lee la
+  respuesta → la devuelve), terminando limpiamente al cerrar el cliente. Tests: unitarios de
+  `ConnectionState` (identidad, versiones, principal, vuelo, créditos), `route` (anillo vacío →
+  `nullopt`; misma clave → mismo nodo) y e2e por loopback con io_uring (relevo contra un "líder" que
+  hace eco + cierre limpio en EOF). **Ajustes del desglose (anotados):** (1) `forward` toma dos
+  `Socket` ya conectados en vez de un `Connection&` (ese tipo aún no existe); el relevo es a nivel de
+  **trama** (no de bytes) porque el plano de datos es petición/respuesta. (2) `ConnectionState` usa el
+  `CreditWindow` de `nexus-broker` (header-only, dependencia descendente permitida: `ingress` está por
+  encima de `broker`, ADR-0018); `nexus-ingress` pasa a enlazar `nexus::wire` (arrastra io+protocol).
+  El **dialado del líder** y el *pool* de conexiones aguas arriba se difieren al cableado de servidor.
+  Validado en GCC/Clang/ASan + clang-format/clang-tidy.
 
 ### Bloque I.F — Despliegue + documentación
 - [ ] **I19** `deploy/`: `Dockerfile` (multi-stage → distroless, no-root, `HEALTHCHECK` → `/readyz`),

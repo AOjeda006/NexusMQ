@@ -11,11 +11,14 @@ add_library(nexus-ingress
   rest_gateway.cpp
   health_monitor.cpp
   problem_detail.cpp
-  pagination.cpp)
+  pagination.cpp
+  proxy.cpp)
 add_library(nexus::ingress ALIAS nexus-ingress)
 
 target_include_directories(nexus-ingress PUBLIC ${PROJECT_SOURCE_DIR}/src)
-target_link_libraries(nexus-ingress PUBLIC nexus::common nexus_options)
+# nexus::wire aporta el framing sobre conexión (FrameReader/Writer) y arrastra io+protocol; el
+# modo proxy (proxy.cpp) releva tramas, y connection_state.hpp usa el CreditWindow (header-only).
+target_link_libraries(nexus-ingress PUBLIC nexus::common nexus::wire nexus_options)
 
 # TLS (OpenSSL): opcional. Si OpenSSL está disponible, compila tls.cpp (TlsContext/TlsConnection,
 # TLS 1.3 + mTLS) y define NEXUS_HAVE_OPENSSL para que el plano TLS y sus tests se activen; si no,
