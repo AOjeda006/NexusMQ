@@ -1,3 +1,8 @@
+// O_DIRECT (E/S directa, F6) es una extensión GNU: hay que pedirla antes de <fcntl.h>.
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "io/file.hpp"
 
 #include <fcntl.h>
@@ -27,12 +32,14 @@ File::~File() {
     close_fd();
 }
 
-File::File(File&& other) noexcept : fd_(std::exchange(other.fd_, -1)) {}
+File::File(File&& other) noexcept
+    : fd_(std::exchange(other.fd_, -1)), direct_(std::exchange(other.direct_, false)) {}
 
 File& File::operator=(File&& other) noexcept {
     if (this != &other) {
         close_fd();
         fd_ = std::exchange(other.fd_, -1);
+        direct_ = std::exchange(other.direct_, false);
     }
     return *this;
 }
@@ -42,15 +49,35 @@ void File::close_fd() noexcept {
         ::close(fd_);
         fd_ = -1;
     }
+    direct_ = false;
 }
 
 expected<File> File::open(const std::string& path, Mode mode) {
-    const int flags = (mode == Mode::ReadOnly) ? O_RDONLY : (O_RDWR | O_CREAT);
-    const int fd = ::open(path.c_str(), flags, kCreateMode);
+    if (mode == Mode::ReadOnly) {
+        const int fd = ::open(path.c_str(), O_RDONLY);
+        if (fd < 0) {
+            return io_error("open");
+        }
+        return File{fd, /*direct=*/false};
+    }
+
+    const int base_flags = O_RDWR | O_CREAT;
+    if (mode == Mode::ReadWriteDirect) {
+        // Intenta E/S directa; si el FS no la admite (EINVAL), recae a E/S con búfer (sin error).
+        const int fd = ::open(path.c_str(), base_flags | O_DIRECT, kCreateMode);
+        if (fd >= 0) {
+            return File{fd, /*direct=*/true};
+        }
+        if (errno != EINVAL) {
+            return io_error("open");
+        }
+    }
+
+    const int fd = ::open(path.c_str(), base_flags, kCreateMode);
     if (fd < 0) {
         return io_error("open");
     }
-    return File{fd};
+    return File{fd, /*direct=*/false};
 }
 
 expected<std::size_t> File::read_at(MutByteSpan dst, std::uint64_t offset) const {

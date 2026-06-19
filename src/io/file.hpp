@@ -10,6 +10,7 @@
 
 #include "common/bytes.hpp"
 #include "common/error.hpp"
+#include "io/aligned_buffer.hpp"  // kDirectAlignment
 
 namespace nexus {
 
@@ -22,8 +23,10 @@ class File {
 public:
     /// Modo de apertura.
     enum class Mode : std::uint8_t {
-        ReadOnly,   ///< Abre un fichero existente para lectura.
-        ReadWrite,  ///< Abre o crea para lectura y escritura.
+        ReadOnly,         ///< Abre un fichero existente para lectura.
+        ReadWrite,        ///< Abre o crea para lectura y escritura.
+        ReadWriteDirect,  ///< Como `ReadWrite` pero con E/S directa (`O_DIRECT`), si el FS lo
+                          ///< admite.
     };
 
     File() = default;
@@ -33,9 +36,19 @@ public:
     File(const File&) = delete;
     File& operator=(const File&) = delete;
 
-    /// @brief Abre @p path en el modo dado (crea el fichero si `ReadWrite`).
+    /// @brief Abre @p path en el modo dado (crea el fichero si `ReadWrite`/`ReadWriteDirect`).
+    /// @details Con `ReadWriteDirect` intenta `O_DIRECT`; si el sistema de ficheros no lo admite
+    ///   (`EINVAL`), **recae** a E/S con búfer y deja `is_direct()` en `false` (sin error). En modo
+    ///   directo, los búferes (`AlignedBuffer`), el offset y la longitud deben estar alineados a
+    ///   `direct_alignment()`.
     /// @return El fichero abierto, o `IoError` con el `errno` traducido.
     [[nodiscard]] static expected<File> open(const std::string& path, Mode mode);
+
+    /// ¿Está el fichero abierto en modo E/S directa (`O_DIRECT` efectivo)?
+    [[nodiscard]] bool is_direct() const noexcept { return direct_; }
+
+    /// Alineación requerida por la E/S directa (búfer/offset/longitud).
+    [[nodiscard]] static constexpr std::size_t direct_alignment() noexcept;
 
     /// @brief Lee en @p dst desde @p offset; devuelve los bytes leídos (0 = EOF).
     [[nodiscard]] expected<std::size_t> read_at(MutByteSpan dst, std::uint64_t offset) const;
@@ -55,10 +68,15 @@ public:
     [[nodiscard]] bool is_open() const noexcept { return fd_ >= 0; }
 
 private:
-    explicit File(int fd) noexcept : fd_(fd) {}
+    File(int fd, bool direct) noexcept : fd_(fd), direct_(direct) {}
     void close_fd() noexcept;
 
     int fd_ = -1;
+    bool direct_ = false;  ///< `true` si se abrió con `O_DIRECT` efectivo.
 };
+
+constexpr std::size_t File::direct_alignment() noexcept {
+    return kDirectAlignment;
+}
 
 }  // namespace nexus

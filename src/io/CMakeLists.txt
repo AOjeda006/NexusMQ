@@ -2,6 +2,7 @@
 # específico de plataforma (en 1b/4 entran io_uring e IOCP tras el mismo puerto).
 add_library(nexus-io
   file.cpp
+  aligned_buffer.cpp
   socket.cpp)
 add_library(nexus::io ALIAS nexus-io)
 

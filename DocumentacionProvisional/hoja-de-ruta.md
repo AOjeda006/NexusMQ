@@ -705,7 +705,13 @@ Harness de benchmark vacío y CI:
   Tests: round-trip LZ4/Zstd, `None` passthrough, anti-bomba, bloque truncado, bits de `attrs` y
   batch comprimido extremo a extremo. Verde en GCC/Clang/ASan; CI con `liblz4-dev`/`libzstd-dev`.
 - [ ] **F6** *Direct I/O* (`O_DIRECT`) + caché/readahead propios (con *fallback* a *buffered*).
-- [ ] **F6** *Direct I/O* (`O_DIRECT`) + caché/readahead propios (con *fallback* a *buffered*).
+  - [x] **F6a** Primitivas de E/S directa — `io/aligned_buffer.{hpp,cpp}` + modo directo en `File`.
+    `AlignedBuffer` confina la asignación **alineada** (`operator new` con `align_val_t`) en un RAII
+    solo movible (sin `new`/`delete` a la vista, como `ArenaAllocator`); `align_up` redondea tamaños.
+    `File::Mode::ReadWriteDirect` abre con `O_DIRECT` y **recae** a E/S con búfer si el FS no lo
+    admite (`EINVAL`), exponiendo `is_direct()`/`direct_alignment()`. Tests: alineación, *move*,
+    alineación inválida, round-trip directo (offset/longitud/búfer alineados). Verde en GCC/Clang/ASan.
+  - [ ] **F6b** Lector con *readahead* sobre `File` (caché de bloques alineados; *prefetch* secuencial).
 - [ ] **F7** Subconjunto **Kafka-compatible** (`ApiVersions`/`Metadata`/`Produce`/`Fetch`) → habla con `kcat`.
 - [ ] **F8** Tracing distribuido (propagación de contexto de traza).
 - [ ] **F9** *Binding* Python (pybind11) *(si el entorno lo soporta)*.
