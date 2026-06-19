@@ -734,7 +734,12 @@ Harness de benchmark vacío y CI:
     `ApiVersions`, que responde **siempre** con cabecera v0. `ApiVersions` v3 (cuerpo flexible):
     anuncia las 4 APIs y sus rangos. Tests: flexibilidad por API, caso especial v0, round-trip de
     cabecera (flexible y no), respuesta ApiVersions. Verde en GCC/Clang/ASan.
-  - [ ] **F7c** `Metadata`; **F7d** `Produce`/`Fetch` (puente al broker).
+  - [x] **F7c** `Metadata` (v9 flexible) — `kafka/metadata.{hpp,cpp}`. `MetadataRequest`
+    (decode; `topics` nulo = todos) y `MetadataResponse` (encode) con brokers, `cluster_id`,
+    `controller_id`, topics y particiones (réplicas/ISR/offline como `COMPACT_ARRAY[INT32]`) y sus
+    *tagged fields*. Tests: decode de petición (nulo y lista) y round-trip de respuesta. Verde en
+    GCC/Clang/ASan.
+  - [ ] **F7d** `Produce`/`Fetch` (codec) + dispatcher que enruta al broker.
   - [ ] **Nota:** la interoperación **en vivo con `kcat`** no se verifica en este entorno (no está
     instalado); se cubre con tests de round-trip/bytes y queda como verificación manual (como F10).
 - [ ] **F8** Tracing distribuido (propagación de contexto de traza).

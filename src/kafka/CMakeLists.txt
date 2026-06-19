@@ -2,7 +2,8 @@
 # de las APIs ApiVersions/Metadata/Produce/Fetch, para hablar con clientes como kcat/librdkafka.
 add_library(nexus-kafka
   codec.cpp
-  messages.cpp)
+  messages.cpp
+  metadata.cpp)
 add_library(nexus::kafka ALIAS nexus-kafka)
 
 target_include_directories(nexus-kafka PUBLIC ${PROJECT_SOURCE_DIR}/src)
