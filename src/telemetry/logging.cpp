@@ -4,8 +4,6 @@
 
 #include "telemetry/logging.hpp"
 
-#include <array>
-#include <cstdio>
 #include <ctime>
 #include <format>
 
@@ -66,11 +64,9 @@ std::string format_rfc3339(std::chrono::system_clock::time_point tp) {
     const std::time_t tt = system_clock::to_time_t(secs);
     std::tm tm{};
     gmtime_r(&tt, &tm);
-    std::array<char, 40> buf{};
-    std::snprintf(buf.data(), buf.size(), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", tm.tm_year + 1900,
-                  tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
-                  static_cast<int>(millis));
-    return buf.data();
+    return std::format("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z", tm.tm_year + 1900,
+                       tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
+                       static_cast<int>(millis));
 }
 
 }  // namespace
