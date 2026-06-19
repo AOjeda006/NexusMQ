@@ -3,7 +3,8 @@
 add_library(nexus-storage
   index.cpp
   segment.cpp
-  partition_log.cpp)
+  partition_log.cpp
+  log_compactor.cpp)
 add_library(nexus::storage ALIAS nexus-storage)
 
 target_include_directories(nexus-storage PUBLIC ${PROJECT_SOURCE_DIR}/src)

@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** **FASE 4 EN CURSO** (Stretch, serie F): hechos **F1** (productor *effectively-once* + *fencing* por época) y **F2** (codec por record + migración del cliente). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
+**Estado actual:** **FASE 4 EN CURSO** (Stretch, serie F): hechos **F1** (productor *effectively-once* + *fencing* por época), **F2** (codec por record + migración del cliente) y **F3** (compactación por clave). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
 añade el **consenso Raft por partición** (`nexus-consensus`: estado/log/RPC, `RaftNode` como máquina de
 estados síncrona sin E/S con pre-vote, replicación, *high-watermark* por mayoría, transferencia de
 liderazgo y learners; ADR-0014/0015), la **integración en el broker** (`ReplicatedPartition`, ADR-0016),
@@ -672,7 +672,17 @@ Harness de benchmark vacío y CI:
     + headers + offset; `Consumer::poll` decodifica con `decode_records`. e2e de cliente con
     round-trip de clave y *tombstone*. (El broker sigue tratando el blob como opaco; lo interpretará
     la compactación, F3.) Verde en GCC/Clang/ASan.
-- [ ] **F3** Compactación **por clave** (`LogCompactor` + *tombstones*).
+- [x] **F3** Compactación **por clave** — `storage/log_compactor.{hpp,cpp}` (`LogCompactor`). Conserva,
+  por clave, **solo el record más reciente** (última aparición en orden de offset); los anteriores se
+  descartan. Un **tombstone** (value nulo) supera a los anteriores y borra la clave (salvo
+  `retain_tombstones`, ventana de borrado). Los records **sin clave** se conservan. **Offsets
+  originales preservados** (con huecos), como Kafka. `compact(span<Record>)` es el algoritmo puro;
+  `compact_log(PartitionLog&)` recorre el log real (lee batches, `decode_records`) y compacta.
+  `CompactionStats` (in/kept/superseded/tombstones_dropped). Tests: último-por-clave, tombstone
+  borra, retención de tombstones, records sin clave, e integración sobre un `PartitionLog` real.
+  **Diferido (anotado):** la **reescritura on-disk** de los segmentos compactados (preservando
+  offsets + reconstruyendo índices) — el algoritmo y la lectura quedan listos; materializar el log
+  compactado en disco es un follow-up (toca cirugía de segmentos/índice). Verde en GCC/Clang/ASan.
 - [ ] **F4** DLQ (*dead-letter queue*) — reencaminado de records irrecuperables.
 - [ ] **F5** Compresión LZ4/Zstd por batch (dep condicional, anti *decompression bomb*).
 - [ ] **F6** *Direct I/O* (`O_DIRECT`) + caché/readahead propios (con *fallback* a *buffered*).
