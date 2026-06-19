@@ -65,6 +65,7 @@ add_executable(nexus-tests
   unit/ingress/health_monitor_test.cpp
   unit/ingress/problem_detail_test.cpp
   unit/ingress/pagination_test.cpp
+  unit/ingress/tls_test.cpp
   unit/telemetry/metrics_test.cpp
   unit/telemetry/logging_test.cpp
   unit/cli/topic_commands_test.cpp
@@ -78,6 +79,7 @@ add_executable(nexus-tests
   e2e/client_e2e_test.cpp
   e2e/admin_http_e2e_test.cpp
   e2e/cli_admin_e2e_test.cpp
+  e2e/tls_e2e_test.cpp
   crash/partition_crash_test.cpp)
 
 # LatencyHistogram es header-only en tools/bench; el test lo incluye directamente.

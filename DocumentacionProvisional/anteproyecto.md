@@ -648,7 +648,7 @@ Resumen de las estructuras nucleares con sus campos; alimenta directamente el de
 
 ### 6.7 Catálogo de ADRs
 
-Ver §9. Índice rápido: ADR-0001 (plataforma), ADR-0002 (I/O), ADR-0003 (replicación: **Raft por partición**, *aceptado*), ADR-0004 (protocolo: **binario propio + REST**, *aceptado*), ADR-0005 (concurrencia: ***shared-nothing thread-per-core***, *aceptado*), ADR-0006 (*ingress* dos modos, *aceptado*), ADR-0007 (consistencia CP/PACELC, *aceptado*), ADR-0008 (coste cero, *aceptado*), ADR-0009 (manejo de errores por capa, *aceptado*), ADR-0010 (IDE: migración a **VS Code** sobre WSL, *aceptado*), ADR-0011 (estándar **C++23** + libc++ en Clang, *aceptado*), ADR-0012 (backend io_uring directo sobre el uapi, sin liburing, *aceptado*), ADR-0013 (capa **`nexus-wire`** para el framing sobre conexión; `nexus-protocol` queda puro, *aceptado*), ADR-0014 (modelo del **log de Raft**: índice = ordinal de entrada, término en sidecar; `RecordBatch` intacto, *aceptado*), ADR-0015 (`RaftNode` como **máquina de estados síncrona sin E/S** —entradas→cola de salidas—, para simulación determinista, *aceptado*), ADR-0016 (`ReplicatedPartition` como **tipo paralelo** a `Partition`, *aceptado*), ADR-0017 (target **`nexus-telemetry`** para observabilidad bajo el broker, *aceptado*), ADR-0018 (REST admin por **puerto/adaptador**: `AdminService` en ingress, `AdminApi` en server, *aceptado*).
+Ver §9. Índice rápido: ADR-0001 (plataforma), ADR-0002 (I/O), ADR-0003 (replicación: **Raft por partición**, *aceptado*), ADR-0004 (protocolo: **binario propio + REST**, *aceptado*), ADR-0005 (concurrencia: ***shared-nothing thread-per-core***, *aceptado*), ADR-0006 (*ingress* dos modos, *aceptado*), ADR-0007 (consistencia CP/PACELC, *aceptado*), ADR-0008 (coste cero, *aceptado*), ADR-0009 (manejo de errores por capa, *aceptado*), ADR-0010 (IDE: migración a **VS Code** sobre WSL, *aceptado*), ADR-0011 (estándar **C++23** + libc++ en Clang, *aceptado*), ADR-0012 (backend io_uring directo sobre el uapi, sin liburing, *aceptado*), ADR-0013 (capa **`nexus-wire`** para el framing sobre conexión; `nexus-protocol` queda puro, *aceptado*), ADR-0014 (modelo del **log de Raft**: índice = ordinal de entrada, término en sidecar; `RecordBatch` intacto, *aceptado*), ADR-0015 (`RaftNode` como **máquina de estados síncrona sin E/S** —entradas→cola de salidas—, para simulación determinista, *aceptado*), ADR-0016 (`ReplicatedPartition` como **tipo paralelo** a `Partition`, *aceptado*), ADR-0017 (target **`nexus-telemetry`** para observabilidad bajo el broker, *aceptado*), ADR-0018 (REST admin por **puerto/adaptador**: `AdminService` en ingress, `AdminApi` en server, *aceptado*), ADR-0019 (**TLS opcional** vía OpenSSL con puente de **BIOs de memoria** sobre el `Proactor`; `find_package(OpenSSL)`/`NEXUS_HAVE_OPENSSL`, arranque en claro si falta, *aceptado*).
 
 ---
 
@@ -1250,6 +1250,26 @@ Procedimientos de operación que el diseño debe soportar (se concretan en Fase 
 - **`AdminApi` concreto en `nexus-server`, referenciado por `ingress` (desglose literal):** crea el ciclo `ingress ↔ server`; descartado.
 - **`AdminApi` en `nexus-broker`:** tendría que implementar la interfaz `AdminService` de `ingress` ⇒ `broker → ingress` (dependencia **ascendente**, prohibida); descartado.
 - **`RestGateway` como router genérico de *handlers* (`std::function`):** rompe el ciclo, pero diluye el contrato de administración en *callbacks* sin tipado; el puerto explícito documenta mejor la API y es más fiel al desglose.
+
+---
+
+### ADR-0019: TLS opcional vía OpenSSL con puente de BIOs de memoria sobre el `Proactor`
+
+- **Estado:** aceptado
+- **Fecha:** 2026-06-19
+
+> **Refina el desglose** (no cambia ninguna decisión previa): el desglose detallado (§4.8) ya situaba `TlsContext`/`TlsConnection` sobre OpenSSL en `nexus-ingress`. Este ADR fija **cómo** se integra OpenSSL (síncrono por diseño) con el modelo proactor asíncrono y **qué grado de dependencia** es OpenSSL en el build.
+
+**Contexto.** El plano de ingress (ADR-0006) termina TLS 1.3 y, intra-clúster, mTLS. La librería elegida es OpenSSL (madura, ubicua), pero su API de E/S es **bloqueante/síncrona** y NexusMQ es **thread-per-core asíncrono** sobre un `Proactor` (io_uring, ADR-0005/0002). Además, OpenSSL es una dependencia de sistema pesada que no siempre está presente (p. ej. entornos mínimos de CI o builds de desarrollo) y el broker debe poder **arrancar en claro** para pruebas locales y despliegues sin TLS.
+
+**Decisión.** (1) **Acoplamiento opcional**: el build usa `find_package(OpenSSL)`; si está, compila `ingress/tls.{hpp,cpp}` y define `NEXUS_HAVE_OPENSSL` (público). Si no, el plano TLS se **omite por completo** (cabecera y `.cpp` guardados con `#ifdef`, tests con `GTEST_SKIP`) y el broker funciona en claro. El CI instala `libssl-dev` para **sí** ejercerlo (compilación, tests, sanitizers y clang-tidy del path TLS). (2) **Puente de BIOs de memoria**: `TlsConnection` no deja que OpenSSL toque el descriptor; usa dos `BIO` de memoria (`rbio`/`wbio`). El bucle de `handshake`/`async_recv`/`async_send` llama a la primitiva OpenSSL y, ante `WANT_READ`/`WANT_WRITE`, **vacía** el `wbio` al socket y **alimenta** el `rbio` desde el socket mediante el `Proactor` asíncrono — así la criptografía corre en línea pero el transporte es no bloqueante. (3) **Fábricas en el contexto**: `TlsContext::server`/`client` cargan material PEM y configuran verificación (mTLS = `SSL_VERIFY_PEER|FAIL_IF_NO_PEER_CERT` + CA); `accept`/`connect` crean la `TlsConnection` fijando el rol del handshake. `peer_principal()` extrae el CN del certificado del par para authz.
+
+**Consecuencias.** (+) El núcleo asíncrono **no se contamina** con E/S bloqueante; TLS encaja tras el mismo `Proactor` que el resto. (+) Build y despliegue **sin OpenSSL** siguen siendo válidos (degradación a claro), cumpliendo coste-cero (ADR-0008). (+) `TlsContext`/`TlsConnection` se prueban por loopback con certs autofirmados generados en el test (una vía, mTLS con principal, y fallo de verificación). (−) El puente BIO añade una copia intermedia ciphertext↔socket (aceptable; el throughput TLS lo domina la cifra, no la copia). (−) La compilación condicional obliga a `#ifdef` en cabecera, `.cpp` y tests.
+
+**Alternativas consideradas.**
+- **`BIO` propio sobre el `Proactor` (custom BIO method):** evita una copia, pero exige implementar un `BIO_METHOD` con semántica de reintento correcta y es mucho más frágil; el puente de BIOs de memoria es el patrón canónico y suficiente.
+- **OpenSSL como dependencia obligatoria (vcpkg/sistema):** simplifica el build, pero rompe coste-cero y el arranque en claro para desarrollo; descartado a favor del acoplamiento opcional.
+- **Otra librería (BearSSL/mbedTLS/rustls-ffi):** menor huella, pero peor ergonomía/cobertura y menos familiar; OpenSSL ya estaba fijado en el desglose.
 
 ---
 

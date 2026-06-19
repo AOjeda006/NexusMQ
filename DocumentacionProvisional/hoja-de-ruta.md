@@ -556,8 +556,20 @@ Harness de benchmark vacío y CI:
   ampliado (`group list`, `diagnostics`, `metrics` contra un `Server` real).
 
 ### Bloque I.E — TLS + modos de ingress
-- [ ] **I17** OpenSSL (condicional) + `TlsContext`/`TlsConnection` (TLS 1.3, mTLS; e2e loopback con
-  certs autofirmados, *skip* si no hay OpenSSL).
+- [x] **I17** **ADR-0019** + `ingress/tls.{hpp,cpp}` — `TlsContext` (RAII sobre `SSL_CTX`, TLS 1.3
+  fijado; fábricas `server`/`client` que cargan PEM y, con CA, exigen/verifican el certificado del
+  par para **mTLS**) y `TlsConnection` (RAII sobre `SSL` + dos **BIOs de memoria**; `handshake`,
+  `async_recv`, `async_send` bombean los records por el `Socket` vía el `Proactor` —cripto en línea,
+  transporte asíncrono—; en error terminal vacía la alerta fatal pendiente antes de propagar;
+  `peer_principal()` saca el CN del cert del par). OpenSSL es **opcional** (`find_package(OpenSSL)` →
+  `NEXUS_HAVE_OPENSSL`): sin él, el plano TLS se omite (broker en claro) y los tests hacen
+  `GTEST_SKIP`; el CI instala `libssl-dev` para compilarlo, testearlo, sanitizarlo y *tidiarlo*.
+  Tests: unitarios de `TlsContext` (cert válido sin/con CA, cert inexistente, cliente) y e2e por
+  loopback con io_uring (handshake una-vía + intercambio cifrado, mTLS con `peer_principal`, y fallo
+  de verificación con CA que no casa). **Ajuste del desglose (anotado):** se añaden `TlsContext::client`
+  y las fábricas `accept`/`connect` (el desglose solo listaba `server(...)`), necesarias para el
+  extremo cliente (loopback/mTLS y, más adelante, el proxy de I18). Validado en GCC/Clang/ASan +
+  clang-format/clang-tidy.
 - [ ] **I18** `Proxy` (modo proxy: enruta clientes "tontos" al líder por *consistent-hash*) +
   `ConnectionState`.
 
