@@ -3,6 +3,7 @@
 add_library(nexus-io
   file.cpp
   aligned_buffer.cpp
+  block_reader.cpp
   socket.cpp)
 add_library(nexus::io ALIAS nexus-io)
 

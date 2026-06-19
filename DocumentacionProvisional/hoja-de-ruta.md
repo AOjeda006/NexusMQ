@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** **FASE 4 EN CURSO** (Stretch, serie F): hechos **F1** (productor *effectively-once* + *fencing* por época), **F2** (codec por record + migración del cliente), **F3** (compactación por clave), **F4** (DLQ) y **F5** (compresión LZ4/Zstd por batch). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
+**Estado actual:** **FASE 4 EN CURSO** (Stretch, serie F): hechos **F1** (productor *effectively-once* + *fencing* por época), **F2** (codec por record + migración del cliente), **F3** (compactación por clave), **F4** (DLQ), **F5** (compresión LZ4/Zstd por batch) y **F6** (E/S directa `O_DIRECT` + lector con readahead). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
 añade el **consenso Raft por partición** (`nexus-consensus`: estado/log/RPC, `RaftNode` como máquina de
 estados síncrona sin E/S con pre-vote, replicación, *high-watermark* por mayoría, transferencia de
 liderazgo y learners; ADR-0014/0015), la **integración en el broker** (`ReplicatedPartition`, ADR-0016),
@@ -704,14 +704,21 @@ Harness de benchmark vacío y CI:
   `decode_records` descomprime de forma transparente; `Producer::set_codec` lo expone al cliente.
   Tests: round-trip LZ4/Zstd, `None` passthrough, anti-bomba, bloque truncado, bits de `attrs` y
   batch comprimido extremo a extremo. Verde en GCC/Clang/ASan; CI con `liblz4-dev`/`libzstd-dev`.
-- [ ] **F6** *Direct I/O* (`O_DIRECT`) + caché/readahead propios (con *fallback* a *buffered*).
+- [x] **F6** *Direct I/O* (`O_DIRECT`) + caché/readahead propios (con *fallback* a *buffered*).
   - [x] **F6a** Primitivas de E/S directa — `io/aligned_buffer.{hpp,cpp}` + modo directo en `File`.
     `AlignedBuffer` confina la asignación **alineada** (`operator new` con `align_val_t`) en un RAII
     solo movible (sin `new`/`delete` a la vista, como `ArenaAllocator`); `align_up` redondea tamaños.
     `File::Mode::ReadWriteDirect` abre con `O_DIRECT` y **recae** a E/S con búfer si el FS no lo
     admite (`EINVAL`), exponiendo `is_direct()`/`direct_alignment()`. Tests: alineación, *move*,
     alineación inválida, round-trip directo (offset/longitud/búfer alineados). Verde en GCC/Clang/ASan.
-  - [ ] **F6b** Lector con *readahead* sobre `File` (caché de bloques alineados; *prefetch* secuencial).
+  - [x] **F6b** Lector con *readahead* — `io/block_reader.{hpp,cpp}`. `BlockReader` lee un `File` en
+    **bloques alineados** (potencia de dos), sirve cualquier rango `[offset, len)` copiando de los
+    bloques que lo cubren, y mantiene **caché propia** (LRU acotada) + **prefetch** secuencial: un
+    acceso que continúa la secuencia precarga los `readahead_blocks` siguientes (best-effort). Es la
+    pareja natural de la E/S directa (sin *page cache* del SO, la gestiona el broker). Maneja el
+    último bloque parcial y el EOF; expone `cache_hits/misses`/`disk_reads`. Tests: rango
+    multi-bloque, acierto de caché, *readahead*, desalojo LRU, bloque parcial, EOF y `block_size`
+    inválido. Verde en GCC/Clang/ASan.
 - [ ] **F7** Subconjunto **Kafka-compatible** (`ApiVersions`/`Metadata`/`Produce`/`Fetch`) → habla con `kcat`.
 - [ ] **F8** Tracing distribuido (propagación de contexto de traza).
 - [ ] **F9** *Binding* Python (pybind11) *(si el entorno lo soporta)*.

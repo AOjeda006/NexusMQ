@@ -20,6 +20,7 @@ add_executable(nexus-tests
   unit/common/task_test.cpp
   unit/io/file_test.cpp
   unit/io/aligned_buffer_test.cpp
+  unit/io/block_reader_test.cpp
   unit/io/socket_test.cpp
   unit/io/fake_proactor_test.cpp
   unit/io/awaitable_test.cpp
