@@ -1,0 +1,86 @@
+# StatefulSet de NexusMQ: el broker tiene estado persistente (logs de partición), de ahí el
+# StatefulSet + volumeClaimTemplates (un PVC por réplica). Los probes usan el puerto de operación.
+#
+#   kubectl apply -f deploy/k8s/
+#
+# La imagen `nexusmq:dev` debe estar disponible para el clúster (build + push a un registry, o
+# `kind load docker-image nexusmq:dev`). El nodo debe soportar io_uring.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nexusmq
+  labels:
+    app: nexusmq
+spec:
+  serviceName: nexusmq          # Service headless: DNS estable nexusmq-0.nexusmq, etc.
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nexusmq
+  template:
+    metadata:
+      labels:
+        app: nexusmq
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532            # el volumen de datos pertenece al grupo no-root
+      containers:
+        - name: nexusd
+          image: nexusmq:dev
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "9092"
+            - "--admin-port"
+            - "9644"
+            - "--data-dir"
+            - "/var/lib/nexusmq"
+            - "--topic"
+            - "demo:3"
+          ports:
+            - name: data
+              containerPort: 9092
+            - name: ops
+              containerPort: 9644
+          livenessProbe:           # ¿el proceso sigue vivo? -> /healthz
+            httpGet:
+              path: /healthz
+              port: ops
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:          # ¿puede recibir tráfico? -> /readyz (arrancado + probes ok)
+            httpGet:
+              path: /readyz
+              port: ops
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "128Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/nexusmq
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

@@ -1,0 +1,13 @@
+# Ignore específico de este Dockerfile (BuildKit usa `<dockerfile>.dockerignore` si existe).
+# Recorta el contexto de build: fuera artefactos, control de versiones y documentación.
+.git/
+.github/
+build/
+**/build/
+.cache/
+DocumentacionProvisional/
+docs/
+deploy/
+**/*.md
+**/.DS_Store
+**/compile_commands.json

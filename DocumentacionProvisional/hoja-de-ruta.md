@@ -589,8 +589,23 @@ Harness de benchmark vacío y CI:
   Validado en GCC/Clang/ASan + clang-format/clang-tidy.
 
 ### Bloque I.F — Despliegue + documentación
-- [ ] **I19** `deploy/`: `Dockerfile` (multi-stage → distroless, no-root, `HEALTHCHECK` → `/readyz`),
-  `docker-compose.yml` (3 nodos + Prometheus/Grafana), `k8s/` (probes), `.dockerignore`.
+- [x] **I19** `deploy/`: **`Dockerfile`** multi-stage (Ubuntu compila en Release → runtime
+  **distroless `cc`**, no-root uid 65532, `EXPOSE 9092/9644`, `VOLUME` con propiedad del uid;
+  `HEALTHCHECK` reusa `nexus-cli diagnostics` —distroless no trae shell/`curl`— que consulta
+  `/healthz`+`/readyz`), **`Dockerfile.dockerignore`**, **`docker-compose.yml`** (3 nodos broker +
+  Prometheus + Grafana con datasource provisionado; `prometheus.yml` raspa `/metrics` de los tres),
+  **`k8s/`** (`StatefulSet` con `volumeClaimTemplates` y probes *liveness* `/healthz` / *readiness*
+  `/readyz` sobre el puerto de operación, contenedor endurecido: `runAsNonRoot`,
+  `readOnlyRootFilesystem`, `drop:[ALL]`; `Service` headless) y `README.md`. **Cableado necesario:**
+  (1) `nexusd` gana los flags `--admin-port`, `--jwt-secret` y `--node-id` (sin ellos no se podía
+  abrir el puerto de operación que necesitan el `HEALTHCHECK`/Prometheus/probes); (2) opción CMake
+  **`NEXUS_BUILD_TESTS`** (ON por defecto) para que la imagen compile solo `nexusd`+`nexus-cli` sin
+  bajar GoogleTest/Benchmark; (3) **fix** `telemetry/logging.cpp`: `format_rfc3339` pasa de `snprintf`
+  a `std::format` (evita `-Werror=format-truncation` que solo salta en build optimizado —Release—).
+  Verificado en local: build Release (`NEXUS_BUILD_TESTS=OFF`) produce ambos binarios y un smoke-test
+  real (`nexusd --admin-port` + `curl /healthz//readyz//metrics` + `nexus-cli diagnostics`/`topic
+  list` + apagado limpio con SIGTERM); YAML validados. **Difiere:** no se construye la imagen en este
+  entorno (sin Docker) ni se añade un job de imagen al CI (Fase 4). Gate C++ verde en GCC/Clang/ASan.
 - [ ] **I20** `docs/openapi.yaml` (contrato REST) + `docs/protocol.md` (protocolo binario) + cierre de Fase 3.
 
 ---

@@ -1,0 +1,19 @@
+# Service headless (clusterIP: None) que da DNS estable a cada réplica del StatefulSet
+# (nexusmq-0.nexusmq, nexusmq-1.nexusmq, …) y agrupa los puertos de datos y de operación.
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexusmq
+  labels:
+    app: nexusmq
+spec:
+  clusterIP: None
+  selector:
+    app: nexusmq
+  ports:
+    - name: data
+      port: 9092
+      targetPort: data
+    - name: ops
+      port: 9644
+      targetPort: ops

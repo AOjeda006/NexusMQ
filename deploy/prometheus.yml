@@ -1,0 +1,16 @@
+# Configuración de Prometheus para el despliegue local: raspa el puerto de operación (/metrics,
+# formato text/plain version=0.0.4) de los tres nodos NexusMQ por su nombre de servicio en compose.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: nexusmq
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - nexus1:9644
+          - nexus2:9644
+          - nexus3:9644
+        labels:
+          cluster: local

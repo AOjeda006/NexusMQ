@@ -1,0 +1,82 @@
+# Despliegue local de NexusMQ: 3 nodos broker + Prometheus + Grafana.
+# Desde deploy/:   docker compose up --build
+#
+# Nota: en Fase 3 los 3 nodos son brokers independientes (el runtime de clúster multi-nodo —
+# descubrimiento de líder, replicación entre nodos— llega en fases posteriores). Sirven para
+# probar el empaquetado, la observabilidad y los probes de salud sobre varias instancias.
+name: nexusmq
+
+x-nexus-common: &nexus-common
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  image: nexusmq:dev
+  restart: unless-stopped
+
+services:
+  nexus1:
+    <<: *nexus-common
+    command: ["--host", "0.0.0.0", "--port", "9092", "--admin-port", "9644",
+              "--data-dir", "/var/lib/nexusmq", "--node-id", "1", "--topic", "demo:3"]
+    ports:
+      - "9092:9092"   # plano de datos
+      - "9644:9644"   # puerto de operación
+    volumes:
+      - nexus1-data:/var/lib/nexusmq
+
+  nexus2:
+    <<: *nexus-common
+    command: ["--host", "0.0.0.0", "--port", "9092", "--admin-port", "9644",
+              "--data-dir", "/var/lib/nexusmq", "--node-id", "2", "--topic", "demo:3"]
+    ports:
+      - "9093:9092"
+      - "9645:9644"
+    volumes:
+      - nexus2-data:/var/lib/nexusmq
+
+  nexus3:
+    <<: *nexus-common
+    command: ["--host", "0.0.0.0", "--port", "9092", "--admin-port", "9644",
+              "--data-dir", "/var/lib/nexusmq", "--node-id", "3", "--topic", "demo:3"]
+    ports:
+      - "9094:9092"
+      - "9646:9644"
+    volumes:
+      - nexus3-data:/var/lib/nexusmq
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - nexus1
+      - nexus2
+      - nexus3
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  nexus1-data:
+  nexus2-data:
+  nexus3-data:
+  prometheus-data:
+  grafana-data:

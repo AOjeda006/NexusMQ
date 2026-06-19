@@ -75,11 +75,17 @@ int main(int argc, char** argv) {
             } else if (arg == "--host" && has_next) {
                 config.host = args[++i];
                 config.advertised_host = config.host;
+            } else if (arg == "--admin-port" && has_next) {
+                config.admin_port = static_cast<std::uint16_t>(parse_int(args[++i], 0));
+            } else if (arg == "--jwt-secret" && has_next) {
+                config.jwt_secret = args[++i];
+            } else if (arg == "--node-id" && has_next) {
+                config.node_id = static_cast<nexus::NodeId>(parse_int(args[++i], config.node_id));
             } else if (arg == "--topic" && has_next) {
                 topics.push_back(parse_topic_spec(args[++i]));
             } else {
-                std::cerr << "uso: nexusd [--port N] [--data-dir DIR] [--host H] [--topic "
-                             "nombre:parts]\n";
+                std::cerr << "uso: nexusd [--port N] [--admin-port N] [--data-dir DIR] [--host H] "
+                             "[--node-id N] [--jwt-secret S] [--topic nombre:parts]\n";
                 return EXIT_FAILURE;
             }
         }
@@ -100,7 +106,11 @@ int main(int argc, char** argv) {
         g_server.store(&server, std::memory_order_release);
         std::signal(SIGINT, on_signal);
         std::signal(SIGTERM, on_signal);
-        std::cout << "NexusMQ escuchando en " << server.port() << " (Ctrl-C para parar)\n";
+        std::cout << "NexusMQ escuchando en " << server.port();
+        if (server.admin_port() != 0) {
+            std::cout << " (operación en " << server.admin_port() << ")";
+        }
+        std::cout << " (Ctrl-C para parar)\n";
         server.run();
         std::cout << "NexusMQ detenido.\n";
     } catch (const std::exception& ex) {

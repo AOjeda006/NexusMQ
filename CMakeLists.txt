@@ -65,10 +65,20 @@ endif()
 
 enable_testing()
 
+# Tests y benchmarks son dev-only y arrastran GoogleTest/Benchmark (FetchContent). Se pueden
+# desactivar para builds de release/empaquetado (p. ej. la imagen Docker, que solo necesita
+# nexusd + nexus-cli y no quiere depender de la red en `configure`).
+option(NEXUS_BUILD_TESTS "Compila la suite de tests y los benchmarks (GoogleTest/Benchmark)" ON)
+
 # Los subdirectorios se incorporan a medida que existen: el árbol crece por hito
 # (M1 cimientos → M2 common/storage → … ). Mientras una carpeta no tenga su
-# CMakeLists, se omite sin romper la configuración.
-foreach(_dir IN ITEMS src tools/bench tools/cli tests)
+# CMakeLists, se omite sin romper la configuración. La biblioteca (src) y el CLI van siempre;
+# tests y benchmarks solo con NEXUS_BUILD_TESTS.
+set(_nexus_subdirs src tools/cli)
+if(NEXUS_BUILD_TESTS)
+  list(APPEND _nexus_subdirs tools/bench tests)
+endif()
+foreach(_dir IN LISTS _nexus_subdirs)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_dir}/CMakeLists.txt")
     add_subdirectory(${_dir})
   endif()
