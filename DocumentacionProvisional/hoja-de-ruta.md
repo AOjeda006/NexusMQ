@@ -720,6 +720,17 @@ Harness de benchmark vacío y CI:
     multi-bloque, acierto de caché, *readahead*, desalojo LRU, bloque parcial, EOF y `block_size`
     inválido. Verde en GCC/Clang/ASan.
 - [ ] **F7** Subconjunto **Kafka-compatible** (`ApiVersions`/`Metadata`/`Produce`/`Fetch`) → habla con `kcat`.
+  - [x] **F7a** Codec de wire Kafka — `kafka/codec.{hpp,cpp}` (target `nexus::kafka`). El protocolo de
+    Kafka es **big-endian** (≠ nativo, ADR-0013), así que lleva codec propio. `Encoder`/`Decoder`
+    (defensivo) cubren `INT8/16/32/64`, `BOOLEAN`, `UNSIGNED_VARINT`, `VARINT`/`VARLONG` (zigzag,
+    reusando `common/varint`), `STRING`/`NULLABLE_STRING`, `COMPACT_STRING`/`COMPACT_NULLABLE_STRING`,
+    `BYTES`/`NULLABLE_BYTES`/`COMPACT_BYTES`, longitudes de `ARRAY`/`COMPACT_ARRAY` y *tagged fields*
+    (de las versiones flexibles). Tests: round-trip y bytes exactos (big-endian, prefijo len+1 de los
+    compactos, zigzag), nulos, *skip* de tagged fields y límites. Verde en GCC/Clang/ASan.
+  - [ ] **F7b** Cabeceras de petición/respuesta + `ApiVersions` (descubrimiento del clúster).
+  - [ ] **F7c** `Metadata`; **F7d** `Produce`/`Fetch` (puente al broker).
+  - [ ] **Nota:** la interoperación **en vivo con `kcat`** no se verifica en este entorno (no está
+    instalado); se cubre con tests de round-trip/bytes y queda como verificación manual (como F10).
 - [ ] **F8** Tracing distribuido (propagación de contexto de traza).
 - [ ] **F9** *Binding* Python (pybind11) *(si el entorno lo soporta)*.
 - [ ] **F10** Backend **IOCP** (Windows) en `nexus-io`; preset `windows-msvc` *(no verificable en este entorno)*.
