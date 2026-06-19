@@ -26,6 +26,11 @@ class Producer {
 public:
     explicit Producer(Client& client) noexcept : client_(client) {}
 
+    /// @brief Fija el códec de compresión del blob de cada batch (F5). Por defecto `None`. Si el
+    ///   códec no está compilado, los batches se envían sin comprimir (degradación silenciosa).
+    void set_codec(Codec codec) noexcept { codec_ = codec; }
+    [[nodiscard]] Codec codec() const noexcept { return codec_; }
+
     /// @brief Publica un único @p value (sin clave) en @p topic/@p partition.
     /// @return el offset asignado.
     [[nodiscard]] expected<Offset> send(const std::string& topic, PartitionId partition,
@@ -49,7 +54,8 @@ public:
                                                 std::span<const Record> records);
 
 private:
-    Client& client_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+    Client& client_;             // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+    Codec codec_ = Codec::None;  ///< Códec de compresión aplicado al construir cada batch (F5).
 };
 
 }  // namespace nexus

@@ -68,7 +68,7 @@ expected<Offset> Producer::send_records(const std::string& topic, PartitionId pa
     for (const Record& rec : records) {
         builder.add(rec);
     }
-    const RecordBatch batch = builder.build();
+    const RecordBatch batch = builder.build(/*header=*/{}, codec_);
     Buffer batch_buf;
     batch.encode(batch_buf);
 

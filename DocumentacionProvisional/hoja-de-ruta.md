@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** **FASE 4 EN CURSO** (Stretch, serie F): hechos **F1** (productor *effectively-once* + *fencing* por época), **F2** (codec por record + migración del cliente), **F3** (compactación por clave) y **F4** (DLQ). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
+**Estado actual:** **FASE 4 EN CURSO** (Stretch, serie F): hechos **F1** (productor *effectively-once* + *fencing* por época), **F2** (codec por record + migración del cliente), **F3** (compactación por clave), **F4** (DLQ) y **F5** (compresión LZ4/Zstd por batch). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
 añade el **consenso Raft por partición** (`nexus-consensus`: estado/log/RPC, `RaftNode` como máquina de
 estados síncrona sin E/S con pre-vote, replicación, *high-watermark* por mayoría, transferencia de
 liderazgo y learners; ADR-0014/0015), la **integración en el broker** (`ReplicatedPartition`, ADR-0016),
@@ -692,7 +692,19 @@ Harness de benchmark vacío y CI:
   `make_dead_letter` (metadatos + tombstone) y e2e (router → topic DLQ → consumo y verificación de
   headers). **Diferido (anotado):** la política de reintentos/máximo de intentos es lógica de
   aplicación; aquí se entrega el mecanismo de reencaminado. Verde en GCC/Clang/ASan.
-- [ ] **F5** Compresión LZ4/Zstd por batch (dep condicional, anti *decompression bomb*).
+- [x] **F5** Compresión LZ4/Zstd por batch — `common/compression.{hpp,cpp}`. Comprime el **blob de
+  records** de un `RecordBatch` (opaco al broker; sigue siéndolo comprimido) y codifica el códec en
+  los 2 bits bajos de `attrs` (`codec_from_attrs`/`attrs_with_codec`). `compress`/`decompress`
+  llevan un **prefijo de tamaño original** (u32 LE) para acotar la salida sin confiar en el formato:
+  defensa anti *decompression bomb* (§7.9) — un bloque que se declare mayor que `max_output` se
+  rechaza **antes** de reservar memoria. LZ4 y Zstd son **dependencias condicionales** (como el plano
+  TLS, ADR-0019): `find_path`/`find_library` definen `NEXUS_HAVE_LZ4`/`NEXUS_HAVE_ZSTD`; si faltan,
+  el códec queda `Unsupported` y `None` siempre funciona. `RecordBatchBuilder::build(header, codec)`
+  comprime al construir (degradación silenciosa a `None` si el códec no está compilado) y
+  `decode_records` descomprime de forma transparente; `Producer::set_codec` lo expone al cliente.
+  Tests: round-trip LZ4/Zstd, `None` passthrough, anti-bomba, bloque truncado, bits de `attrs` y
+  batch comprimido extremo a extremo. Verde en GCC/Clang/ASan; CI con `liblz4-dev`/`libzstd-dev`.
+- [ ] **F6** *Direct I/O* (`O_DIRECT`) + caché/readahead propios (con *fallback* a *buffered*).
 - [ ] **F6** *Direct I/O* (`O_DIRECT`) + caché/readahead propios (con *fallback* a *buffered*).
 - [ ] **F7** Subconjunto **Kafka-compatible** (`ApiVersions`/`Metadata`/`Produce`/`Fetch`) → habla con `kcat`.
 - [ ] **F8** Tracing distribuido (propagación de contexto de traza).

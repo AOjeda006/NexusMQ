@@ -105,6 +105,12 @@ offset base. El batch viaja **intacto** por el log y la replicación (es la unid
 de entrada de Raft, ADR-0014). El layout campo a campo está en
 [`src/common/record.hpp`](../src/common/record.hpp) y [`src/protocol/messages.hpp`](../src/protocol/messages.hpp).
 
+El **blob de records** puede ir **comprimido** (F5): los **2 bits bajos** de `attrs` indican el
+códec (`0`=None, `1`=LZ4, `2`=Zstd). El broker trata el blob como **opaco** —lo guarda y replica
+comprimido—; solo el cliente lo descomprime al consumir. El bloque comprimido lleva su **tamaño
+original** como prefijo (u32 LE) para acotar la descompresión (defensa anti *decompression bomb*).
+Ver [`src/common/compression.hpp`](../src/common/compression.hpp).
+
 ## Seguridad del transporte
 
 El plano de datos puede terminar **TLS 1.3** (y **mTLS** intra-clúster) por delante del framing

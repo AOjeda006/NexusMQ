@@ -9,6 +9,7 @@
 #include <span>
 #include <utility>
 
+#include "common/compression.hpp"
 #include "common/varint.hpp"
 
 namespace nexus {
@@ -165,14 +166,29 @@ expected<Record> decode_record(ByteSpan& cursor, Offset base_offset) {
     return rec;
 }
 
-expected<std::vector<Record>> decode_records(const RecordBatch& batch) {
+expected<std::vector<Record>> decode_records(const RecordBatch& batch,
+                                             std::size_t max_decompressed) {
     const std::int32_t count = batch.header().record_count;
     if (count < 0) {
         return make_error(ErrorCode::Corrupt, "record_count negativo");
     }
+    // Descomprime el blob si los bits de códec de `attrs` lo indican (F5). El búfer descomprimido
+    // debe vivir mientras se recorre; los Record copian sus bytes, así que es seguro.
+    const Codec codec = codec_from_attrs(batch.header().attrs);
+    std::vector<std::byte> decompressed;
+    ByteSpan blob = batch.records();
+    if (codec != Codec::None) {
+        expected<std::vector<std::byte>> raw = decompress(codec, blob, max_decompressed);
+        if (!raw) {
+            return std::unexpected(raw.error());
+        }
+        decompressed = std::move(*raw);
+        blob = ByteSpan{decompressed};
+    }
+
     std::vector<Record> out;
     out.reserve(static_cast<std::size_t>(count));
-    ByteSpan cursor = batch.records();
+    ByteSpan cursor = blob;
     for (std::int32_t i = 0; i < count; ++i) {
         expected<Record> rec = decode_record(cursor, batch.header().base_offset);
         if (!rec) {
@@ -188,7 +204,7 @@ RecordBatchBuilder& RecordBatchBuilder::add(Record rec) {
     return *this;
 }
 
-RecordBatch RecordBatchBuilder::build(RecordBatchHeader header) const {
+RecordBatch RecordBatchBuilder::build(RecordBatchHeader header, Codec codec) const {
     Buffer records;
     std::int64_t delta = 0;
     for (const Record& rec : records_) {
@@ -197,6 +213,17 @@ RecordBatch RecordBatchBuilder::build(RecordBatchHeader header) const {
     }
     header.record_count = static_cast<std::int32_t>(records_.size());
     const ByteSpan span = records.as_span();
+
+    // Comprime el blob si se pide un códec disponible (F5); fija los bits de códec en `attrs`. Si
+    // el códec no está compilado o la compresión falla, se construye sin comprimir (`None`).
+    if (codec != Codec::None && codec_available(codec)) {
+        expected<std::vector<std::byte>> compressed = compress(codec, span);
+        if (compressed) {
+            header.attrs = attrs_with_codec(header.attrs, codec);
+            return RecordBatch{header, std::move(*compressed)};
+        }
+    }
+    header.attrs = attrs_with_codec(header.attrs, Codec::None);
     return RecordBatch{header, std::vector<std::byte>{span.begin(), span.end()}};
 }
 

@@ -42,6 +42,8 @@ struct Record {
 /// Topes anti-DoS al decodificar (entrada no confiable): nº de records/headers.
 inline constexpr std::int64_t kMaxRecordsPerBatch = 1'000'000;
 inline constexpr std::int64_t kMaxHeadersPerRecord = 10'000;
+/// Tope del blob de records **descomprimido** (anti *decompression bomb*): 64 MiB.
+inline constexpr std::size_t kMaxRecordBytes = std::size_t{64} * 1024 * 1024;
 
 /// @brief Codifica @p rec (con su prefijo de longitud) al final de @p out.
 /// @param offset_delta Delta del offset respecto al base del batch (0 para el primero).
@@ -56,7 +58,10 @@ void encode_record(const Record& rec, std::int64_t offset_delta, Buffer& out);
 [[nodiscard]] expected<Record> decode_record(ByteSpan& cursor, Offset base_offset);
 
 /// @brief Decodifica todos los records del blob de @p batch (con offsets absolutos).
-[[nodiscard]] expected<std::vector<Record>> decode_records(const RecordBatch& batch);
+/// @details Si los bits de códec de `attrs` indican compresión (F5), el blob se **descomprime**
+///   primero, acotando la salida a @p max_decompressed (anti *decompression bomb*).
+[[nodiscard]] expected<std::vector<Record>> decode_records(
+    const RecordBatch& batch, std::size_t max_decompressed = kMaxRecordBytes);
 
 /// @brief Acumula records y produce un RecordBatch (asigna offset_delta por orden de inserción).
 ///   Afinidad: REACTOR-LOCAL.
@@ -71,7 +76,10 @@ public:
     /// @brief Construye el batch. Sobrescribe `header.record_count` con el nº de records; el
     ///   `base_offset` lo asigna el log al anexar (queda como venga en @p header, normalmente 0).
     ///   Los campos de idempotencia de @p header se respetan.
-    [[nodiscard]] RecordBatch build(RecordBatchHeader header = {}) const;
+    /// @param codec Si no es `None`, comprime el blob de records y fija los bits de códec de
+    /// `attrs`
+    ///   (F5). Si el códec no está compilado, el batch se construye **sin** comprimir (`None`).
+    [[nodiscard]] RecordBatch build(RecordBatchHeader header = {}, Codec codec = Codec::None) const;
 
 private:
     std::vector<Record> records_;
