@@ -6,6 +6,7 @@ add_library(nexus-common
   crc32c.cpp
   bytes.cpp
   record.cpp
+  record_codec.cpp
   varint.cpp
   sha256.cpp
   base64.cpp)
