@@ -85,6 +85,7 @@ add_executable(nexus-tests
   e2e/broker_e2e_test.cpp
   unit/client/dead_letter_test.cpp
   unit/kafka/codec_test.cpp
+  unit/kafka/messages_test.cpp
   e2e/client_e2e_test.cpp
   e2e/admin_http_e2e_test.cpp
   e2e/cli_admin_e2e_test.cpp

@@ -727,7 +727,13 @@ Harness de benchmark vacío y CI:
     `BYTES`/`NULLABLE_BYTES`/`COMPACT_BYTES`, longitudes de `ARRAY`/`COMPACT_ARRAY` y *tagged fields*
     (de las versiones flexibles). Tests: round-trip y bytes exactos (big-endian, prefijo len+1 de los
     compactos, zigzag), nulos, *skip* de tagged fields y límites. Verde en GCC/Clang/ASan.
-  - [ ] **F7b** Cabeceras de petición/respuesta + `ApiVersions` (descubrimiento del clúster).
+  - [x] **F7b** Cabeceras + `ApiVersions` — `kafka/messages.{hpp,cpp}`. `RequestHeader` y su
+    decodificación (deduce la versión de cabecera por API/versión: `client_id` en v1+, *tagged
+    fields* en la flexible v2; `client_id` sigue siendo `NULLABLE_STRING` clásico). Versionado de
+    cabeceras (`is_flexible`, `request/response_header_version`) con el **caso especial** de
+    `ApiVersions`, que responde **siempre** con cabecera v0. `ApiVersions` v3 (cuerpo flexible):
+    anuncia las 4 APIs y sus rangos. Tests: flexibilidad por API, caso especial v0, round-trip de
+    cabecera (flexible y no), respuesta ApiVersions. Verde en GCC/Clang/ASan.
   - [ ] **F7c** `Metadata`; **F7d** `Produce`/`Fetch` (puente al broker).
   - [ ] **Nota:** la interoperación **en vivo con `kcat`** no se verifica en este entorno (no está
     instalado); se cubre con tests de round-trip/bytes y queda como verificación manual (como F10).
