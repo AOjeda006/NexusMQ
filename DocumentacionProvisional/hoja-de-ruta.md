@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** **FASE 3 EN CURSO** (Ingress + operación). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
+**Estado actual:** **FASE 3 COMPLETA** (Ingress + operación: I1–I20). Siguiente: **Fase 4 — Stretch** (opcional). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
 añade el **consenso Raft por partición** (`nexus-consensus`: estado/log/RPC, `RaftNode` como máquina de
 estados síncrona sin E/S con pre-vote, replicación, *high-watermark* por mayoría, transferencia de
 liderazgo y learners; ADR-0014/0015), la **integración en el broker** (`ReplicatedPartition`, ADR-0016),
@@ -376,7 +376,25 @@ Harness de benchmark vacío y CI:
 
 ---
 
-## Fase 3 — Ingress + operación *(EN CURSO)*
+## Fase 3 — Ingress + operación *(COMPLETA ✅)*
+
+> **Resumen de cierre de Fase 3.** Entregable: capa de **ingress + operación** sobre el broker.
+> Resiliencia determinista (`TokenBucket`, `CircuitBreaker`, `LoadBalancer`, `HealthChecker` con
+> reloj inyectado); **observabilidad** (`nexus-telemetry`: métricas Prometheus + logging JSON,
+> ADR-0017); **HTTP/JSON/JWT a mano** y **REST admin** por puerto/adaptador (ADR-0018) servido en un
+> **puerto de operación** aparte (`/metrics`, `/healthz`, `/readyz`, `/api/v1/...`); **CLI** de
+> administración (`nexus-cli`) sobre ese REST; **TLS 1.3 + mTLS** opcional vía OpenSSL con puente de
+> BIOs de memoria sobre el `Proactor` (ADR-0019); **modo proxy** (relevo de tramas + consistent-hash)
+> y `ConnectionState`; y **empaquetado** (`deploy/`: Docker distroless no-root, compose 3 nodos +
+> Prometheus/Grafana, k8s con probes) + **documentación** del contrato (`docs/openapi.yaml`,
+> `docs/protocol.md`). ADRs nuevos: **0017** (telemetría), **0018** (REST admin puerto/adaptador),
+> **0019** (TLS opcional). **Ajustes del desglose (anotados por hito):** relojes inyectados en las
+> primitivas con tiempo; REST admin desacoplado por DIP para romper el ciclo `ingress↔server`;
+> `TlsContext::client` + fábricas `accept`/`connect`; `Proxy::forward` sobre dos `Socket` (sin tipo
+> `Connection`) y a nivel de trama; `ConnectionState` reusa `CreditWindow` (dep descendente). **Difido
+> (decisiones de fasing, no deuda):** cableado del TLS y del proxy en el plano de datos del server,
+> dialado/pool del líder aguas arriba, poblar las métricas del broker, y construir/publicar la imagen
+> en CI. Siguiente: **Fase 4 — Stretch** (opcional).
 
 > Targets: `nexus-ingress`, `nexus-cli`; observabilidad (`nexus-server`); `deploy/`.
 > Deps de `nexus-ingress` (desglose §4.8): common, io, protocol, wire.
@@ -606,7 +624,14 @@ Harness de benchmark vacío y CI:
   real (`nexusd --admin-port` + `curl /healthz//readyz//metrics` + `nexus-cli diagnostics`/`topic
   list` + apagado limpio con SIGTERM); YAML validados. **Difiere:** no se construye la imagen en este
   entorno (sin Docker) ni se añade un job de imagen al CI (Fase 4). Gate C++ verde en GCC/Clang/ASan.
-- [ ] **I20** `docs/openapi.yaml` (contrato REST) + `docs/protocol.md` (protocolo binario) + cierre de Fase 3.
+- [x] **I20** `docs/openapi.yaml` (OpenAPI 3.0.3): contrato del REST admin servido en el puerto de
+  operación — `/api/v1/topics` (GET listado paginado / POST crea con `Location`), `/api/v1/topics/{name}`
+  (GET describe / DELETE 204), `/api/v1/groups` (GET), más `/healthz`, `/readyz`, `/metrics`; esquemas
+  de los DTOs y de `ProblemDetail` (RFC 7807), paginación `page`/`size` y `bearerAuth` (JWT) sobre
+  `/api/v1/*`. `docs/protocol.md`: protocolo binario del plano de datos — framing longitud-prefijo
+  (cabecera de 14 B little-endian: `length|apiKey|apiVersion|correlationId|flags`), tabla de ApiKeys
+  (0–11), negociación de versiones, bit de `flags` de crédito, y tabla de `WireError` (0–15) con
+  reintentabilidad. YAML validado; ambos docs enlazan al código fuente como fuente de verdad.
 
 ---
 

@@ -1,0 +1,293 @@
+openapi: 3.0.3
+info:
+  title: NexusMQ — REST admin API
+  version: "1.0.0"
+  description: >
+    API de administración y operación de NexusMQ, servida en el **puerto de operación**
+    (por defecto 9644), separado del plano de datos binario (puerto 9092). Cubre la gestión
+    de topics y grupos bajo `/api/v1` (autenticada con Bearer JWT cuando el nodo arranca con
+    `--jwt-secret`) y los endpoints de salud/métricas (sin autenticar). Los errores siguen
+    **RFC 7807** (`application/problem+json`).
+  license:
+    name: PolyForm Noncommercial 1.0.0
+    url: https://polyformproject.org/licenses/noncommercial/1.0.0/
+
+servers:
+  - url: http://localhost:9644
+    description: Puerto de operación local
+
+tags:
+  - name: topics
+    description: Gestión de topics.
+  - name: groups
+    description: Grupos de consumidores.
+  - name: operación
+    description: Salud y métricas (sin autenticación).
+
+paths:
+  /healthz:
+    get:
+      tags: [operación]
+      summary: Liveness — ¿el proceso está vivo?
+      security: []
+      responses:
+        "200":
+          description: Vivo.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthStatus" }
+        "503":
+          description: Drenando (apagándose).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthStatus" }
+
+  /readyz:
+    get:
+      tags: [operación]
+      summary: Readiness — ¿puede recibir tráfico?
+      description: Arrancado y con todos los probes (p. ej. disco) en verde.
+      security: []
+      responses:
+        "200":
+          description: Listo.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReadinessStatus" }
+        "503":
+          description: No listo (arrancando o algún probe falla).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReadinessStatus" }
+
+  /metrics:
+    get:
+      tags: [operación]
+      summary: Métricas en formato de exposición de Prometheus.
+      security: []
+      responses:
+        "200":
+          description: Métricas (text/plain; version=0.0.4).
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /api/v1/topics:
+    get:
+      tags: [topics]
+      summary: Lista los topics (paginado).
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: Página de topics.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TopicPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [topics]
+      summary: Crea un topic.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateTopicRequest" }
+      responses:
+        "201":
+          description: Topic creado. La cabecera `Location` apunta al recurso.
+          headers:
+            Location:
+              schema: { type: string }
+              description: Ruta del topic creado (`/api/v1/topics/{name}`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TopicSummary" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "405": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/topics/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+        description: Nombre del topic.
+    get:
+      tags: [topics]
+      summary: Describe un topic (resumen + particiones).
+      responses:
+        "200":
+          description: Descripción del topic.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TopicDescription" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    delete:
+      tags: [topics]
+      summary: Borra un topic.
+      responses:
+        "204": { description: Borrado (sin contenido). }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "405": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/groups:
+    get:
+      tags: [groups]
+      summary: Lista los grupos de consumidores (paginado).
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: Página de grupos.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GroupPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "405": { $ref: "#/components/responses/Problem" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        JWT firmado (HS256) con el secreto del nodo. Solo se exige si el nodo arrancó con
+        `--jwt-secret`; en ese caso, las rutas `/api/v1/*` devuelven 401 sin un token válido.
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, default: 1 }
+      description: Número de página (1-based).
+    Size:
+      name: size
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      description: Elementos por página (acotado a [1, 100]).
+
+  responses:
+    Problem:
+      description: Error con detalle RFC 7807.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/ProblemDetail" }
+
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status: { type: string, enum: [ok, draining] }
+      required: [status]
+
+    ReadinessStatus:
+      type: object
+      properties:
+        status: { type: string, enum: [ready, not_ready] }
+        checks:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              healthy: { type: boolean }
+              detail: { type: string }
+            required: [name, healthy]
+      required: [status]
+
+    CreateTopicRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, description: Nombre del topic (no vacío). }
+        partitionCount: { type: integer, default: 1, minimum: 1 }
+        replicationFactor: { type: integer, default: 1, minimum: 1 }
+        segmentBytes: { type: integer, format: int64, default: 0, description: "0 = por defecto del broker." }
+        retentionMs: { type: integer, format: int64, default: -1, description: "-1 = sin límite." }
+        retentionBytes: { type: integer, format: int64, default: -1, description: "-1 = sin límite." }
+
+    TopicSummary:
+      type: object
+      properties:
+        name: { type: string }
+        partitionCount: { type: integer }
+        replicationFactor: { type: integer }
+        createdAtMs: { type: integer, format: int64 }
+      required: [name, partitionCount, replicationFactor, createdAtMs]
+
+    PartitionInfo:
+      type: object
+      properties:
+        id: { type: integer }
+        leader: { type: integer, description: Nodo líder (este nodo en Fase 1b). }
+        highWatermark: { type: integer, format: int64 }
+        leaderEpoch: { type: integer, format: int64 }
+      required: [id, leader, highWatermark, leaderEpoch]
+
+    TopicDescription:
+      type: object
+      properties:
+        name: { type: string }
+        partitionCount: { type: integer }
+        replicationFactor: { type: integer }
+        createdAtMs: { type: integer, format: int64 }
+        partitions:
+          type: array
+          items: { $ref: "#/components/schemas/PartitionInfo" }
+      required: [name, partitionCount, replicationFactor, createdAtMs, partitions]
+
+    GroupSummary:
+      type: object
+      properties:
+        groupId: { type: string }
+        state:
+          type: string
+          enum: [Empty, PreparingRebalance, CompletingRebalance, Stable, Dead, Unknown]
+        generation: { type: integer }
+        memberCount: { type: integer, format: int64 }
+      required: [groupId, state, generation, memberCount]
+
+    TopicPage:
+      type: object
+      properties:
+        page: { type: integer }
+        size: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/TopicSummary" }
+      required: [page, size, items]
+
+    GroupPage:
+      type: object
+      properties:
+        page: { type: integer }
+        size: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/GroupSummary" }
+      required: [page, size, items]
+
+    ProblemDetail:
+      type: object
+      description: Detalle de error según RFC 7807.
+      properties:
+        type: { type: string, format: uri, default: "about:blank" }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+      required: [title, status]
+
+security:
+  - bearerAuth: []

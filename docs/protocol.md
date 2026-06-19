@@ -1,0 +1,111 @@
+# Protocolo binario de NexusMQ (plano de datos)
+
+Contrato del **plano de datos** de NexusMQ: el protocolo binario sobre TCP que hablan los
+clientes nativos con el broker (puerto `9092` por defecto). El **plano de administración** es
+aparte (REST sobre el puerto de operación; ver [`openapi.yaml`](openapi.yaml)).
+
+- **Transporte:** TCP. Una conexión multiplexa muchas peticiones por `correlation_id`.
+- **Modelo:** petición/respuesta. El cliente envía una trama de petición; el broker responde con
+  una trama cuyo `correlation_id` **espeja** el de la petición.
+- **Endianness:** **little-endian** para todos los enteros.
+- **Codificación:** los enteros son de ancho fijo; cadenas y bytes van longitud-prefijo; los enteros
+  variables usan **varint**. La fuente de verdad del codec es [`src/protocol/codec.hpp`](../src/protocol/codec.hpp)
+  y los mensajes [`src/protocol/messages.hpp`](../src/protocol/messages.hpp).
+
+## Trama (framing)
+
+Toda trama es **longitud-prefijo**: una cabecera de 14 bytes seguida del payload.
+
+```
+ 0               4       6       8                 12      14
+ +---------------+-------+-------+-----------------+-------+===============+
+ |   length:u32  |apiKey |apiVer | correlationId   | flags |    payload    |
+ |               | :u16  | :u16  |     :u32        | :u16  |   (length-10) |
+ +---------------+-------+-------+-----------------+-------+===============+
+```
+
+| Campo            | Tipo  | Descripción                                                        |
+| ---------------- | ----- | ------------------------------------------------------------------ |
+| `length`         | u32   | Bytes **tras** este campo (resto de cabecera + payload) = 10 + payload. |
+| `apiKey`         | u16   | Operación (ver tabla de ApiKeys).                                  |
+| `apiVersion`     | u16   | Versión del esquema de esa operación (negociada, ver más abajo).   |
+| `correlationId`  | u32   | Eco petición↔respuesta; lo elige el cliente.                       |
+| `flags`          | u16   | Bits de control (ver abajo).                                       |
+| `payload`        | bytes | Cuerpo específico de la operación (`length - 10` bytes).            |
+
+**Lectura:** lee 4 bytes (`length`), luego lee exactamente `length` bytes más. La cabecera
+codificada ocupa 14 bytes (`kEncodedSize`); el lector valida una cota inferior (debe caber el
+resto de cabecera) y una **cota superior** anti-DoS (`max_frame`, por defecto **16 MiB**).
+
+### `flags`
+
+| Bit      | Nombre              | Significado                                            |
+| -------- | ------------------- | ------------------------------------------------------ |
+| `0x0001` | credit update       | La trama acarrea una actualización de créditos (control de flujo / backpressure). |
+
+## ApiKeys
+
+| Valor | ApiKey          | Descripción                                          |
+| ----- | --------------- | ---------------------------------------------------- |
+| 0     | `ApiVersions`   | Negociación de versiones soportadas.                 |
+| 1     | `Metadata`      | Brokers del clúster y topics/particiones.            |
+| 2     | `Produce`       | Publica `RecordBatch` en una partición.              |
+| 3     | `Fetch`         | Lee registros desde un offset.                       |
+| 4     | `OffsetCommit`  | Confirma el offset consumido de un grupo.            |
+| 5     | `OffsetFetch`   | Recupera el offset confirmado de un grupo.           |
+| 6     | `JoinGroup`     | Une un miembro a un grupo de consumidores.           |
+| 7     | `SyncGroup`     | Distribuye la asignación de particiones del grupo.   |
+| 8     | `Heartbeat`     | Mantiene viva la pertenencia al grupo.               |
+| 9     | `LeaveGroup`    | Abandona el grupo.                                    |
+| 10    | `CreateTopic`   | Crea un topic.                                        |
+| 11    | `DeleteTopic`   | Borra un topic.                                       |
+
+## Negociación de versiones
+
+El cliente abre con `ApiVersions` anunciando el máximo que soporta por `ApiKey`. El servidor
+publica un rango `[min, max]` por `ApiKey`; la versión efectiva es la **mayor que ambos
+soportan**: `min(client_max, server.max)` si alcanza `server.min`, o `0` si la `ApiKey` no es
+negociable / no hay solape. A partir de ahí, cada trama lleva su `apiVersion`. Ver
+[`src/protocol/versioning.hpp`](../src/protocol/versioning.hpp).
+
+## Modelo de errores
+
+Las respuestas acarrean un `errorCode:i16` (`WireError`) como contrato externo de errores
+(ADR-0009): el núcleo trabaja con `Error`/`ErrorCode` y traduce en el **borde** del protocolo.
+`None` (0) = éxito. El cliente reintroduce el código en su modelo interno al recibirlo.
+
+| Código | WireError                 | ¿Reintentable? |
+| ------ | ------------------------- | -------------- |
+| 0      | `None` (éxito)            | —              |
+| 1      | `NotLeaderForPartition`   | sí             |
+| 2      | `LeaderNotAvailable`      | sí             |
+| 3      | `UnknownTopicOrPartition` | no             |
+| 4      | `OffsetOutOfRange`        | no             |
+| 5      | `NotEnoughReplicas`       | sí             |
+| 6      | `RequestTimedOut`         | sí             |
+| 7      | `CorruptMessage`          | no             |
+| 8      | `MessageTooLarge`         | no             |
+| 9      | `OutOfOrderSequence`      | no             |
+| 10     | `DuplicateSequence`       | no             |
+| 11     | `Throttled`               | sí             |
+| 12     | `RebalanceInProgress`     | sí             |
+| 13     | `UnsupportedVersion`      | no             |
+| 14     | `Unauthorized`            | no             |
+| 15     | `InvalidRequest`          | no             |
+
+La política exacta de reintento (`is_retryable`) y la traducción `WireError`↔`Error` viven en
+[`src/protocol/error_code.hpp`](../src/protocol/error_code.hpp).
+
+## Registros y batches
+
+`Produce`/`Fetch` transportan **record batches** estilo Kafka v2: una cabecera de batch con un
+**CRC32C** que cubre el contenido, compresión común y muchos registros longitud-prefijo bajo un
+offset base. El batch viaja **intacto** por el log y la replicación (es la unidad de escritura y
+de entrada de Raft, ADR-0014). El layout campo a campo está en
+[`src/common/record.hpp`](../src/common/record.hpp) y [`src/protocol/messages.hpp`](../src/protocol/messages.hpp).
+
+## Seguridad del transporte
+
+El plano de datos puede terminar **TLS 1.3** (y **mTLS** intra-clúster) por delante del framing
+(ADR-0019); el protocolo binario es idéntico, cifrado o en claro. Ver
+[`src/ingress/tls.hpp`](../src/ingress/tls.hpp).
