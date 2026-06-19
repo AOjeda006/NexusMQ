@@ -98,6 +98,11 @@ std::string_view as_text(const std::vector<std::byte>& bytes) {
                             bytes.size()};  // NOLINT(*-reinterpret-cast)
 }
 
+// Texto del valor de un record consumido (asume que el valor está presente, no es tombstone).
+std::string_view value_text(const nexus::ConsumedRecord& rec) {
+    return as_text(rec.value.value());
+}
+
 TEST(ClientE2E, ProducerConsumer_RoundTripConOffsets) {
     TempDir dir{"roundtrip"};
     std::optional<ServerFixture> fixture;
@@ -136,11 +141,11 @@ TEST(ClientE2E, ProducerConsumer_RoundTripConOffsets) {
     ASSERT_TRUE(first.has_value());
     ASSERT_EQ(first->size(), 3U);
     EXPECT_EQ((*first)[0].offset, 0);
-    EXPECT_EQ(as_text((*first)[0].value), "alpha");
+    EXPECT_EQ(value_text((*first)[0]), "alpha");
     EXPECT_EQ((*first)[1].offset, 1);
-    EXPECT_EQ(as_text((*first)[1].value), "beta");
+    EXPECT_EQ(value_text((*first)[1]), "beta");
     EXPECT_EQ((*first)[2].offset, 2);
-    EXPECT_EQ(as_text((*first)[2].value), "gamma");
+    EXPECT_EQ(value_text((*first)[2]), "gamma");
     EXPECT_EQ(consumer.position(), 3);
 
     // Al día: el siguiente poll no devuelve nada.
@@ -177,9 +182,46 @@ TEST(ClientE2E, SendBatch_AsignaOffsetsConsecutivos) {
     const nexus::expected<std::vector<nexus::ConsumedRecord>> records = consumer.poll();
     ASSERT_TRUE(records.has_value());
     ASSERT_EQ(records->size(), 3U);
-    EXPECT_EQ(as_text((*records)[0].value), "uno");
-    EXPECT_EQ(as_text((*records)[2].value), "tres");
+    EXPECT_EQ(value_text((*records)[0]), "uno");
+    EXPECT_EQ(value_text((*records)[2]), "tres");
     EXPECT_EQ((*records)[2].offset, 2);
+}
+
+TEST(ClientE2E, SendKeyedYTombstone_RoundTripDeClaveYBorrado) {
+    TempDir dir{"keyed"};
+    std::optional<ServerFixture> fixture;
+    try {
+        fixture.emplace(dir.path());
+    } catch (const std::system_error& ex) {
+        GTEST_SKIP() << "io_uring no disponible en este entorno: " << ex.what();
+    }
+    ASSERT_TRUE(fixture->start());
+
+    nexus::expected<nexus::Client> client_exp =
+        nexus::Client::connect(nexus::Endpoint{.host = "127.0.0.1", .port = fixture->port()});
+    ASSERT_TRUE(client_exp.has_value());
+    nexus::Client& client = *client_exp;
+    ASSERT_TRUE(client.create_topic("kv", 1).has_value());
+
+    nexus::Producer producer = client.producer();
+    ASSERT_TRUE(producer.send_keyed("kv", 0, bytes_of("user-1"), bytes_of("activo")).has_value());
+    ASSERT_TRUE(producer.send_tombstone("kv", 0, bytes_of("user-1")).has_value());
+
+    nexus::Consumer consumer = client.consumer("kv", 0);
+    const nexus::expected<std::vector<nexus::ConsumedRecord>> records = consumer.poll();
+    ASSERT_TRUE(records.has_value());
+    ASSERT_EQ(records->size(), 2U);
+
+    // Record con clave y valor.
+    ASSERT_TRUE((*records)[0].key.has_value());
+    EXPECT_EQ(as_text(*(*records)[0].key), "user-1");
+    ASSERT_TRUE((*records)[0].value.has_value());
+    EXPECT_EQ(value_text((*records)[0]), "activo");
+
+    // Tombstone: misma clave, value nulo.
+    ASSERT_TRUE((*records)[1].key.has_value());
+    EXPECT_EQ(as_text(*(*records)[1].key), "user-1");
+    EXPECT_FALSE((*records)[1].value.has_value());
 }
 
 TEST(ClientE2E, Metadata_ListaBrokerYTopic) {

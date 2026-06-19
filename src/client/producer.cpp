@@ -6,36 +6,69 @@
 
 #include <array>
 #include <cstddef>
-#include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "client/client.hpp"
 #include "common/record.hpp"
-#include "protocol/codec.hpp"
+#include "common/record_codec.hpp"
 #include "protocol/error_code.hpp"
 #include "protocol/messages.hpp"
 
 namespace nexus {
+namespace {
+
+/// Bytes propietarios a partir de una vista (copia).
+std::vector<std::byte> own(ByteSpan data) {
+    return {data.begin(), data.end()};
+}
+
+}  // namespace
 
 expected<Offset> Producer::send(const std::string& topic, PartitionId partition, ByteSpan value) {
-    const std::array<ByteSpan, 1> values{value};
-    return send_batch(topic, partition, values);
+    Record rec;
+    rec.value = own(value);
+    const std::array<Record, 1> records{std::move(rec)};
+    return send_records(topic, partition, records);
+}
+
+expected<Offset> Producer::send_keyed(const std::string& topic, PartitionId partition, ByteSpan key,
+                                      ByteSpan value) {
+    Record rec;
+    rec.key = own(key);
+    rec.value = own(value);
+    const std::array<Record, 1> records{std::move(rec)};
+    return send_records(topic, partition, records);
+}
+
+expected<Offset> Producer::send_tombstone(const std::string& topic, PartitionId partition,
+                                          ByteSpan key) {
+    Record rec;
+    rec.key = own(key);
+    rec.value = std::nullopt;  // tombstone: borra la clave en la compactación.
+    const std::array<Record, 1> records{std::move(rec)};
+    return send_records(topic, partition, records);
 }
 
 expected<Offset> Producer::send_batch(const std::string& topic, PartitionId partition,
                                       std::span<const ByteSpan> values) {
-    // Records longitud-prefijo dentro del blob opaco del batch (el broker no los interpreta).
-    Buffer records;
-    Encoder enc{records};
+    std::vector<Record> records;
+    records.reserve(values.size());
     for (const ByteSpan value : values) {
-        enc.put_bytes(value);
+        Record rec;
+        rec.value = own(value);
+        records.push_back(std::move(rec));
     }
-    const ByteSpan records_span = records.as_span();
+    return send_records(topic, partition, records);
+}
 
-    RecordBatchHeader header;
-    header.record_count = static_cast<std::int32_t>(values.size());
-    const RecordBatch batch{header,
-                            std::vector<std::byte>{records_span.begin(), records_span.end()}};
+expected<Offset> Producer::send_records(const std::string& topic, PartitionId partition,
+                                        std::span<const Record> records) {
+    RecordBatchBuilder builder;
+    for (const Record& rec : records) {
+        builder.add(rec);
+    }
+    const RecordBatch batch = builder.build();
     Buffer batch_buf;
     batch.encode(batch_buf);
 

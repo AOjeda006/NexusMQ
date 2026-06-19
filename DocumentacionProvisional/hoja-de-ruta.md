@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** **FASE 4 EN CURSO** (Stretch, serie F): hecho **F1** (productor *effectively-once* + *fencing* por época). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
+**Estado actual:** **FASE 4 EN CURSO** (Stretch, serie F): hechos **F1** (productor *effectively-once* + *fencing* por época) y **F2** (codec por record + migración del cliente). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
 añade el **consenso Raft por partición** (`nexus-consensus`: estado/log/RPC, `RaftNode` como máquina de
 estados síncrona sin E/S con pre-vote, replicación, *high-watermark* por mayoría, transferencia de
 liderazgo y learners; ADR-0014/0015), la **integración en el broker** (`ReplicatedPartition`, ADR-0016),
@@ -656,8 +656,22 @@ Harness de benchmark vacío y CI:
   *fencing por epoch* que B2 dejó diferido. Tests: unit de `ProducerSession` (fenced, reinicio por
   época, offset de duplicado), `Partition` (fenced/nueva época/offset original), `error_code`
   (round-trip del nuevo código). `docs/protocol.md` añade el código 16. Verde en GCC/Clang/ASan.
-- [ ] **F2** Codec por **record** (`Record` con key/value/headers, varint/zigzag) + `RecordBatchBuilder`
-  (prerequisito de compactación por clave, DLQ por clave y subconjunto Kafka).
+- [x] **F2** Codec por **record** (`Record` con key/value/headers) + migración del cliente. Dos pasos:
+  - [x] **F2a** `common/record_codec.{hpp,cpp}` — `Record` (key y value **anulables** —value nulo =
+    *tombstone* para compactación—, headers, offset absoluto, timestamp_delta) y `RecordHeader`.
+    Layout por record **estilo Kafka v2** (varint zigzag): `length | attributes | timestampDelta |
+    offsetDelta | keyLen(-1=nulo) | key | valueLen(-1=nulo) | value | headerCount | headers`.
+    Decodificador defensivo con topes anti-DoS. `RecordBatchBuilder` acumula records y asigna
+    `offset_delta` por orden; `decode_records` recupera offsets absolutos (`base_offset + delta`).
+    Tests de round-trip (key/value, tombstone, clave nula, headers con valor nulo), builder con
+    offsets y decodificador defensivo. (Antes M2 dejaba el payload como bytes opacos; este es el
+    "Record individual con varint/zigzag y record_batch_builder" diferido.)
+  - [x] **F2b** Migración de `Producer`/`Consumer` al codec. `Producer` gana `send_keyed`,
+    `send_tombstone` y `send_records` (control total de key/value/headers); `send`/`send_batch`
+    pasan a construir `Record` vía el builder. `ConsumedRecord` refleja `key`/`value` **anulables**
+    + headers + offset; `Consumer::poll` decodifica con `decode_records`. e2e de cliente con
+    round-trip de clave y *tombstone*. (El broker sigue tratando el blob como opaco; lo interpretará
+    la compactación, F3.) Verde en GCC/Clang/ASan.
 - [ ] **F3** Compactación **por clave** (`LogCompactor` + *tombstones*).
 - [ ] **F4** DLQ (*dead-letter queue*) — reencaminado de records irrecuperables.
 - [ ] **F5** Compresión LZ4/Zstd por batch (dep condicional, anti *decompression bomb*).

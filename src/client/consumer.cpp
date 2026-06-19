@@ -4,10 +4,13 @@
 
 #include "client/consumer.hpp"
 
+#include <utility>
+#include <vector>
+
 #include "client/client.hpp"
 #include "common/bytes.hpp"
 #include "common/record.hpp"
-#include "protocol/codec.hpp"
+#include "common/record_codec.hpp"
 #include "protocol/error_code.hpp"
 #include "protocol/messages.hpp"
 
@@ -42,15 +45,13 @@ expected<std::vector<ConsumedRecord>> Consumer::poll(std::int32_t max_bytes) {
         if (!batch) {
             break;
         }
-        Decoder rec_dec{batch->records()};
-        for (std::int32_t i = 0; i < batch->header().record_count; ++i) {
-            const expected<ByteSpan> value = rec_dec.get_bytes();
-            if (!value) {
-                break;
-            }
-            out.push_back(
-                ConsumedRecord{.offset = batch->header().base_offset + i,
-                               .value = std::vector<std::byte>{value->begin(), value->end()}});
+        const expected<std::vector<Record>> records = decode_records(*batch);
+        if (!records) {
+            break;
+        }
+        for (const Record& rec : *records) {
+            out.push_back(ConsumedRecord{
+                .offset = rec.offset, .key = rec.key, .value = rec.value, .headers = rec.headers});
         }
         position_ = batch->last_offset() + 1;
         remaining = remaining.subspan(view->encoded_size);

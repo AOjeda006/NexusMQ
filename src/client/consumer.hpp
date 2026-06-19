@@ -4,23 +4,28 @@
 
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "common/error.hpp"
+#include "common/record_codec.hpp"
 #include "common/types.hpp"
 
 namespace nexus {
 
 class Client;
 
-/// @brief Un record consumido: su offset en la partición y su valor (copia propietaria).
+/// @brief Un record consumido (copias propietarias). Afinidad: INMUTABLE.
+/// @details `key`/`value` son **anulables**: `value == nullopt` es un **tombstone** (borrado por
+///   clave). El `offset` es el absoluto en la partición.
 struct ConsumedRecord {
     Offset offset = 0;
-    std::vector<std::byte> value;
+    std::optional<std::vector<std::byte>> key;
+    std::optional<std::vector<std::byte>> value;
+    std::vector<RecordHeader> headers;
 };
 
 /// @brief Consume de una (topic, partición) llevando la posición de lectura. Afinidad:
