@@ -169,6 +169,26 @@ expected<void> PartitionLog::truncate_to(Offset offset) {
     return {};
 }
 
+expected<void> PartitionLog::truncate_prefix_to(Offset offset) {
+    if (offset <= log_start_offset_) {
+        return {};  // nada que recortar (idempotente).
+    }
+    if (offset > log_end_offset_) {
+        return make_error(ErrorCode::OutOfRange, "truncate_prefix_to por encima de log_end_offset");
+    }
+    // Borra los segmentos sellados cuyo rango entero queda por debajo de `offset` (el siguiente
+    // segmento empieza en <= offset). La guarda `size() > 1` preserva siempre el activo.
+    while (segments_.size() > 1 && segments_[1]->base_offset() <= offset) {
+        const Offset base = segments_.front()->base_offset();
+        segments_.erase(segments_.begin());  // cierra los fd del segmento (RAII).
+        std::error_code ec;
+        std::filesystem::remove(seg_path(dir_, base, ".log"), ec);
+        std::filesystem::remove(seg_path(dir_, base, ".index"), ec);
+        log_start_offset_ = segments_.front()->base_offset();
+    }
+    return {};
+}
+
 expected<void> PartitionLog::sync() {
     if (const auto synced = active()->sync(); !synced) {
         return synced;

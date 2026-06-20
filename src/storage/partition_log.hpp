@@ -58,6 +58,17 @@ public:
     ///   frontera de batch.
     [[nodiscard]] expected<void> truncate_to(Offset offset);
 
+    /// @brief Recorta el **prefijo** del log borrando los segmentos sellados enteros cuyo rango
+    ///   queda por debajo de @p offset (compactación de Raft por snapshot, ADR-0024).
+    /// @details Pieza simétrica de `enforce_retention`, pero recortando a un **offset preciso** en
+    ///   vez de por política de tamaño/tiempo. Borra segmentos **completos** (nunca a media trama,
+    ///   nunca el activo): tras la llamada `log_start_offset()` avanza hasta la base del primer
+    ///   segmento conservado, que puede quedar **por debajo** de @p offset si ese offset cae dentro
+    ///   de un segmento (la reclamación física es por segmentos enteros; la lógica del `RaftLog` es
+    ///   exacta en el índice). Idempotente si @p offset ≤ `log_start_offset()`; `OutOfRange` si
+    ///   @p offset > `log_end_offset()`.
+    [[nodiscard]] expected<void> truncate_prefix_to(Offset offset);
+
     /// @brief Fuerza la durabilidad del segmento activo (`fsync`) y avanza `recovery_point`.
     [[nodiscard]] expected<void> sync();
 

@@ -421,6 +421,74 @@ TEST(PartitionLog, TruncateTo_PorEncimaDeLogEnd_DevuelveOutOfRange) {
     EXPECT_EQ(bad.error().code(), nexus::ErrorCode::OutOfRange);
 }
 
+TEST(PartitionLog, TruncatePrefixTo_BorraSegmentosEnterosBajoOffset) {
+    const TempDir dir("tprefix_basico");
+    auto plog = three_segments(dir.path());  // segmentos base 0,2,4; offsets 0..5
+    ASSERT_EQ(plog.segment_count(), 3U);
+
+    ASSERT_TRUE(plog.truncate_prefix_to(2).has_value());  // el seg base 0 queda entero bajo 2
+    EXPECT_EQ(plog.segment_count(), 2U);
+    EXPECT_EQ(plog.log_start_offset(), 2);
+    EXPECT_EQ(plog.log_end_offset(), 6);
+    EXPECT_FALSE(std::filesystem::exists(seg_log_path(dir.path(), 0)));  // fichero borrado
+
+    const auto borrado = plog.read(0, 1000);
+    ASSERT_FALSE(borrado.has_value());
+    EXPECT_EQ(borrado.error().code(), nexus::ErrorCode::OutOfRange);
+    EXPECT_TRUE(plog.read(2, 100000).has_value());
+}
+
+TEST(PartitionLog, TruncatePrefixTo_NoExactoAlByte_ConservaSegmentoQueContieneOffset) {
+    const TempDir dir("tprefix_inexacto");
+    auto plog = three_segments(dir.path());  // base 0,2,4
+
+    // offset 3 cae dentro del segmento base 2: solo el seg base 0 es enteramente anterior.
+    ASSERT_TRUE(plog.truncate_prefix_to(3).has_value());
+    EXPECT_EQ(plog.segment_count(), 2U);
+    EXPECT_EQ(plog.log_start_offset(), 2);  // best-effort: por segmentos enteros, no al byte
+}
+
+TEST(PartitionLog, TruncatePrefixTo_NuncaBorraElActivo) {
+    const TempDir dir("tprefix_activo");
+    auto plog = three_segments(dir.path());
+
+    ASSERT_TRUE(plog.truncate_prefix_to(plog.log_end_offset()).has_value());
+    EXPECT_EQ(plog.segment_count(), 1U);  // conserva el activo (base 4)
+    EXPECT_EQ(plog.log_start_offset(), 4);
+    EXPECT_EQ(plog.log_end_offset(), 6);
+    EXPECT_TRUE(plog.read(4, 100000).has_value());
+}
+
+TEST(PartitionLog, TruncatePrefixTo_PorDebajoDeLogStart_EsNoOp) {
+    const TempDir dir("tprefix_noop");
+    auto plog = three_segments(dir.path());
+    ASSERT_TRUE(plog.truncate_prefix_to(2).has_value());  // log_start -> 2
+    ASSERT_TRUE(plog.truncate_prefix_to(1).has_value());  // 1 <= log_start: no-op
+    EXPECT_EQ(plog.segment_count(), 2U);
+    EXPECT_EQ(plog.log_start_offset(), 2);
+}
+
+TEST(PartitionLog, TruncatePrefixTo_PorEncimaDeLogEnd_DevuelveOutOfRange) {
+    const TempDir dir("tprefix_over");
+    auto plog = three_segments(dir.path());
+    const auto bad = plog.truncate_prefix_to(99);
+    ASSERT_FALSE(bad.has_value());
+    EXPECT_EQ(bad.error().code(), nexus::ErrorCode::OutOfRange);
+}
+
+TEST(PartitionLog, TruncatePrefixTo_ReabreYPreservaElCorte) {
+    const TempDir dir("tprefix_reopen");
+    {
+        auto plog = three_segments(dir.path());
+        ASSERT_TRUE(plog.truncate_prefix_to(2).has_value());  // borra el seg base 0
+        EXPECT_EQ(plog.log_start_offset(), 2);
+    }
+    auto reopened = nexus::PartitionLog::open(dir.path(), small_segments());
+    ASSERT_TRUE(reopened.has_value());
+    EXPECT_EQ(reopened->log_start_offset(), 2);  // el segmento borrado no reaparece
+    EXPECT_EQ(reopened->log_end_offset(), 6);
+}
+
 TEST(PartitionLog, TruncateTo_ReabreYPreservaElCorte) {
     const TempDir dir("trunc_reopen");
     {
