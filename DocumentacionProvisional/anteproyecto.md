@@ -648,7 +648,7 @@ Resumen de las estructuras nucleares con sus campos; alimenta directamente el de
 
 ### 6.7 Catálogo de ADRs
 
-Ver §9. Índice rápido: ADR-0001 (plataforma), ADR-0002 (I/O), ADR-0003 (replicación: **Raft por partición**, *aceptado*), ADR-0004 (protocolo: **binario propio + REST**, *aceptado*), ADR-0005 (concurrencia: ***shared-nothing thread-per-core***, *aceptado*), ADR-0006 (*ingress* dos modos, *aceptado*), ADR-0007 (consistencia CP/PACELC, *aceptado*), ADR-0008 (coste cero, *aceptado*), ADR-0009 (manejo de errores por capa, *aceptado*), ADR-0010 (IDE: migración a **VS Code** sobre WSL, *aceptado*), ADR-0011 (estándar **C++23** + libc++ en Clang, *aceptado*), ADR-0012 (backend io_uring directo sobre el uapi, sin liburing, *aceptado*), ADR-0013 (capa **`nexus-wire`** para el framing sobre conexión; `nexus-protocol` queda puro, *aceptado*), ADR-0014 (modelo del **log de Raft**: índice = ordinal de entrada, término en sidecar; `RecordBatch` intacto, *aceptado*), ADR-0015 (`RaftNode` como **máquina de estados síncrona sin E/S** —entradas→cola de salidas—, para simulación determinista, *aceptado*), ADR-0016 (`ReplicatedPartition` como **tipo paralelo** a `Partition`, *aceptado*), ADR-0017 (target **`nexus-telemetry`** para observabilidad bajo el broker, *aceptado*), ADR-0018 (REST admin por **puerto/adaptador**: `AdminService` en ingress, `AdminApi` en server, *aceptado*), ADR-0019 (**TLS opcional** vía OpenSSL con puente de **BIOs de memoria** sobre el `Proactor`; `find_package(OpenSSL)`/`NEXUS_HAVE_OPENSSL`, arranque en claro si falta, *aceptado*).
+Ver §9. Índice rápido: ADR-0001 (plataforma), ADR-0002 (I/O), ADR-0003 (replicación: **Raft por partición**, *aceptado*), ADR-0004 (protocolo: **binario propio + REST**, *aceptado*), ADR-0005 (concurrencia: ***shared-nothing thread-per-core***, *aceptado*), ADR-0006 (*ingress* dos modos, *aceptado*), ADR-0007 (consistencia CP/PACELC, *aceptado*), ADR-0008 (coste cero, *aceptado*), ADR-0009 (manejo de errores por capa, *aceptado*), ADR-0010 (IDE: migración a **VS Code** sobre WSL, *aceptado*), ADR-0011 (estándar **C++23** + libc++ en Clang, *aceptado*), ADR-0012 (backend io_uring directo sobre el uapi, sin liburing, *aceptado*), ADR-0013 (capa **`nexus-wire`** para el framing sobre conexión; `nexus-protocol` queda puro, *aceptado*), ADR-0014 (modelo del **log de Raft**: índice = ordinal de entrada, término en sidecar; `RecordBatch` intacto, *aceptado*), ADR-0015 (`RaftNode` como **máquina de estados síncrona sin E/S** —entradas→cola de salidas—, para simulación determinista, *aceptado*), ADR-0016 (`ReplicatedPartition` como **tipo paralelo** a `Partition`, *aceptado*), ADR-0017 (target **`nexus-telemetry`** para observabilidad bajo el broker, *aceptado*), ADR-0018 (REST admin por **puerto/adaptador**: `AdminService` en ingress, `AdminApi` en server, *aceptado*), ADR-0019 (**TLS opcional** vía OpenSSL con puente de **BIOs de memoria** sobre el `Proactor`; `find_package(OpenSSL)`/`NEXUS_HAVE_OPENSSL`, arranque en claro si falta, *aceptado*), ADR-0020 (***binding* de Python** vía **ABI C estable** `nexus-ffi` + `ctypes` en vez de pybind11 —no construible sin `python3-dev`—, *aceptado*).
 
 ---
 
@@ -1270,6 +1270,26 @@ Procedimientos de operación que el diseño debe soportar (se concretan en Fase 
 - **`BIO` propio sobre el `Proactor` (custom BIO method):** evita una copia, pero exige implementar un `BIO_METHOD` con semántica de reintento correcta y es mucho más frágil; el puente de BIOs de memoria es el patrón canónico y suficiente.
 - **OpenSSL como dependencia obligatoria (vcpkg/sistema):** simplifica el build, pero rompe coste-cero y el arranque en claro para desarrollo; descartado a favor del acoplamiento opcional.
 - **Otra librería (BearSSL/mbedTLS/rustls-ffi):** menor huella, pero peor ergonomía/cobertura y menos familiar; OpenSSL ya estaba fijado en el desglose.
+
+---
+
+### ADR-0020: *Binding* de Python vía **ABI C estable** (`nexus-ffi` + `ctypes`) en lugar de pybind11
+
+- **Estado:** aceptado
+- **Fecha:** 2026-06-20
+
+> **Ajusta la hoja de ruta** (F9 decía «*binding* Python (pybind11) *si el entorno lo soporta*»): fija **cómo** se expone NexusMQ a Python cuando el entorno **no** soporta construir extensiones de CPython.
+
+**Contexto.** F9 (Fase 4) pide un *binding* de Python. La opción por defecto (pybind11) compila una **extensión nativa de CPython**, que necesita las **cabeceras de desarrollo de Python** (`Python.h`, `pyconfig.h`) y una *toolchain* de extensiones. El entorno de desarrollo y los *runners* de CI **no** las tienen (solo el intérprete; sin `python3-dev`, sin `pip`, sin `sudo` para instalarlas), de modo que una extensión pybind11 **no se podría compilar ni verificar** aquí — chocaría con la puerta de calidad (TDD, «nunca pushear en rojo», verificar en local en los dos compiladores).
+
+**Decisión.** Exponer un subconjunto **puro y transversal** del núcleo tras una **frontera C `extern "C"`** en un target nuevo `nexus-ffi`, compilado como **librería compartida** (`libnexus-ffi.so`), y consumirla desde Python con **`ctypes`** (módulo `bindings/python/nexusmq.py`). La ABI (`src/ffi/nexus_ffi.h`) cubre: versión, **CRC32C** (integridad de records) y el codec de **contexto de traza W3C `traceparent`** (F8). Ventajas: (1) se compila con el **propio compilador de C++** (sin cabeceras de Python), así que entra en la puerta de calidad (GCC/Clang/ASan + clang-tidy sobre `src/ffi/nexus_ffi.cpp`); (2) se verifica con **cualquier** intérprete de Python presente (prueba de humo `bindings/python/smoke_test.py` con `ctypes`); (3) la ABI C es **estable** y sirve a otros lenguajes (Rust/Go/Node FFI), no solo a Python. Para enlazar los archivos estáticos del núcleo dentro de la `.so`, `nexus-common` y `nexus-telemetry` se marcan `POSITION_INDEPENDENT_CODE`.
+
+**Consecuencias.** (+) *Binding* **realmente verificado** en este entorno (ABI por GoogleTest en la puerta de calidad; lado Python por la prueba de humo), no código sin compilar. (+) Sin dependencias nuevas de build (ni pybind11 ni `python3-dev`); CI intacto. (+) La frontera C es reutilizable por otros lenguajes. (−) Ergonomía más baja que pybind11 (gestión manual de tipos/`ctypes`, sin objetos Python ricos automáticos) y superficie acotada a funciones puras (no expone aún el cliente productor/consumidor). (−) Introduce la primera librería **compartida** del árbol (y PIC en dos targets base).
+
+**Alternativas consideradas.**
+- **pybind11 (extensión de CPython):** mejor ergonomía, pero **no construible ni verificable** sin `python3-dev`/*toolchain* en este entorno/CI; quedaría como código sin compilar, contra la normativa. Reconsiderable si el entorno gana las cabeceras de desarrollo.
+- **Cabeceras de Python vendoreadas a mano (prefijo local, como OpenSSL en ADR-0019):** `pyconfig.h` es **generado por la build de CPython** y específico de plataforma; replicarlo a mano es frágil y los *runners* de CI tampoco lo tendrían. Descartado.
+- **Servicio REST + cliente HTTP en Python:** ya existe el gateway REST (Fase 3), pero eso es interoperabilidad de red, no un *binding* en proceso; complementario, no sustituto.
 
 ---
 

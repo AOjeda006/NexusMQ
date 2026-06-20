@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** **FASE 4 EN CURSO** (Stretch, serie F): hechos **F1** (productor *effectively-once* + *fencing* por época), **F2** (codec por record + migración del cliente), **F3** (compactación por clave), **F4** (DLQ), **F5** (compresión LZ4/Zstd por batch), **F6** (E/S directa `O_DIRECT` + lector con readahead) y **F7** (subconjunto Kafka-compatible: codec big-endian, cabeceras + `ApiVersions`, `Metadata`, `Produce`/`Fetch` y *dispatcher* `KafkaGateway`) y **F8** (tracing distribuido: contexto W3C + spans). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
+**Estado actual:** **FASE 4 EN CURSO** (Stretch, serie F): hechos **F1** (productor *effectively-once* + *fencing* por época), **F2** (codec por record + migración del cliente), **F3** (compactación por clave), **F4** (DLQ), **F5** (compresión LZ4/Zstd por batch), **F6** (E/S directa `O_DIRECT` + lector con readahead) y **F7** (subconjunto Kafka-compatible: codec big-endian, cabeceras + `ApiVersions`, `Metadata`, `Produce`/`Fetch` y *dispatcher* `KafkaGateway`) , **F8** (tracing distribuido: contexto W3C + spans) y **F9** (*binding* Python vía ABI C `nexus-ffi` + `ctypes`, ADR-0020). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
 añade el **consenso Raft por partición** (`nexus-consensus`: estado/log/RPC, `RaftNode` como máquina de
 estados síncrona sin E/S con pre-vote, replicación, *high-watermark* por mayoría, transferencia de
 liderazgo y learners; ADR-0014/0015), la **integración en el broker** (`ReplicatedPartition`, ADR-0016),
@@ -767,7 +767,16 @@ Harness de benchmark vacío y CI:
   producción) **inyectados** para tests deterministas. `end()` es `noexcept` (una traza nunca tumba el
   proceso). Tests: bytes W3C golden + round-trip, rechazo de cabeceras malformadas, herencia
   traza/padre, emisión con duración, RAII idempotente y reanudación remota. Verde en GCC/Clang/ASan.
-- [ ] **F9** *Binding* Python (pybind11) *(si el entorno lo soporta)*.
+- [x] **F9** *Binding* Python — **ABI C** `nexus-ffi` + `ctypes` (**ADR-0020**; pybind11 no es
+  construible sin `python3-dev`/*toolchain*, ausente en este entorno/CI). `src/ffi/nexus_ffi.{h,cpp}`:
+  librería **compartida** (`libnexus-ffi.so`) que expone tras `extern "C"` la versión, el **CRC32C**
+  (integridad de records) y el codec de **traza W3C `traceparent`** (F8). `bindings/python/nexusmq.py`
+  envuelve la `.so` con `ctypes` (clase `NexusMQ`: `version`/`crc32c`/`format_traceparent`/
+  `parse_traceparent`). Verificado a **dos niveles**: la ABI por GoogleTest (`tests/unit/ffi`,
+  paridad con el núcleo + round-trip W3C; entra en la puerta de calidad GCC/Clang/ASan + clang-tidy) y
+  el lado Python por la prueba de humo `bindings/python/smoke_test.py` (CRC32C contra el vector de
+  Castagnoli, round-trip del traceparent). `nexus-common`/`nexus-telemetry` pasan a PIC para enlazar
+  en la `.so`. La frontera C es reutilizable por otros lenguajes (Rust/Go/Node FFI).
 - [ ] **F10** Backend **IOCP** (Windows) en `nexus-io`; preset `windows-msvc` *(no verificable en este entorno)*.
 
 ---

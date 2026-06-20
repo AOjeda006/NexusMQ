@@ -90,6 +90,7 @@ add_executable(nexus-tests
   unit/kafka/metadata_test.cpp
   unit/kafka/produce_fetch_test.cpp
   unit/kafka/gateway_test.cpp
+  unit/ffi/ffi_test.cpp
   e2e/client_e2e_test.cpp
   e2e/admin_http_e2e_test.cpp
   e2e/cli_admin_e2e_test.cpp
@@ -118,6 +119,7 @@ target_link_libraries(nexus-tests PRIVATE
   nexus::telemetry
   nexus::client
   nexus::kafka
+  nexus::ffi
   nexus::server
   nexus::cli)
 

@@ -20,3 +20,7 @@ compile_commands.json
 
 # Datos de ejecución del broker (logs de partición, etc.)
 /data/
+
+# Python (bindings)
+__pycache__/
+*.pyc
