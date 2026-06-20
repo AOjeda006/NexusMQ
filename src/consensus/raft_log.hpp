@@ -43,20 +43,45 @@ public:
 
     /// @brief Elimina las entradas con índice >= @p index (resolución de conflictos, §7.11 #5).
     /// @details Trunca el `PartitionLog` por la frontera de batch de la entrada @p index y recorta
-    ///   el sidecar. `index > last_index()` es no-op; `index < 1` es `InvalidArgument`.
+    ///   el sidecar. `index > last_index()` es no-op; `index < 1` o `index <= snapshot_index()`
+    ///   (cola ya compactada) es `InvalidArgument`.
     [[nodiscard]] expected<void> truncate_from(Index index);
+
+    /// @brief Compacta el log descartando el prefijo aplicado hasta @p up_to_index (snapshot,
+    ///   ADR-0024).
+    /// @details Fija la **base de snapshot** `(up_to_index, term_at(up_to_index),
+    ///   last_offset(up_to_index))`, descarta las entradas con índice ≤ @p up_to_index del sidecar
+    ///   (exacto en el índice), recorta el prefijo **físico** del `PartitionLog`
+    ///   (`truncate_prefix_to`, best-effort por segmentos) y persiste la base en el sidecar de
+    ///   snapshot con `fsync`. Tras compactar, `term_at(up_to_index)` sigue devolviendo su término;
+    ///   `term_at(index < up_to_index)` es `OutOfRange` (compactado).
+    /// @pre @p up_to_index ≤ `commit_index` del consenso (responsabilidad del llamante: solo se
+    ///   compacta lo ya replicado en mayoría y aplicado).
+    /// @return No-op si @p up_to_index ≤ `snapshot_index()`; `InvalidArgument` si supera
+    ///   `last_index()`; error de E/S si falla el recorte o la persistencia.
+    [[nodiscard]] expected<void> compact_to(Index up_to_index);
 
     /// @brief Término de la entrada @p index. `index == 0` → `0` (centinela); fuera de rango alto →
     ///   `OutOfRange`.
     [[nodiscard]] expected<Term> term_at(Index index) const;
 
-    /// Número de entradas del log (índice de la última; `0` si vacío).
-    [[nodiscard]] Index last_index() const noexcept { return static_cast<Index>(entries_.size()); }
-
-    /// Término de la última entrada (`0` si el log está vacío).
-    [[nodiscard]] Term last_term() const noexcept {
-        return entries_.empty() ? Term{0} : entries_.back().term;
+    /// Índice de la última entrada (`0` si vacío); incluye el prefijo cubierto por el snapshot.
+    [[nodiscard]] Index last_index() const noexcept {
+        return snapshot_index_ + static_cast<Index>(entries_.size());
     }
+
+    /// Término de la última entrada (`snapshot_term` si solo queda el snapshot; `0` si vacío).
+    [[nodiscard]] Term last_term() const noexcept {
+        if (!entries_.empty()) {
+            return entries_.back().term;
+        }
+        return snapshot_index_ > 0 ? snapshot_term_ : Term{0};
+    }
+
+    /// Último índice cubierto por el snapshot (`0` si no se ha compactado).
+    [[nodiscard]] Index snapshot_index() const noexcept { return snapshot_index_; }
+    /// Término del último índice cubierto por el snapshot.
+    [[nodiscard]] Term snapshot_term() const noexcept { return snapshot_term_; }
 
     /// @brief Hasta @p max entradas a partir de @p index (para `AppendEntries`).
     [[nodiscard]] expected<std::vector<RaftLogEntry>> entries_from(Index index,
@@ -76,18 +101,33 @@ private:
 
     /// Tamaño en bytes de un registro del sidecar: `term:i64 | base:i64 | last:i64 | type:u8`.
     static constexpr std::size_t kMetaRecordSize = 25;
+    /// Tamaño del registro del sidecar de snapshot: `crc:u32 | index:i64 | term:i64 | offset:i64`.
+    static constexpr std::size_t kSnapshotRecordSize = 28;
 
-    RaftLog(PartitionLog& log, File meta, std::vector<EntryMeta> entries);
+    RaftLog(PartitionLog& log, File meta, File snapshot, std::vector<EntryMeta> entries,
+            Index snapshot_index, Term snapshot_term, Offset snapshot_last_offset);
 
     /// Escribe el metadato @p meta al final del sidecar (en la posición de la próxima entrada).
     [[nodiscard]] expected<void> persist_meta(const EntryMeta& meta);
+    /// Persiste la base de snapshot actual (registro fijo + CRC32C) con `fsync`.
+    [[nodiscard]] expected<void> persist_snapshot();
+    /// Reescribe el sidecar de metadatos con exactamente las entradas vivas (tras compactar).
+    [[nodiscard]] expected<void> rewrite_meta();
     /// Lee el `RecordBatch` (bytes) de la entrada @p entry desde el `PartitionLog`.
     [[nodiscard]] expected<std::vector<std::byte>> read_payload(const EntryMeta& entry) const;
+    /// Posición en `entries_` de la entrada de índice @p index (relativa a la base de snapshot).
+    [[nodiscard]] std::size_t slot_of(Index index) const noexcept {
+        return static_cast<std::size_t>(index - snapshot_index_ - 1);
+    }
 
     // Vista no propietaria del log subyacente (RaftLog no es asignable, a propósito).
     PartitionLog& log_;               // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
-    File meta_file_;                  ///< Sidecar de metadatos por entrada (RAII).
-    std::vector<EntryMeta> entries_;  ///< Metadatos por índice (1-based: entrada `i` en `[i-1]`).
+    File meta_file_;                  ///< Sidecar de metadatos por entrada viva (RAII).
+    File snapshot_file_;              ///< Sidecar de la base de snapshot (RAII).
+    std::vector<EntryMeta> entries_;  ///< Metadatos de las entradas **vivas** (índice > snapshot).
+    Index snapshot_index_ = 0;  ///< Último índice cubierto por el snapshot (0 = sin snapshot).
+    Term snapshot_term_ = 0;    ///< Término de `snapshot_index_`.
+    Offset snapshot_last_offset_ = 0;  ///< Offset de partición del último record del snapshot.
 };
 
 }  // namespace nexus

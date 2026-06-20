@@ -185,6 +185,129 @@ TEST(RaftLog, TruncateFrom_MasAllaDelFinal_EsNoOp) {
     EXPECT_EQ(rlog->last_index(), 1);
 }
 
+nexus::LogConfig small_segments() {
+    nexus::LogConfig cfg;
+    cfg.segment_bytes = 100;  // rota tras superar 100 bytes (cada entrada ~44 bytes -> 2/segmento)
+    cfg.index_interval_bytes = 64;
+    return cfg;
+}
+
+TEST(RaftLog, CompactTo_DescartaPrefijoYConservaCola) {
+    const TempDir dir("compact");
+    auto plog = nexus::PartitionLog::open(dir.log_dir(), nexus::LogConfig{});
+    ASSERT_TRUE(plog.has_value());
+    auto rlog = nexus::RaftLog::open(*plog, dir.meta_path());
+    ASSERT_TRUE(rlog.has_value());
+    ASSERT_TRUE(append_one(*rlog, 1, 1, 1).has_value());  // offset 0
+    ASSERT_TRUE(append_one(*rlog, 1, 2, 1).has_value());  // offset 1
+    ASSERT_TRUE(append_one(*rlog, 2, 3, 1).has_value());  // offset 2
+    ASSERT_TRUE(append_one(*rlog, 2, 4, 1).has_value());  // offset 3
+
+    ASSERT_TRUE(rlog->compact_to(2).has_value());  // descarta los índices 1 y 2
+    EXPECT_EQ(rlog->snapshot_index(), 2);
+    EXPECT_EQ(rlog->snapshot_term(), 1);
+    EXPECT_EQ(rlog->last_index(), 4);  // la cola sigue intacta
+    EXPECT_EQ(rlog->last_term(), 2);
+    EXPECT_EQ(rlog->term_at(2).value(), 1);  // frontera del snapshot: su término sobrevive
+    EXPECT_EQ(rlog->term_at(3).value(), 2);
+    EXPECT_FALSE(rlog->term_at(1).has_value());           // compactado
+    EXPECT_FALSE(rlog->offsets_at(2).has_value());        // compactado
+    EXPECT_FALSE(rlog->entries_from(2, 10).has_value());  // requiere snapshot
+
+    const auto cola = rlog->entries_from(3, 10);
+    ASSERT_TRUE(cola.has_value());
+    ASSERT_EQ(cola->size(), 2U);  // índices 3 y 4
+    EXPECT_EQ((*cola)[0].index, 3);
+    EXPECT_EQ((*cola)[1].index, 4);
+}
+
+TEST(RaftLog, CompactTo_HastaElFinal_DejaSoloSnapshotYContinua) {
+    const TempDir dir("compact_full");
+    auto plog = nexus::PartitionLog::open(dir.log_dir(), nexus::LogConfig{});
+    ASSERT_TRUE(plog.has_value());
+    auto rlog = nexus::RaftLog::open(*plog, dir.meta_path());
+    ASSERT_TRUE(rlog.has_value());
+    ASSERT_TRUE(append_one(*rlog, 1, 1, 1).has_value());
+    ASSERT_TRUE(append_one(*rlog, 2, 2, 1).has_value());
+    ASSERT_TRUE(append_one(*rlog, 3, 3, 1).has_value());
+
+    ASSERT_TRUE(rlog->compact_to(3).has_value());  // compacta todo el log
+    EXPECT_EQ(rlog->snapshot_index(), 3);
+    EXPECT_EQ(rlog->last_index(), 3);
+    EXPECT_EQ(rlog->last_term(), 3);  // solo queda el snapshot
+
+    const auto last = append_one(*rlog, 4, 4, 1);  // reanuda en el índice 4
+    ASSERT_TRUE(last.has_value());
+    EXPECT_EQ(*last, 4);
+    EXPECT_EQ(rlog->term_at(4).value(), 4);
+}
+
+TEST(RaftLog, CompactTo_NoOpYErrorMasAllaDelFinal) {
+    const TempDir dir("compact_edge");
+    auto plog = nexus::PartitionLog::open(dir.log_dir(), nexus::LogConfig{});
+    ASSERT_TRUE(plog.has_value());
+    auto rlog = nexus::RaftLog::open(*plog, dir.meta_path());
+    ASSERT_TRUE(rlog.has_value());
+    ASSERT_TRUE(append_one(*rlog, 1, 1, 1).has_value());
+    ASSERT_TRUE(append_one(*rlog, 1, 2, 1).has_value());
+
+    ASSERT_TRUE(rlog->compact_to(0).has_value());  // no-op
+    EXPECT_EQ(rlog->snapshot_index(), 0);
+    ASSERT_TRUE(rlog->compact_to(1).has_value());
+    ASSERT_TRUE(rlog->compact_to(1).has_value());  // idempotente (<= snapshot)
+    EXPECT_EQ(rlog->snapshot_index(), 1);
+    const auto bad = rlog->compact_to(99);  // más allá del final
+    ASSERT_FALSE(bad.has_value());
+    EXPECT_EQ(bad.error().code(), nexus::ErrorCode::InvalidArgument);
+}
+
+TEST(RaftLog, CompactTo_ConSegmentosPequenos_ReclamaDiscoFisico) {
+    const TempDir dir("compact_disk");
+    auto plog = nexus::PartitionLog::open(dir.log_dir(), small_segments());
+    ASSERT_TRUE(plog.has_value());
+    auto rlog = nexus::RaftLog::open(*plog, dir.meta_path());
+    ASSERT_TRUE(rlog.has_value());
+    for (nexus::Index i = 1; i <= 4; ++i) {  // offsets 0..2 en el seg base 0; offset 3 en el base 3
+        ASSERT_TRUE(append_one(*rlog, 1, i, 1).has_value());
+    }
+    ASSERT_GT(plog->segment_count(), 1U);
+
+    // Compacta hasta el índice 3 (offset 2): el segmento base 0 (offsets 0..2) queda enteramente
+    // por debajo del primer offset vivo (3) y se reclama; el índice 4 sigue vivo.
+    ASSERT_TRUE(rlog->compact_to(3).has_value());
+    EXPECT_EQ(plog->log_start_offset(), 3);       // disco reclamado por segmentos enteros
+    const auto cola = rlog->entries_from(4, 10);  // la cola viva sigue legible
+    ASSERT_TRUE(cola.has_value());
+    EXPECT_EQ(cola->size(), 1U);
+    EXPECT_EQ((*cola)[0].index, 4);
+}
+
+TEST(RaftLog, Reopen_TrasCompactar_RecuperaBaseDeSnapshot) {
+    const TempDir dir("compact_reopen");
+    {
+        auto plog = nexus::PartitionLog::open(dir.log_dir(), nexus::LogConfig{});
+        ASSERT_TRUE(plog.has_value());
+        auto rlog = nexus::RaftLog::open(*plog, dir.meta_path());
+        ASSERT_TRUE(rlog.has_value());
+        ASSERT_TRUE(append_one(*rlog, 1, 1, 1).has_value());
+        ASSERT_TRUE(append_one(*rlog, 1, 2, 1).has_value());
+        ASSERT_TRUE(append_one(*rlog, 2, 3, 1).has_value());
+        ASSERT_TRUE(append_one(*rlog, 2, 4, 1).has_value());
+        ASSERT_TRUE(rlog->compact_to(2).has_value());
+        ASSERT_TRUE(plog->sync().has_value());
+    }
+    auto plog = nexus::PartitionLog::open(dir.log_dir(), nexus::LogConfig{});
+    ASSERT_TRUE(plog.has_value());
+    auto rlog = nexus::RaftLog::open(*plog, dir.meta_path());
+    ASSERT_TRUE(rlog.has_value());
+    EXPECT_EQ(rlog->snapshot_index(), 2);
+    EXPECT_EQ(rlog->snapshot_term(), 1);
+    EXPECT_EQ(rlog->last_index(), 4);
+    EXPECT_EQ(rlog->term_at(2).value(), 1);  // base de snapshot recuperada
+    EXPECT_EQ(rlog->term_at(3).value(), 2);
+    EXPECT_FALSE(rlog->term_at(1).has_value());  // sigue compactado tras reabrir
+}
+
 TEST(RaftLog, Reopen_RecuperaIndicesYTerminos) {
     const TempDir dir("reopen");
     {
