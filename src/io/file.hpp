@@ -10,6 +10,7 @@
 
 #include "common/bytes.hpp"
 #include "common/error.hpp"
+#include "common/types.hpp"       // NativeHandle, kInvalidHandle
 #include "io/aligned_buffer.hpp"  // kDirectAlignment
 
 namespace nexus {
@@ -65,13 +66,13 @@ public:
     /// @brief Tamaño actual del fichero en bytes.
     [[nodiscard]] expected<std::uint64_t> size() const;
 
-    [[nodiscard]] bool is_open() const noexcept { return fd_ >= 0; }
+    [[nodiscard]] bool is_open() const noexcept { return fd_ != kInvalidHandle; }
 
 private:
-    File(int fd, bool direct) noexcept : fd_(fd), direct_(direct) {}
+    File(NativeHandle fd, bool direct) noexcept : fd_(fd), direct_(direct) {}
     void close_fd() noexcept;
 
-    int fd_ = -1;
+    NativeHandle fd_ = kInvalidHandle;
     bool direct_ = false;  ///< `true` si se abrió con `O_DIRECT` efectivo.
 };
 

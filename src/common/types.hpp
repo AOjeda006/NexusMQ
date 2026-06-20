@@ -27,6 +27,22 @@ using Generation = std::int32_t;  ///< Generación de un grupo de consumidores (
 /// Instante en el reloj monótono (deadlines de temporizadores; inmune a saltos del reloj de pared).
 using MonoTime = std::chrono::steady_clock::time_point;
 
+/// @brief Handle nativo del SO que posee la capa de E/S, agnóstico de plataforma.
+/// @details En **POSIX** es un descriptor de fichero (`int`); en **Windows** un entero de ancho de
+///   puntero que alberga tanto un `HANDLE` (puntero) como un `SOCKET` (`UINT_PTR`). El puerto
+///   `Proactor` y `File`/`Socket` lo usan en lugar de `int` para ser portables a IOCP
+///   (ADR-0021/0022) sin filtrar `<windows.h>` al resto del árbol.
+#ifdef _WIN32
+using NativeHandle = std::uintptr_t;
+#else
+using NativeHandle = int;
+#endif
+
+/// @brief Centinela de handle inválido/no abierto.
+/// @details `-1` en POSIX; en Windows coincide con `INVALID_HANDLE_VALUE` e `INVALID_SOCKET`
+///   (ambos `(uintptr_t)-1`), de modo que una sola constante sirve para ficheros y sockets.
+inline constexpr NativeHandle kInvalidHandle = static_cast<NativeHandle>(-1);
+
 /// Códec de compresión de un RecordBatch.
 enum class Codec : std::uint8_t { None, Lz4, Zstd };
 

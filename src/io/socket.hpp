@@ -11,6 +11,7 @@
 #include "common/bytes.hpp"
 #include "common/error.hpp"
 #include "common/task.hpp"
+#include "common/types.hpp"  // NativeHandle, kInvalidHandle
 #include "io/proactor.hpp"
 
 namespace nexus {
@@ -25,7 +26,7 @@ class Socket {
 public:
     Socket() = default;
     /// Adopta @p fd (ya conectado), tomando su propiedad.
-    explicit Socket(int fd) noexcept : fd_(fd) {}
+    explicit Socket(NativeHandle fd) noexcept : fd_(fd) {}
 
     /// @brief Conecta (bloqueante, plano de control) a @p host (IPv4 punteada) : @p port.
     /// @details La conexión es plano de control; el transporte de datos posterior es async. Pensado
@@ -45,11 +46,11 @@ public:
     /// Activa/desactiva `TCP_NODELAY` (algoritmo de Nagle). Mejor esfuerzo (ignora el fallo).
     void set_nodelay(bool enabled) const;
     void close() noexcept;
-    [[nodiscard]] int fd() const noexcept { return fd_; }
-    [[nodiscard]] bool is_open() const noexcept { return fd_ >= 0; }
+    [[nodiscard]] NativeHandle fd() const noexcept { return fd_; }
+    [[nodiscard]] bool is_open() const noexcept { return fd_ != kInvalidHandle; }
 
 private:
-    int fd_ = -1;
+    NativeHandle fd_ = kInvalidHandle;
 };
 
 /// @brief Socket de escucha TCP con cierre RAII y `accept` asíncrono. Afinidad: REACTOR-LOCAL.
@@ -76,12 +77,12 @@ public:
     /// Puerto local efectivamente enlazado (útil con puerto efímero); `0` si no está enlazado.
     [[nodiscard]] std::uint16_t local_port() const;
     void close() noexcept;
-    [[nodiscard]] int fd() const noexcept { return fd_; }
-    [[nodiscard]] bool is_open() const noexcept { return fd_ >= 0; }
+    [[nodiscard]] NativeHandle fd() const noexcept { return fd_; }
+    [[nodiscard]] bool is_open() const noexcept { return fd_ != kInvalidHandle; }
 
 private:
-    explicit Listener(int fd) noexcept : fd_(fd) {}
-    int fd_ = -1;
+    explicit Listener(NativeHandle fd) noexcept : fd_(fd) {}
+    NativeHandle fd_ = kInvalidHandle;
 };
 
 }  // namespace nexus

@@ -19,25 +19,25 @@ namespace nexus {
 namespace detail {
 
 /// Traduce un resultado estilo io_uring (`< 0` ⇒ errno negado) a un `Error{IoError}`.
-[[nodiscard]] inline Error io_error_from(std::int32_t result) {
+[[nodiscard]] inline Error io_error_from(Proactor::IoResult result) {
     return Error{ErrorCode::IoError, "E/S asíncrona falló (errno " + std::to_string(-result) + ")"};
 }
 
-[[nodiscard]] inline expected<std::size_t> result_to_size(std::int32_t result) {
+[[nodiscard]] inline expected<std::size_t> result_to_size(Proactor::IoResult result) {
     if (result < 0) {
         return std::unexpected(io_error_from(result));
     }
     return static_cast<std::size_t>(result);
 }
 
-[[nodiscard]] inline expected<int> result_to_fd(std::int32_t result) {
+[[nodiscard]] inline expected<NativeHandle> result_to_fd(Proactor::IoResult result) {
     if (result < 0) {
         return std::unexpected(io_error_from(result));
     }
-    return result;
+    return static_cast<NativeHandle>(result);
 }
 
-[[nodiscard]] inline expected<void> result_to_void(std::int32_t result) {
+[[nodiscard]] inline expected<void> result_to_void(Proactor::IoResult result) {
     if (result < 0) {
         return std::unexpected(io_error_from(result));
     }
@@ -58,7 +58,7 @@ public:
     [[nodiscard]] bool await_ready() const noexcept { return false; }
 
     void await_suspend(std::coroutine_handle<> awaiting) {
-        static_cast<Derived*>(this)->submit([this, awaiting](std::int32_t result) {
+        static_cast<Derived*>(this)->submit([this, awaiting](Proactor::IoResult result) {
             result_ = result;
             awaiting.resume();
         });
@@ -66,8 +66,8 @@ public:
 
 protected:
     // Vista no propietaria; el awaitable es efímero (vive dentro del co_await).
-    Proactor& proactor_;       // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
-    std::int32_t result_ = 0;  // lo fija la completion antes de reanudar
+    Proactor& proactor_;             // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+    Proactor::IoResult result_ = 0;  // lo fija la completion antes de reanudar
 
 private:
     // Constructor privado + `friend Derived`: solo el propio derivado puede instanciar la base CRTP
@@ -81,7 +81,8 @@ private:
 /// `co_await` sobre una lectura posicional; produce los bytes leídos (`0` = EOF).
 class ReadAwaitable : public detail::IoAwaitable<ReadAwaitable> {
 public:
-    ReadAwaitable(Proactor& proactor, int fd, MutByteSpan buffer, std::uint64_t offset) noexcept
+    ReadAwaitable(Proactor& proactor, NativeHandle fd, MutByteSpan buffer,
+                  std::uint64_t offset) noexcept
         : IoAwaitable(proactor), fd_(fd), buffer_(buffer), offset_(offset) {}
 
     void submit(Proactor::Completion on_done) {
@@ -92,7 +93,7 @@ public:
     }
 
 private:
-    int fd_;
+    NativeHandle fd_;
     MutByteSpan buffer_;
     std::uint64_t offset_;
 };
@@ -100,7 +101,8 @@ private:
 /// `co_await` sobre una escritura posicional; produce los bytes escritos.
 class WriteAwaitable : public detail::IoAwaitable<WriteAwaitable> {
 public:
-    WriteAwaitable(Proactor& proactor, int fd, ByteSpan data, std::uint64_t offset) noexcept
+    WriteAwaitable(Proactor& proactor, NativeHandle fd, ByteSpan data,
+                   std::uint64_t offset) noexcept
         : IoAwaitable(proactor), fd_(fd), data_(data), offset_(offset) {}
 
     void submit(Proactor::Completion on_done) {
@@ -111,7 +113,7 @@ public:
     }
 
 private:
-    int fd_;
+    NativeHandle fd_;
     ByteSpan data_;
     std::uint64_t offset_;
 };
@@ -119,7 +121,7 @@ private:
 /// `co_await` sobre un `fsync`/`fdatasync`.
 class FsyncAwaitable : public detail::IoAwaitable<FsyncAwaitable> {
 public:
-    FsyncAwaitable(Proactor& proactor, int fd, bool datasync) noexcept
+    FsyncAwaitable(Proactor& proactor, NativeHandle fd, bool datasync) noexcept
         : IoAwaitable(proactor), fd_(fd), datasync_(datasync) {}
 
     void submit(Proactor::Completion on_done) {
@@ -128,29 +130,31 @@ public:
     [[nodiscard]] expected<void> await_resume() const { return detail::result_to_void(result_); }
 
 private:
-    int fd_;
+    NativeHandle fd_;
     bool datasync_;
 };
 
 /// `co_await` sobre un `accept`; produce el descriptor del socket aceptado.
 class AcceptAwaitable : public detail::IoAwaitable<AcceptAwaitable> {
 public:
-    AcceptAwaitable(Proactor& proactor, int listen_fd) noexcept
+    AcceptAwaitable(Proactor& proactor, NativeHandle listen_fd) noexcept
         : IoAwaitable(proactor), listen_fd_(listen_fd) {}
 
     void submit(Proactor::Completion on_done) {
         proactor_.submit_accept(listen_fd_, std::move(on_done));
     }
-    [[nodiscard]] expected<int> await_resume() const { return detail::result_to_fd(result_); }
+    [[nodiscard]] expected<NativeHandle> await_resume() const {
+        return detail::result_to_fd(result_);
+    }
 
 private:
-    int listen_fd_;
+    NativeHandle listen_fd_;
 };
 
 /// `co_await` sobre un `recv`; produce los bytes recibidos (`0` = conexión cerrada).
 class RecvAwaitable : public detail::IoAwaitable<RecvAwaitable> {
 public:
-    RecvAwaitable(Proactor& proactor, int fd, MutByteSpan buffer) noexcept
+    RecvAwaitable(Proactor& proactor, NativeHandle fd, MutByteSpan buffer) noexcept
         : IoAwaitable(proactor), fd_(fd), buffer_(buffer) {}
 
     void submit(Proactor::Completion on_done) {
@@ -161,14 +165,14 @@ public:
     }
 
 private:
-    int fd_;
+    NativeHandle fd_;
     MutByteSpan buffer_;
 };
 
 /// `co_await` sobre un `send`; produce los bytes enviados.
 class SendAwaitable : public detail::IoAwaitable<SendAwaitable> {
 public:
-    SendAwaitable(Proactor& proactor, int fd, ByteSpan data) noexcept
+    SendAwaitable(Proactor& proactor, NativeHandle fd, ByteSpan data) noexcept
         : IoAwaitable(proactor), fd_(fd), data_(data) {}
 
     void submit(Proactor::Completion on_done) {
@@ -179,7 +183,7 @@ public:
     }
 
 private:
-    int fd_;
+    NativeHandle fd_;
     ByteSpan data_;
 };
 
@@ -200,26 +204,28 @@ private:
 
 // --- Azúcar de construcción (el tipo del awaitable queda implícito en el co_await). ---
 
-[[nodiscard]] inline ReadAwaitable async_read(Proactor& proactor, int fd, MutByteSpan buffer,
-                                              std::uint64_t offset) noexcept {
+[[nodiscard]] inline ReadAwaitable async_read(Proactor& proactor, NativeHandle fd,
+                                              MutByteSpan buffer, std::uint64_t offset) noexcept {
     return ReadAwaitable{proactor, fd, buffer, offset};
 }
-[[nodiscard]] inline WriteAwaitable async_write(Proactor& proactor, int fd, ByteSpan data,
+[[nodiscard]] inline WriteAwaitable async_write(Proactor& proactor, NativeHandle fd, ByteSpan data,
                                                 std::uint64_t offset) noexcept {
     return WriteAwaitable{proactor, fd, data, offset};
 }
-[[nodiscard]] inline FsyncAwaitable async_fsync(Proactor& proactor, int fd,
+[[nodiscard]] inline FsyncAwaitable async_fsync(Proactor& proactor, NativeHandle fd,
                                                 bool datasync = false) noexcept {
     return FsyncAwaitable{proactor, fd, datasync};
 }
-[[nodiscard]] inline AcceptAwaitable async_accept(Proactor& proactor, int listen_fd) noexcept {
+[[nodiscard]] inline AcceptAwaitable async_accept(Proactor& proactor,
+                                                  NativeHandle listen_fd) noexcept {
     return AcceptAwaitable{proactor, listen_fd};
 }
-[[nodiscard]] inline RecvAwaitable async_recv(Proactor& proactor, int fd,
+[[nodiscard]] inline RecvAwaitable async_recv(Proactor& proactor, NativeHandle fd,
                                               MutByteSpan buffer) noexcept {
     return RecvAwaitable{proactor, fd, buffer};
 }
-[[nodiscard]] inline SendAwaitable async_send(Proactor& proactor, int fd, ByteSpan data) noexcept {
+[[nodiscard]] inline SendAwaitable async_send(Proactor& proactor, NativeHandle fd,
+                                              ByteSpan data) noexcept {
     return SendAwaitable{proactor, fd, data};
 }
 [[nodiscard]] inline TimerAwaitable async_timer(Proactor& proactor, MonoTime deadline) noexcept {

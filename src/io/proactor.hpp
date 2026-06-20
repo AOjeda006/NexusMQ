@@ -22,8 +22,13 @@ namespace nexus {
 ///   una corrutina aún suspendiéndose): siempre se difiere a `run_completions`.
 class Proactor {
 public:
-    /// Resultado estilo io_uring: `>= 0` éxito (bytes/fd); `< 0` error con `-result` = errno.
-    using Completion = MoveOnlyFunction<void(std::int32_t result)>;
+    /// @brief Resultado de una operación, estilo io_uring: `>= 0` éxito (bytes o handle aceptado);
+    ///   `< 0` error con `-result` = errno.
+    /// @details Ancho de **puntero** (`intptr_t`) y no `int32`: además de cuentas y errores, debe
+    ///   alojar un `NativeHandle` (un `SOCKET`/`HANDLE` de Windows no cabe en 32 bits). En Linux
+    ///   `intptr_t` aloja el `int` del `cqe->res` sin cambio de comportamiento.
+    using IoResult = std::intptr_t;
+    using Completion = MoveOnlyFunction<void(IoResult result)>;
 
     Proactor(const Proactor&) = delete;
     Proactor& operator=(const Proactor&) = delete;
@@ -32,18 +37,19 @@ public:
     virtual ~Proactor() = default;
 
     /// Lee de @p fd en @p buffer desde @p offset.
-    virtual void submit_read(int fd, MutByteSpan buffer, std::uint64_t offset,
+    virtual void submit_read(NativeHandle fd, MutByteSpan buffer, std::uint64_t offset,
                              Completion on_done) = 0;
     /// Escribe @p data en @p fd en @p offset.
-    virtual void submit_write(int fd, ByteSpan data, std::uint64_t offset, Completion on_done) = 0;
+    virtual void submit_write(NativeHandle fd, ByteSpan data, std::uint64_t offset,
+                              Completion on_done) = 0;
     /// Fuerza durabilidad de @p fd (`fsync`/`fdatasync` según @p datasync).
-    virtual void submit_fsync(int fd, bool datasync, Completion on_done) = 0;
-    /// Acepta una conexión entrante en @p listen_fd (result = fd del socket aceptado).
-    virtual void submit_accept(int listen_fd, Completion on_done) = 0;
+    virtual void submit_fsync(NativeHandle fd, bool datasync, Completion on_done) = 0;
+    /// Acepta una conexión entrante en @p listen_fd (result = handle del socket aceptado).
+    virtual void submit_accept(NativeHandle listen_fd, Completion on_done) = 0;
     /// Recibe de un socket @p fd en @p buffer.
-    virtual void submit_recv(int fd, MutByteSpan buffer, Completion on_done) = 0;
+    virtual void submit_recv(NativeHandle fd, MutByteSpan buffer, Completion on_done) = 0;
     /// Envía @p data por el socket @p fd.
-    virtual void submit_send(int fd, ByteSpan data, Completion on_done) = 0;
+    virtual void submit_send(NativeHandle fd, ByteSpan data, Completion on_done) = 0;
     /// Dispara una completion cuando el reloj monótono alcance @p deadline.
     virtual void submit_timer(MonoTime deadline, Completion on_done) = 0;
 
