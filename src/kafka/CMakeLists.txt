@@ -3,7 +3,9 @@
 add_library(nexus-kafka
   codec.cpp
   messages.cpp
-  metadata.cpp)
+  metadata.cpp
+  produce.cpp
+  fetch.cpp)
 add_library(nexus::kafka ALIAS nexus-kafka)
 
 target_include_directories(nexus-kafka PUBLIC ${PROJECT_SOURCE_DIR}/src)

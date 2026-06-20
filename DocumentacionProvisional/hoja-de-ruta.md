@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** **FASE 4 EN CURSO** (Stretch, serie F): hechos **F1** (productor *effectively-once* + *fencing* por época), **F2** (codec por record + migración del cliente), **F3** (compactación por clave), **F4** (DLQ), **F5** (compresión LZ4/Zstd por batch) y **F6** (E/S directa `O_DIRECT` + lector con readahead). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
+**Estado actual:** **FASE 4 EN CURSO** (Stretch, serie F): hechos **F1** (productor *effectively-once* + *fencing* por época), **F2** (codec por record + migración del cliente), **F3** (compactación por clave), **F4** (DLQ), **F5** (compresión LZ4/Zstd por batch), **F6** (E/S directa `O_DIRECT` + lector con readahead) y **F7a–F7d** (subconjunto Kafka-compatible: codec big-endian, cabeceras + `ApiVersions`, `Metadata`, `Produce`/`Fetch`). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
 añade el **consenso Raft por partición** (`nexus-consensus`: estado/log/RPC, `RaftNode` como máquina de
 estados síncrona sin E/S con pre-vote, replicación, *high-watermark* por mayoría, transferencia de
 liderazgo y learners; ADR-0014/0015), la **integración en el broker** (`ReplicatedPartition`, ADR-0016),
@@ -739,7 +739,16 @@ Harness de benchmark vacío y CI:
     `controller_id`, topics y particiones (réplicas/ISR/offline como `COMPACT_ARRAY[INT32]`) y sus
     *tagged fields*. Tests: decode de petición (nulo y lista) y round-trip de respuesta. Verde en
     GCC/Clang/ASan.
-  - [ ] **F7d** `Produce`/`Fetch` (codec) + dispatcher que enruta al broker.
+  - [x] **F7d** `Produce`/`Fetch` (codec) — `kafka/produce.{hpp,cpp}` y `kafka/fetch.{hpp,cpp}`.
+    `Produce` v9 flexible: decode de la petición (`transactional_id` nullable, `acks`, `timeout_ms`,
+    topics→particiones con `COMPACT_RECORDS` = `COMPACT_NULLABLE_BYTES` opaco) y encode de la
+    respuesta (offsets/errores por partición, `throttle_time_ms`). `Fetch` v12 flexible: decode de la
+    petición (réplica, ventanas, sesión incremental, *forgotten topics*, `rack_id`) y encode de la
+    respuesta (HWM/LSO/offsets, `aborted_transactions`, `preferred_read_replica`, records). Se añadió
+    `COMPACT_NULLABLE_BYTES` (zero-copy) al codec. Tests: round-trip de las 4 (decode petición / encode
+    respuesta) incl. records. Verde en GCC/Clang/ASan.
+  - [ ] **F7e** *Dispatcher* (`KafkaGateway`) que enruta `ApiVersions`/`Metadata`/`Produce`/`Fetch`
+    al clúster/broker.
   - [ ] **Nota:** la interoperación **en vivo con `kcat`** no se verifica en este entorno (no está
     instalado); se cubre con tests de round-trip/bytes y queda como verificación manual (como F10).
 - [ ] **F8** Tracing distribuido (propagación de contexto de traza).

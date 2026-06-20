@@ -140,6 +140,14 @@ void Encoder::put_compact_bytes(ByteSpan data) {
     out_.append(data);
 }
 
+void Encoder::put_compact_nullable_bytes(const std::optional<ByteSpan>& data) {
+    if (!data) {
+        put_unsigned_varint(0);
+        return;
+    }
+    put_compact_bytes(*data);
+}
+
 void Encoder::put_array_len(std::int32_t count) {
     put_i32(count);
 }
@@ -345,6 +353,21 @@ expected<ByteSpan> Decoder::get_compact_bytes() {
         return make_error(ErrorCode::Corrupt, "COMPACT_BYTES no admite nulo");
     }
     return take(*len - 1);
+}
+
+expected<std::optional<ByteSpan>> Decoder::get_compact_nullable_bytes() {
+    const expected<std::uint32_t> len = get_unsigned_varint();
+    if (!len) {
+        return std::unexpected(len.error());
+    }
+    if (*len == 0) {
+        return std::optional<ByteSpan>{};
+    }
+    const expected<ByteSpan> bytes = take(*len - 1);
+    if (!bytes) {
+        return std::unexpected(bytes.error());
+    }
+    return std::optional<ByteSpan>{*bytes};
 }
 
 expected<std::int32_t> Decoder::get_array_len() {

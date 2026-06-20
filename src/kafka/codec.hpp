@@ -56,6 +56,8 @@ public:
     void put_nullable_bytes(const std::optional<ByteSpan>& data);
     /// `COMPACT_BYTES`: `UNSIGNED_VARINT`(len+1) + contenido.
     void put_compact_bytes(ByteSpan data);
+    /// `COMPACT_NULLABLE_BYTES` (p. ej. `COMPACT_RECORDS`): `UNSIGNED_VARINT`(len+1; 0 = nulo).
+    void put_compact_nullable_bytes(const std::optional<ByteSpan>& data);
 
     /// Longitud de un `ARRAY` clásico (`INT32`; -1 = nulo). Los elementos los escribe el llamante.
     void put_array_len(std::int32_t count);
@@ -99,6 +101,9 @@ public:
     [[nodiscard]] expected<ByteSpan> get_bytes();
     [[nodiscard]] expected<std::optional<ByteSpan>> get_nullable_bytes();
     [[nodiscard]] expected<ByteSpan> get_compact_bytes();
+    /// `COMPACT_NULLABLE_BYTES`: la vista apunta dentro de la entrada; `nullopt` si se declara
+    /// nulo.
+    [[nodiscard]] expected<std::optional<ByteSpan>> get_compact_nullable_bytes();
 
     /// Longitud de un `ARRAY` clásico (`INT32`); -1 se devuelve como tal (nulo).
     [[nodiscard]] expected<std::int32_t> get_array_len();
