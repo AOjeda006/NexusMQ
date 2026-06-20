@@ -74,7 +74,7 @@ option(NEXUS_BUILD_TESTS "Compila la suite de tests y los benchmarks (GoogleTest
 # (M1 cimientos → M2 common/storage → … ). Mientras una carpeta no tenga su
 # CMakeLists, se omite sin romper la configuración. La biblioteca (src) y el CLI van siempre;
 # tests y benchmarks solo con NEXUS_BUILD_TESTS.
-set(_nexus_subdirs src tools/cli)
+set(_nexus_subdirs src tools/cli tools/wincheck)
 if(NEXUS_BUILD_TESTS)
   list(APPEND _nexus_subdirs tools/bench tests)
 endif()
