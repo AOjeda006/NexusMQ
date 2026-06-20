@@ -2,6 +2,7 @@
 # Capa: depende de common, storage y protocol (deps del desglose §4.6).
 add_library(nexus-consensus
   raft_state.cpp
+  raft_state_store.cpp
   raft_rpc.cpp
   raft_log.cpp
   raft_node.cpp)

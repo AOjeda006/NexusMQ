@@ -87,6 +87,18 @@ public:
     /// @brief Registra el voto del término actual a @p candidate (a lo sumo uno por término).
     void record_vote(NodeId candidate) noexcept { voted_for_ = candidate; }
 
+    /// @brief Reconstruye el estado a partir de valores **persistidos** en disco.
+    /// @details No aplica la regla de monotonía de `advance_term`: al recuperar, el disco es la
+    ///   fuente de verdad (el estado ya era válido cuando se persistió). Lo usa
+    ///   `RaftStateStore::load`.
+    [[nodiscard]] static RaftPersistentState restore(Term term,
+                                                     std::optional<NodeId> voted_for) noexcept {
+        RaftPersistentState state;
+        state.current_term_ = term;
+        state.voted_for_ = voted_for;
+        return state;
+    }
+
     bool operator==(const RaftPersistentState&) const = default;
 
 private:

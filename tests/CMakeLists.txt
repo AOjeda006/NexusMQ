@@ -81,6 +81,7 @@ add_executable(nexus-tests
   unit/cli/group_commands_test.cpp
   unit/consensus/raft_rpc_test.cpp
   unit/consensus/raft_log_test.cpp
+  unit/consensus/raft_state_store_test.cpp
   unit/consensus/raft_node_test.cpp
   sim/raft_sim_test.cpp
   e2e/broker_e2e_test.cpp
