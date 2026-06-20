@@ -15,7 +15,7 @@
 
 namespace nexus {
 
-/// @brief Envoltura RAII sobre un handle de fichero del SO (POSIX o Win32). Afinidad: REACTOR-LOCAL.
+/// @brief Envoltura RAII sobre un handle de fichero del SO (POSIX/Win32). Afinidad: REACTOR-LOCAL.
 /// @details **Solo movible**: posee el handle (`NativeHandle`) y lo cierra en el destructor (un
 ///   recurso del SO no debe fugarse). Fase 1: E/S **bloqueante** — POSIX (`pread`/`pwrite`/`fsync`)
 ///   o Windows (`ReadFile`/`WriteFile`/`FlushFileBuffers`); la variante asíncrona (io_uring/IOCP)

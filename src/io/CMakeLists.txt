@@ -17,5 +17,13 @@ if(NEXUS_HAS_IOURING_HEADER)
   target_compile_definitions(nexus-io PUBLIC NEXUS_HAVE_IOURING)
 endif()
 
+# Backend IOCP: solo en Windows (ADR-0022). Espejo del backend io_uring sobre el mismo
+# puerto Proactor; requiere Winsock (ws2_32) y las funciones de extensión (mswsock, AcceptEx).
+# El resto del árbol es Linux-nativo: nexus-io es la capa que aísla la plataforma.
+if(WIN32)
+  target_sources(nexus-io PRIVATE iocp_backend.cpp)
+  target_link_libraries(nexus-io PUBLIC ws2_32 mswsock)
+endif()
+
 target_include_directories(nexus-io PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(nexus-io PUBLIC nexus::common nexus_options)

@@ -37,8 +37,8 @@ namespace nexus {
 ///     *completion* vía `PostQueuedCompletionStatus`).
 ///   - `submit_accept`: `AcceptEx` (precarga un socket aceptado). `submit_recv`/`submit_send`:
 ///     `WSARecv`/`WSASend` con `WSAOVERLAPPED`.
-///   - `submit_timer`: los temporizadores se guardan en un `multimap` por *deadline* y vencen cuando
-///     la espera de `GetQueuedCompletionStatusEx` agota su *timeout* (calculado al próximo deadline).
+///   - `submit_timer`: los temporizadores se guardan en un `multimap` por *deadline*; vencen cuando
+///     la espera de `GetQueuedCompletionStatusEx` agota su *timeout* (calculado al próximo).
 ///   - `run_completions`/`wait_completions`: `GetQueuedCompletionStatusEx` drena un **lote** de
 ///     *completions* (sin bloquear con `dwMilliseconds = 0`; bloqueando hasta @p deadline en la
 ///     espera). El `result` estilo io_uring (`>=0` bytes/handle / `<0` `-error`) se obtiene de
