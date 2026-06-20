@@ -22,8 +22,9 @@ namespace {
     if (!blob) {
         return std::unexpected(blob.error());
     }
-    if (*blob) {
-        part.records.assign((*blob)->begin(), (*blob)->end());
+    const std::optional<ByteSpan>& records = *blob;
+    if (records.has_value()) {
+        part.records.assign(records->begin(), records->end());
     }
     const expected<void> tags = dec.skip_tagged_fields();
     if (!tags) {
