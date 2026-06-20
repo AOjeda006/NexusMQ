@@ -25,7 +25,10 @@ sobre Windows real con MSVC** (VS 2026, `/W4 /WX`; arnés `tools/wincheck`: File
 eco IOCP por loopback y temporizador — los 4 casos PASAN). **GitHub Actions desactivadas
 temporalmente** por cuota (se reactivan al publicar); la puerta de calidad se mantiene en local.
 Con las series M/R/C/I/F cerradas, **las Fases 1→4 están implementadas**; lo pendiente es trabajo de
-cierre, no de fase: benchmarks de producción y la documentación final previa a publicar.
+cierre, no de fase, agrupado en la **Fase 4b** (ver más abajo): bloque **W** (verificar/endurecer
+Windows — W1 cerrado), bloque **D** (cerrar la deuda diferida por *fasing*: persistencia de Raft,
+snapshots, swap-in en caliente, TLS/proxy y métricas) y bloque **L** (benchmarks de producción). La
+documentación final y la reactivación del CI (+ publicación) van **al final**, tras W/D/L.
 
 > **Resumen de cierre de Fase 1b.** (histórico) Entregable: broker de un nodo *thread-per-core* que publica y consume con un cliente nativo, hablando el protocolo binario propio sobre io_uring. Targets nuevos/cerrados: `nexus-reactor`, `nexus-protocol`, `nexus-wire` (ADR-0013), `nexus-broker`, `nexus-client`, `nexus-server` (+ `Socket`/`Listener` async en `nexus-io`). Modelo de errores `expected<T>` en el núcleo y traducción wire↔núcleo en el borde (`from_error`/`to_error`); RAII; TDD; sin Raft. **Ajustes de diseño respecto al desglose (anotados por hito):** `task<T>` reubicado a `common/`; backend io_uring directo sobre el uapi (ADR-0012); framing en `nexus-wire` con protocolo puro (ADR-0013); broker **síncrono** en 1b (E/S de almacenamiento bloqueante; la versión async llega con Raft); `Connection`→corrutina libre `serve_connection`; cliente síncrono de un solo nodo; `CreditWindow` reubicado de protocol a broker. **Diferido a Fase 2 (decisiones de fasing, no deuda):** `File` async + ruta de almacenamiento async, *multi-reactor* con routing por partición, grupos de consumidores (Join/Sync/Heartbeat + rebalanceo), persistencia del topic de offsets, y el cableado end-to-end de créditos en la ruta de *push*.
 
@@ -810,6 +813,64 @@ Harness de benchmark vacío y CI:
     incondicionales en MSVC); el código IOCP/`File`/`Socket` no necesitó cambios (MinGW ya lo cubría).
   - El resto del servidor (reactor *pinning*, `nexusd` con señales POSIX, backend io_uring) sigue
     Linux-nativo: lo portado y verificado es la capa de E/S (`nexus-io`), que aísla la plataforma.
+
+---
+
+## Fase 4b — Cierre de producción *(en curso)*
+
+> **No es una fase nueva del anteproyecto** —las Fases 1→4 están **implementadas**—: agrupa el **trabajo
+> de cierre** que aflora al contrastar el estado real con la documentación. Tres bloques:
+> **W** (verificar/endurecer Windows), **D** (cerrar la **deuda diferida por *fasing***: cablear en
+> caliente lo que quedó como "bloque de construcción listo, sin enchufar") y **L** (campaña de
+> **benchmarks de producción**, un objetivo declarado del proyecto). La **documentación final**, la
+> **reactivación del CI** (GitHub Actions, hoy `ci.yml.disabled`) y la **publicación** del repo se hacen
+> **al final**, una vez cerrados W/D/L (decisión del autor: ahorrar cuota de Actions hasta publicar).
+
+### Bloque W — Verificación y endurecimiento de Windows
+- [x] **W1** Runtime de `nexus-io` en Windows con **MSVC** (VS 2026, MSVC 19.51, `/W4 /WX`): arnés
+  `tools/wincheck` (File bloqueante + directa, eco IOCP por loopback, `submit_timer`; 4/4 PASAN),
+  **ADR-0023** (reemplaza ADR-0022). Único arreglo: `crc32c.cpp` portable a MSVC (`__cpuid` +
+  intrínsecos SSE4.2 incondicionales tras `#if defined(_MSC_VER)`; el camino GCC/Clang queda idéntico).
+  **Revalidado en Linux** (GCC + Clang/libc++ + ASan, 599/599; format/tidy limpios): el cambio es inerte
+  fuera de MSVC. Cierra la deuda de runtime de F10.
+- [ ] **W2** `clang-cl` como **segundo compilador Windows** — **bloqueado al entorno Windows**: requiere
+  instalar el componente *C++ Clang tools for Windows* de Visual Studio (MSVC ABI + Windows SDK); **no se
+  puede ejecutar desde Linux** (ni MinGW ni el contenedor lo cubren). Tarea para una sesión en la máquina
+  Windows: configurar el preset `windows-msvc` con `clang-cl` y recompilar `nexus-io`. Bajo riesgo,
+  valor de robustez (un tercer toolchain).
+- [ ] **W3** Port **completo de `nexusd` a Windows** (no solo `nexus-io`) — **grande y opcional**. Hoy son
+  Linux-nativos: el *pinning* del `ReactorPool` (`pthread_setaffinity_np`/`cpu_set_t` →
+  `SetThreadAffinityMask` en Win32), la **factoría de proactor** del server (crea `IoUringBackend` → debe
+  elegir `IocpBackend` en Windows; la pieza ya existe y está runtime-verificada), las **señales** de
+  `nexusd` (`std::signal` es portable, pero el despertar por `eventfd` no → `SetConsoleCtrlHandler` +
+  despertar por `PostQueuedCompletionStatus`) y cualquier fuga POSIX en broker/consensus/ingress (p. ej.
+  OpenSSL). **Solo compile-verificable aquí (MinGW), no runtime**; además exige que **todo el árbol**
+  compile en Windows (no solo `nexus-io`). Es un hito en sí mismo: se aborda como **W3** dedicado y su
+  runtime se delega a la máquina Windows (mismo patrón que W1). Prioridad **baja** frente a D/L (el valor
+  de portabilidad —el puerto `Proactor`— ya está demostrado por `nexus-io`).
+
+### Bloque D — Cerrar la deuda diferida por *fasing* (punto 1)
+- [~] **D1** **Persistencia en disco del estado persistente de Raft** (`RaftPersistentState::persist`/`load`:
+  `current_term`/`voted_for`). Hoy la FSM (ADR-0015) opera en memoria; un reinicio pierde el término y el
+  voto, lo que **viola la seguridad de Raft** (§5: un nodo podría votar dos veces en un término tras
+  recuperarse). Fichero propio (`raft-state`) con escritura **durable** (`fsync`) y `decode` defensivo
+  con CRC; se carga al abrir el `RaftNode`. TDD determinista (sin red). *(En curso.)*
+- [ ] **D2** **Snapshots / compactación** del log de Raft (`InstallSnapshot` ya tiene RPC en C2): truncar
+  el prefijo aplicado para acotar el crecimiento del log y poner al día a un seguidor muy rezagado.
+- [ ] **D3** **Swap-in en caliente** del stack Raft + multi-reactor en el `Server` vivo con **transporte
+  real** (hoy `ReplicatedPartition`/`call_on`/`PartitionRouter` se prueban con red virtual; falta
+  enchufarlos al servidor de producción y mover los RPC de Raft por la red).
+- [ ] **D4** **Cableado de TLS + proxy** en el plano de datos del server (la criptografía/`TlsContext` y el
+  `Proxy` existen, ADR-0019; falta enchufarlos al flujo de conexiones real).
+- [ ] **D5** **Poblar las métricas del broker** en el hot-path (la telemetría existe, ADR-0017; faltan los
+  contadores/histogramas en produce/fetch/replicación).
+
+### Bloque L — Benchmarks de producción (punto 2)
+- [ ] **L1** Generador de carga **open-loop** sobre la red (tasa fija, anti *coordinated omission*;
+  `fundamentos/rendimiento/`): cliente de carga que produce/consume contra `nexusd` real.
+- [ ] **L2** **Campaña de latencia** end-to-end con `LatencyHistogram` (p50/p99/p999/max) bajo carga
+  representativa + **publicar las cifras** (entrada a la documentación final). Es uno de los entregables
+  declarados del proyecto (motor de log con cifras de rendimiento, ahora end-to-end con red).
 
 ---
 
