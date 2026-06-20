@@ -48,12 +48,12 @@
     },
     {
       "name": "windows-msvc",
-      "displayName": "Windows MSVC (IOCP) [andamio, F10 — ver ADR-0021]",
+      "displayName": "Windows MSVC (IOCP) [nexus-io portado, F10 — ver ADR-0022]",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
       "cacheVariables": {
-        "_comment_scaffold": "Andamio para el backend IOCP (F10): el árbol es Linux-nativo (io_uring/O_DIRECT/sockets POSIX), así que el port Windows completo (File/Socket→Win32 + IocpBackend) está diferido (ADR-0021). Oculto fuera de Windows por 'condition'.",
+        "_comment_scaffold": "Build Windows. La capa de E/S (nexus-io: File/Socket→Win32 + IocpBackend) está portada y compile-verificada con MinGW (ADR-0022); CMake compila iocp_backend.cpp y enlaza ws2_32/mswsock en WIN32. El resto del árbol (reactor pinning, nexusd con señales POSIX) sigue Linux-nativo: un nexusd Windows completo es trabajo futuro. Para compile-verificar solo nexus-io sin MSVC: tools/verify-windows-io.sh. Oculto fuera de Windows por 'condition'.",
         "CMAKE_CXX_STANDARD": "23",
         "CMAKE_BUILD_TYPE": "Debug"
       }

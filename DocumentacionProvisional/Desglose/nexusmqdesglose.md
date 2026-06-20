@@ -73,7 +73,9 @@ nexus-common                         (sin dependencias internas)
 
 Regla de capas (forzada en CMake): un target NO puede depender de otro de su
 misma capa o superior. `storage` nunca depende de `ingress`; `protocol` nunca de
-`broker`; etc. La portabilidad Windows vive SOLO en `nexus-io` (adaptador IOCP).
+`broker`; etc. La portabilidad Windows vive SOLO en `nexus-io`: backend `IocpBackend` + ramas Win32
+de `File`/`Socket` (`NativeHandle`/`IoResult` portables), implementado y compile-verificado con
+MinGW (ADR-0022). El resto del árbol es agnóstico de plataforma.
 
 ================================================================================
 3. ÁRBOL DE CARPETAS Y ARCHIVOS (alto nivel)
@@ -185,8 +187,9 @@ io_uring_backend.hpp / .cpp   [Linux]
     - `- registered_buffers_`, `- fixed_files_` (registered buffers/fixed files).
     - Implementa los `submit_*` encolando SQEs; `run_completions` procesa CQEs.
 
-iocp_backend.hpp / .cpp   [Windows, Fase 4]
-  **IocpBackend : Proactor** — equivalente sobre *completion ports*.
+iocp_backend.hpp / .cpp   [Windows, implementado — ADR-0022]
+  **IocpBackend : Proactor** — equivalente sobre *completion ports* (compile-verificado con MinGW;
+  runtime pendiente de Windows).
 
 awaitable.hpp
   *Awaitables* que suspenden la corrutina y reanudan en la completion (§3.3):

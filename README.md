@@ -1,10 +1,12 @@
 # NexusMQ
 
-> **Broker de mensajería distribuido de alto rendimiento** en C++20, con arquitectura
+> **Broker de mensajería distribuido de alto rendimiento** en C++23, con arquitectura
 > **shared-nothing thread-per-core** y **Raft por partición**.
 >
-> ⚠️ **Estado: en desarrollo — Fase 1.** Documento y código **provisionales**; se revisarán
-> antes de publicar en el portfolio.
+> ⚠️ **Estado: en desarrollo — Fases 1→4 implementadas** (motor de log, reactor+broker,
+> Raft por partición, ingress/operación y *stretch*). Código y documentación **provisionales**;
+> se revisarán antes de publicar en el portfolio. **GitHub Actions desactivadas temporalmente**
+> (cuota; se reactivan al publicar); la puerta de calidad se mantiene en local.
 
 NexusMQ es un *message broker* de **log particionado** (estilo Kafka): productores **añaden**
 registros al final de un log append-only y consumidores **leen** desde el offset que elijan y
@@ -25,8 +27,9 @@ del diseño de brokers (la que usa Redpanda), no la de hace una década.
 - **Raft por partición.** Cada partición es su propio **grupo Raft**: su log replicado *es* el log de
   la partición (el WAL). El *high-watermark* es el `commitIndex` de Raft; el modelo de `acks`
   (`0`/`1`/`quorum`) se asienta sobre su *commit*. Postura **CP** (consistencia sobre disponibilidad).
-- **I/O por *completions* (proactor).** Abstracción común a **io_uring** (Linux, primero) e **IOCP**
-  (Windows, después), sobre la que se asientan las **corutinas de C++20**.
+- **I/O por *completions* (proactor).** Abstracción común a **io_uring** (Linux) e **IOCP**
+  (Windows: la capa `nexus-io` está portada y **compile-verificada con MinGW-w64**, ADR-0022;
+  runtime en Windows pendiente), sobre la que se asientan las **corutinas de C++23**.
 - **Protocolo binario propio** (framing + multiplexing por *correlation ID* + versionado) con
   **gateway REST** para interoperabilidad. Subconjunto Kafka-compatible diferido a *stretch*.
 - **Capa de *ingress* en dos modos:** cliente nativo directo al líder (primario) + proxy/REST (opt-in).

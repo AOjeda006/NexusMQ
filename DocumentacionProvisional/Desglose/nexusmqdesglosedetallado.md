@@ -132,7 +132,8 @@ Checksum CRC32C (Castagnoli), estándar de facto en logs; HW (SSE4.2) + fallback
 4.2  nexus-io   (src/io/)   — Fase 1 (bloqueante) → 1b (proactor)   — deps: common
 ================================================================================
 Abstracción de E/S por *completions* (proactor). ÚNICO módulo con código por plataforma
-(io_uring en Linux ahora; IOCP en Windows, Fase 4). El resto del sistema es agnóstico.
+(io_uring en Linux; IOCP + Win32/Winsock en Windows, implementado y compile-verificado con MinGW,
+ADR-0022; el handle es `NativeHandle`). El resto del sistema es agnóstico.
 
 ----- proactor.hpp --------------------------------------------------------------
 **Proactor**  [REACTOR-LOCAL]  — puerto abstracto de E/S asíncrona (un anillo por reactor).
@@ -161,8 +162,10 @@ Abstracción de E/S por *completions* (proactor). ÚNICO módulo con código por
   - io_uring_sqe* get_sqe();
   - void          submit_pending();
 
------ iocp_backend.hpp / .cpp   [Windows, Fase 4] -------------------------------
+----- iocp_backend.hpp / .cpp   [Windows, implementado — ADR-0022] --------------
 **IocpBackend : Proactor**  — equivalente sobre IO Completion Ports (mismo contrato).
+  Compile-verificado con MinGW (GetQueuedCompletionStatusEx/AcceptEx/PostQueuedCompletionStatus);
+  runtime pendiente de Windows.
 
 ----- awaitable.hpp -------------------------------------------------------------
 Awaitables que suspenden la corrutina y la reanudan en la completion (§3.3):
