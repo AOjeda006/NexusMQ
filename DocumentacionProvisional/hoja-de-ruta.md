@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** **FASE 4 EN CURSO** (Stretch, serie F): hechos **F1** (productor *effectively-once* + *fencing* por época), **F2** (codec por record + migración del cliente), **F3** (compactación por clave), **F4** (DLQ), **F5** (compresión LZ4/Zstd por batch), **F6** (E/S directa `O_DIRECT` + lector con readahead) y **F7** (subconjunto Kafka-compatible: codec big-endian, cabeceras + `ApiVersions`, `Metadata`, `Produce`/`Fetch` y *dispatcher* `KafkaGateway`) , **F8** (tracing distribuido: contexto W3C + spans) y **F9** (*binding* Python vía ABI C `nexus-ffi` + `ctypes`, ADR-0020). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
+**Estado actual:** **FASE 4 (Stretch, serie F) COMPLETADA** — **F1** (productor *effectively-once* + *fencing* por época), **F2** (codec por record + migración del cliente), **F3** (compactación por clave), **F4** (DLQ), **F5** (compresión LZ4/Zstd por batch), **F6** (E/S directa `O_DIRECT` + lector con readahead), **F7** (subconjunto Kafka-compatible: codec big-endian, cabeceras + `ApiVersions`, `Metadata`, `Produce`/`Fetch` y *dispatcher* `KafkaGateway`), **F8** (tracing distribuido: contexto W3C + spans), **F9** (*binding* Python vía ABI C `nexus-ffi` + `ctypes`, ADR-0020) y **F10** (backend IOCP Windows: diseño + ADR-0021, implementación diferida —no verificable en este entorno—). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
 añade el **consenso Raft por partición** (`nexus-consensus`: estado/log/RPC, `RaftNode` como máquina de
 estados síncrona sin E/S con pre-vote, replicación, *high-watermark* por mayoría, transferencia de
 liderazgo y learners; ADR-0014/0015), la **integración en el broker** (`ReplicatedPartition`, ADR-0016),
@@ -777,7 +777,15 @@ Harness de benchmark vacío y CI:
   el lado Python por la prueba de humo `bindings/python/smoke_test.py` (CRC32C contra el vector de
   Castagnoli, round-trip del traceparent). `nexus-common`/`nexus-telemetry` pasan a PIC para enlazar
   en la `.so`. La frontera C es reutilizable por otros lenguajes (Rust/Go/Node FFI).
-- [ ] **F10** Backend **IOCP** (Windows) en `nexus-io`; preset `windows-msvc` *(no verificable en este entorno)*.
+- [x] **F10** Backend **IOCP** (Windows) — **diseño fijado, implementación diferida** (**ADR-0021**).
+  `src/io/iocp_backend.hpp`: `IocpBackend : Proactor` (declaración + *pimpl* que oculta
+  `<windows.h>`) con el **mapeo IOCP→`Proactor`** operación a operación (`CreateIoCompletionPort`,
+  `ReadFile`/`WriteFile` con `OVERLAPPED`, `WSARecv`/`WSASend`, `AcceptEx`, `FlushFileBuffers`,
+  `GetQueuedCompletionStatusEx` por lotes, `PostQueuedCompletionStatus` para `wake`). Todo bajo
+  `#ifdef _WIN32` y **sin `.cpp`** → en Linux es vacío, cero impacto en build/puerta de calidad.
+  Preset `windows-msvc` (andamio, oculto fuera de Windows por `condition`). **No verificable en este
+  entorno** (sin MSVC/SDK; CI solo Linux) y un backend real exige antes portar `File`/`Socket` a
+  Win32 (trabajo futuro fuera de Fase 4): por eso se entrega el diseño + ADR, no código sin compilar.
 
 ---
 

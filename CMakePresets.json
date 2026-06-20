@@ -45,6 +45,18 @@
       "cacheVariables": {
         "NEXUS_TSAN": "ON"
       }
+    },
+    {
+      "name": "windows-msvc",
+      "displayName": "Windows MSVC (IOCP) [andamio, F10 — ver ADR-0021]",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": {
+        "_comment_scaffold": "Andamio para el backend IOCP (F10): el árbol es Linux-nativo (io_uring/O_DIRECT/sockets POSIX), así que el port Windows completo (File/Socket→Win32 + IocpBackend) está diferido (ADR-0021). Oculto fuera de Windows por 'condition'.",
+        "CMAKE_CXX_STANDARD": "23",
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
     }
   ],
   "buildPresets": [
