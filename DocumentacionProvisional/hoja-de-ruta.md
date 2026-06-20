@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** **FASE 4 EN CURSO** (Stretch, serie F): hechos **F1** (productor *effectively-once* + *fencing* por época), **F2** (codec por record + migración del cliente), **F3** (compactación por clave), **F4** (DLQ), **F5** (compresión LZ4/Zstd por batch), **F6** (E/S directa `O_DIRECT` + lector con readahead) y **F7a–F7d** (subconjunto Kafka-compatible: codec big-endian, cabeceras + `ApiVersions`, `Metadata`, `Produce`/`Fetch`). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
+**Estado actual:** **FASE 4 EN CURSO** (Stretch, serie F): hechos **F1** (productor *effectively-once* + *fencing* por época), **F2** (codec por record + migración del cliente), **F3** (compactación por clave), **F4** (DLQ), **F5** (compresión LZ4/Zstd por batch), **F6** (E/S directa `O_DIRECT` + lector con readahead) y **F7** (subconjunto Kafka-compatible: codec big-endian, cabeceras + `ApiVersions`, `Metadata`, `Produce`/`Fetch` y *dispatcher* `KafkaGateway`). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
 añade el **consenso Raft por partición** (`nexus-consensus`: estado/log/RPC, `RaftNode` como máquina de
 estados síncrona sin E/S con pre-vote, replicación, *high-watermark* por mayoría, transferencia de
 liderazgo y learners; ADR-0014/0015), la **integración en el broker** (`ReplicatedPartition`, ADR-0016),
@@ -719,7 +719,7 @@ Harness de benchmark vacío y CI:
     último bloque parcial y el EOF; expone `cache_hits/misses`/`disk_reads`. Tests: rango
     multi-bloque, acierto de caché, *readahead*, desalojo LRU, bloque parcial, EOF y `block_size`
     inválido. Verde en GCC/Clang/ASan.
-- [ ] **F7** Subconjunto **Kafka-compatible** (`ApiVersions`/`Metadata`/`Produce`/`Fetch`) → habla con `kcat`.
+- [x] **F7** Subconjunto **Kafka-compatible** (`ApiVersions`/`Metadata`/`Produce`/`Fetch`) → habla con `kcat`.
   - [x] **F7a** Codec de wire Kafka — `kafka/codec.{hpp,cpp}` (target `nexus::kafka`). El protocolo de
     Kafka es **big-endian** (≠ nativo, ADR-0013), así que lleva codec propio. `Encoder`/`Decoder`
     (defensivo) cubren `INT8/16/32/64`, `BOOLEAN`, `UNSIGNED_VARINT`, `VARINT`/`VARLONG` (zigzag,
@@ -747,8 +747,14 @@ Harness de benchmark vacío y CI:
     respuesta (HWM/LSO/offsets, `aborted_transactions`, `preferred_read_replica`, records). Se añadió
     `COMPACT_NULLABLE_BYTES` (zero-copy) al codec. Tests: round-trip de las 4 (decode petición / encode
     respuesta) incl. records. Verde en GCC/Clang/ASan.
-  - [ ] **F7e** *Dispatcher* (`KafkaGateway`) que enruta `ApiVersions`/`Metadata`/`Produce`/`Fetch`
-    al clúster/broker.
+  - [x] **F7e** *Dispatcher* (`KafkaGateway`) — `kafka/gateway.{hpp,cpp}`. Decodifica la cabecera de
+    petición, enruta por `api_key` y serializa la respuesta con la versión de cabecera correcta
+    (caso especial v0 de `ApiVersions`). `ApiVersions` se resuelve en el propio gateway (anuncia
+    `supported_apis()`); `Metadata`/`Produce`/`Fetch` se delegan al **puerto** `KafkaBroker`
+    (inyección de dependencias: separa el protocolo puro de `nexus-broker`; el adaptador real vive en
+    el servidor). Opera sobre el cuerpo del frame (el prefijo `Size` lo añade el transporte). Tests:
+    despacho de las 4 APIs con un `FakeBroker` (eco de `correlation_id`, delegación correcta,
+    `api_key` no soportada → error). Verde en GCC/Clang/ASan.
   - [ ] **Nota:** la interoperación **en vivo con `kcat`** no se verifica en este entorno (no está
     instalado); se cubre con tests de round-trip/bytes y queda como verificación manual (como F10).
 - [ ] **F8** Tracing distribuido (propagación de contexto de traza).
