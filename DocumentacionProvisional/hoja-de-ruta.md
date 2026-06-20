@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** **FASE 4 (Stretch, serie F) COMPLETADA** — **F1** (productor *effectively-once* + *fencing* por época), **F2** (codec por record + migración del cliente), **F3** (compactación por clave), **F4** (DLQ), **F5** (compresión LZ4/Zstd por batch), **F6** (E/S directa `O_DIRECT` + lector con readahead), **F7** (subconjunto Kafka-compatible: codec big-endian, cabeceras + `ApiVersions`, `Metadata`, `Produce`/`Fetch` y *dispatcher* `KafkaGateway`), **F8** (tracing distribuido: contexto W3C + spans), **F9** (*binding* Python vía ABI C `nexus-ffi` + `ctypes`, ADR-0020) y **F10** (backend IOCP Windows: **implementado y compile-verificado con MinGW-w64**, ADR-0022 —reemplaza ADR-0021—; runtime en Windows pendiente). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
+**Estado actual:** **FASE 4 (Stretch, serie F) COMPLETADA** — **F1** (productor *effectively-once* + *fencing* por época), **F2** (codec por record + migración del cliente), **F3** (compactación por clave), **F4** (DLQ), **F5** (compresión LZ4/Zstd por batch), **F6** (E/S directa `O_DIRECT` + lector con readahead), **F7** (subconjunto Kafka-compatible: codec big-endian, cabeceras + `ApiVersions`, `Metadata`, `Produce`/`Fetch` y *dispatcher* `KafkaGateway`), **F8** (tracing distribuido: contexto W3C + spans), **F9** (*binding* Python vía ABI C `nexus-ffi` + `ctypes`, ADR-0020) y **F10** (backend IOCP Windows: **implementado y verificado en runtime sobre Windows con MSVC** (VS 2026, MSVC 19.51, `/W4 /WX`; arnés `tools/wincheck`), ADR-0023 —reemplaza ADR-0022, que a su vez reemplazó ADR-0021—). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
 añade el **consenso Raft por partición** (`nexus-consensus`: estado/log/RPC, `RaftNode` como máquina de
 estados síncrona sin E/S con pre-vote, replicación, *high-watermark* por mayoría, transferencia de
 liderazgo y learners; ADR-0014/0015), la **integración en el broker** (`ReplicatedPartition`, ADR-0016),
@@ -20,11 +20,12 @@ los **grupos de consumidores** (FSM generacional + Join/Sync/Heartbeat/Leave + `
 determinista** que verifica elección, failover, partición y **chaos** (Leader Completeness,
 anti-split-brain, reinicios rodantes) comprobando las invariantes de seguridad. **599 tests** verdes en
 GCC/libstdc++ y Clang/libc++ (+ **ASan/UBSan** y **TSan**); la capa de E/S Windows (`nexus-io`) se
-**compile-verifica con MinGW-w64** (`tools/verify-windows-io.sh`). **GitHub Actions desactivadas
+**compile-verifica con MinGW-w64** (`tools/verify-windows-io.sh`) y, además, **se verifica en runtime
+sobre Windows real con MSVC** (VS 2026, `/W4 /WX`; arnés `tools/wincheck`: File bloqueante + directa,
+eco IOCP por loopback y temporizador — los 4 casos PASAN). **GitHub Actions desactivadas
 temporalmente** por cuota (se reactivan al publicar); la puerta de calidad se mantiene en local.
 Con las series M/R/C/I/F cerradas, **las Fases 1→4 están implementadas**; lo pendiente es trabajo de
-cierre, no de fase: verificación en runtime sobre Windows (job `windows-latest` al reactivar CI),
-benchmarks de producción y la documentación final previa a publicar.
+cierre, no de fase: benchmarks de producción y la documentación final previa a publicar.
 
 > **Resumen de cierre de Fase 1b.** (histórico) Entregable: broker de un nodo *thread-per-core* que publica y consume con un cliente nativo, hablando el protocolo binario propio sobre io_uring. Targets nuevos/cerrados: `nexus-reactor`, `nexus-protocol`, `nexus-wire` (ADR-0013), `nexus-broker`, `nexus-client`, `nexus-server` (+ `Socket`/`Listener` async en `nexus-io`). Modelo de errores `expected<T>` en el núcleo y traducción wire↔núcleo en el borde (`from_error`/`to_error`); RAII; TDD; sin Raft. **Ajustes de diseño respecto al desglose (anotados por hito):** `task<T>` reubicado a `common/`; backend io_uring directo sobre el uapi (ADR-0012); framing en `nexus-wire` con protocolo puro (ADR-0013); broker **síncrono** en 1b (E/S de almacenamiento bloqueante; la versión async llega con Raft); `Connection`→corrutina libre `serve_connection`; cliente síncrono de un solo nodo; `CreditWindow` reubicado de protocol a broker. **Diferido a Fase 2 (decisiones de fasing, no deuda):** `File` async + ruta de almacenamiento async, *multi-reactor* con routing por partición, grupos de consumidores (Join/Sync/Heartbeat + rebalanceo), persistencia del topic de offsets, y el cableado end-to-end de créditos en la ruta de *push*.
 
@@ -783,9 +784,11 @@ Harness de benchmark vacío y CI:
   el lado Python por la prueba de humo `bindings/python/smoke_test.py` (CRC32C contra el vector de
   Castagnoli, round-trip del traceparent). `nexus-common`/`nexus-telemetry` pasan a PIC para enlazar
   en la `.so`. La frontera C es reutilizable por otros lenguajes (Rust/Go/Node FFI).
-- [x] **F10** Backend **IOCP** (Windows) — **implementado y compile-verificado con MinGW** (**ADR-0022**,
-  reemplaza ADR-0021). La premisa de ADR-0021 («no verificable en este entorno») cayó al comprobar que
-  el contenedor **sí** puede instalar el cross-compiler **MinGW-w64** (headers Win32 reales). Entregado:
+- [x] **F10** Backend **IOCP** (Windows) — **implementado, compile-verificado con MinGW y verificado en
+  RUNTIME sobre Windows con MSVC** (**ADR-0023**, reemplaza ADR-0022 —que reemplazó ADR-0021—). La premisa
+  de ADR-0021 («no verificable en este entorno») cayó al comprobar que el contenedor **sí** puede instalar
+  el cross-compiler **MinGW-w64** (headers Win32 reales); ADR-0023 cierra la última deuda al **ejecutarlo**
+  en una máquina Windows real. Entregado:
   - **Frontera portable** (`refactor(io)`): `NativeHandle` (=`int` en POSIX, `uintptr_t` en Windows) y
     `Proactor::IoResult` (=`intptr_t`, aloja un `SOCKET`/`HANDLE` aceptado) sustituyen a `int fd`; cambio
     *type-identical* en Linux (599 tests siguen verdes).
@@ -795,10 +798,18 @@ Harness de benchmark vacío y CI:
   - **`iocp_backend.cpp`**: `IocpBackend` sobre `CreateIoCompletionPort`/`GetQueuedCompletionStatusEx`/
     `PostQueuedCompletionStatus`, `AcceptEx`, temporizadores por *timeout* de espera; maquinaria Win32
     confinada en el *pimpl* `Port`. CMake compila el `.cpp` y enlaza `ws2_32`/`mswsock` en `WIN32`.
-  - **Verificación**: `tools/verify-windows-io.sh` compila `common`+`io` y enlaza un driver en `.exe`
-    con MinGW (`-Wall -Wextra -Wpedantic -Werror`). **Runtime en Windows pendiente** (deuda acotada:
-    job `windows-latest` al reactivar el CI). El resto del servidor (reactor *pinning*, `nexusd` con
-    señales POSIX) sigue Linux-nativo: lo portado es la capa de E/S (`nexus-io`), que aísla la plataforma.
+  - **Verificación (compilación)**: `tools/verify-windows-io.sh` compila `common`+`io` y enlaza un driver
+    en `.exe` con MinGW (`-Wall -Wextra -Wpedantic -Werror`).
+  - **Verificación (runtime, ADR-0023)**: en Windows real con **MSVC** (VS 2026, MSVC 19.51, `/W4 /WX`),
+    el preset `windows-msvc` (`-D NEXUS_BUILD_TESTS=OFF`) compila `nexus-io` y el arnés `tools/wincheck`
+    (Windows-only, `if(WIN32)`, sin ctest ni reactor) lo **ejecuta**: File (round-trip + size/sync/truncate)
+    y File directa (`NO_BUFFERING`, alineado a 4 KiB), eco IOCP por loopback (`bind`/`connect`/`AcceptEx`/
+    `WSARecv`/`WSASend`) end-to-end + cierre limpio (EOF) bombeando `wait_completions` a mano, y
+    `submit_timer`. **Los 4 casos PASAN.** Fue necesario un arreglo de portabilidad en `nexus-common`
+    (`crc32c.cpp`: `__builtin_cpu_supports`/`[[gnu::target]]` de GCC → `__cpuid` + intrínsecos SSE4.2
+    incondicionales en MSVC); el código IOCP/`File`/`Socket` no necesitó cambios (MinGW ya lo cubría).
+  - El resto del servidor (reactor *pinning*, `nexusd` con señales POSIX, backend io_uring) sigue
+    Linux-nativo: lo portado y verificado es la capa de E/S (`nexus-io`), que aísla la plataforma.
 
 ---
 
