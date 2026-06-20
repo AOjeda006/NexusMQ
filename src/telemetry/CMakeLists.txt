@@ -3,7 +3,8 @@
 # cualquier capa (broker, reactor, ingress, server) pueda registrar o exponer sin ciclos.
 add_library(nexus-telemetry
   metrics.cpp
-  logging.cpp)
+  logging.cpp
+  tracing.cpp)
 add_library(nexus::telemetry ALIAS nexus-telemetry)
 
 target_include_directories(nexus-telemetry PUBLIC ${PROJECT_SOURCE_DIR}/src)

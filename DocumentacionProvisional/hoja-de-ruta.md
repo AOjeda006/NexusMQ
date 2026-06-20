@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** **FASE 4 EN CURSO** (Stretch, serie F): hechos **F1** (productor *effectively-once* + *fencing* por época), **F2** (codec por record + migración del cliente), **F3** (compactación por clave), **F4** (DLQ), **F5** (compresión LZ4/Zstd por batch), **F6** (E/S directa `O_DIRECT` + lector con readahead) y **F7** (subconjunto Kafka-compatible: codec big-endian, cabeceras + `ApiVersions`, `Metadata`, `Produce`/`Fetch` y *dispatcher* `KafkaGateway`). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
+**Estado actual:** **FASE 4 EN CURSO** (Stretch, serie F): hechos **F1** (productor *effectively-once* + *fencing* por época), **F2** (codec por record + migración del cliente), **F3** (compactación por clave), **F4** (DLQ), **F5** (compresión LZ4/Zstd por batch), **F6** (E/S directa `O_DIRECT` + lector con readahead) y **F7** (subconjunto Kafka-compatible: codec big-endian, cabeceras + `ApiVersions`, `Metadata`, `Produce`/`Fetch` y *dispatcher* `KafkaGateway`) y **F8** (tracing distribuido: contexto W3C + spans). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
 añade el **consenso Raft por partición** (`nexus-consensus`: estado/log/RPC, `RaftNode` como máquina de
 estados síncrona sin E/S con pre-vote, replicación, *high-watermark* por mayoría, transferencia de
 liderazgo y learners; ADR-0014/0015), la **integración en el broker** (`ReplicatedPartition`, ADR-0016),
@@ -757,7 +757,16 @@ Harness de benchmark vacío y CI:
     `api_key` no soportada → error). Verde en GCC/Clang/ASan.
   - [ ] **Nota:** la interoperación **en vivo con `kcat`** no se verifica en este entorno (no está
     instalado); se cubre con tests de round-trip/bytes y queda como verificación manual (como F10).
-- [ ] **F8** Tracing distribuido (propagación de contexto de traza).
+- [x] **F8** Tracing distribuido (propagación de contexto de traza) — `telemetry/tracing.{hpp,cpp}`.
+  Tipos de valor `TraceId` (128 bits) / `SpanId` (64 bits) / `SpanContext` (con *trace-flags* y
+  *sampled*); codec **W3C Trace Context** (`format_traceparent`/`parse_traceparent`, versión `00`,
+  defensivo) — el formato de facto para propagar la traza entre saltos. `Tracer`/`Span` (RAII,
+  *move-only*): `start_root`/`start_child`/`start_from_remote` propagan `trace_id`/`flags` y encadenan
+  `parent_id`; al cerrar (o destruir) el span entrega su `SpanData` —con duración y atributos— al
+  *sink* inyectado. Reloj, *sink* y generador de ids (`IdGenerator`; `RandomIdGenerator` splitmix64 en
+  producción) **inyectados** para tests deterministas. `end()` es `noexcept` (una traza nunca tumba el
+  proceso). Tests: bytes W3C golden + round-trip, rechazo de cabeceras malformadas, herencia
+  traza/padre, emisión con duración, RAII idempotente y reanudación remota. Verde en GCC/Clang/ASan.
 - [ ] **F9** *Binding* Python (pybind11) *(si el entorno lo soporta)*.
 - [ ] **F10** Backend **IOCP** (Windows) en `nexus-io`; preset `windows-msvc` *(no verificable en este entorno)*.
 

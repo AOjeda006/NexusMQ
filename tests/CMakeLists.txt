@@ -75,6 +75,7 @@ add_executable(nexus-tests
   unit/ingress/proxy_test.cpp
   unit/telemetry/metrics_test.cpp
   unit/telemetry/logging_test.cpp
+  unit/telemetry/tracing_test.cpp
   unit/cli/topic_commands_test.cpp
   unit/cli/cli_options_test.cpp
   unit/cli/group_commands_test.cpp
