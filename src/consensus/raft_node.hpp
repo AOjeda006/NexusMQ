@@ -115,6 +115,33 @@ public:
     [[nodiscard]] std::optional<NodeId> leader_hint() const noexcept { return leader_id_; }
     [[nodiscard]] NodeId id() const noexcept { return self_; }
 
+    /// @brief ¿Cambió el estado persistente (término/voto) desde el último
+    /// `clear_persistent_dirty`?
+    /// @details Gancho de durabilidad para el portador de la FSM (ADR-0015): tras cada entrada
+    ///   (`tick`/`on_*`/`propose`), si esto es `true`, debe persistir `persistent_state()` con
+    ///   `fsync` (vía `RaftStateStore::save`) **antes** de transportar `take_messages()` —regla de
+    ///   seguridad de Raft §5: el término y el voto se guardan antes de responder a un RPC— y luego
+    ///   llamar `clear_persistent_dirty()`.
+    [[nodiscard]] bool persistent_state_dirty() const noexcept { return persistent_dirty_; }
+
+    /// @brief Estado persistente actual (término y voto), para que el portador lo persista.
+    [[nodiscard]] const RaftPersistentState& persistent_state() const noexcept {
+        return persistent_;
+    }
+
+    /// @brief Marca el estado persistente como ya guardado (tras un `save` durable correcto).
+    void clear_persistent_dirty() noexcept { persistent_dirty_ = false; }
+
+    /// @brief Restaura el estado persistente cargado de disco **al arrancar**.
+    /// @details Lo invoca el portador justo tras construir el nodo (con lo que devuelve
+    ///   `RaftStateStore::load`) y antes de la primera entrada. No marca *dirty*: lo recién leído
+    ///   del disco no hay que volver a escribirlo.
+    /// @pre Se llama una sola vez, antes del primer `tick`/`on_*`/`propose`.
+    void restore_persistent_state(RaftPersistentState state) noexcept {
+        persistent_ = state;
+        persistent_dirty_ = false;
+    }
+
 private:
     void become_follower(MonoTime now, Term term);
     /// Inicia la ronda de **pre-votos** (§9.6): sondea sin subir el término ni votarse a sí mismo.
@@ -159,6 +186,18 @@ private:
     }
     [[nodiscard]] std::chrono::milliseconds random_election_timeout();
 
+    /// Avanza el término **y** marca el estado persistente como sucio (debe persistirse antes de
+    /// transportar; ver `persistent_state_dirty`). Centraliza la regla de durabilidad en un punto.
+    void advance_term(Term term) {
+        persistent_.advance_term(term);
+        persistent_dirty_ = true;
+    }
+    /// Registra el voto del término actual **y** marca el estado persistente como sucio.
+    void record_vote(NodeId candidate) {
+        persistent_.record_vote(candidate);
+        persistent_dirty_ = true;
+    }
+
     /// Tope de entradas por `AppendEntries` (acota el tamaño del mensaje de replicación).
     static constexpr std::size_t kMaxEntriesPerAppend = 64;
 
@@ -176,6 +215,8 @@ private:
 
     RaftRole role_ = RaftRole::Follower;
     RaftPersistentState persistent_;
+    /// ¿`persistent_` cambió y aún no se ha persistido en disco? (gancho de durabilidad, §5).
+    bool persistent_dirty_ = false;
     RaftVolatileState volatile_;
     Epoch leader_epoch_ = 0;
     std::optional<NodeId> leader_id_;

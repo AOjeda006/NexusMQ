@@ -850,11 +850,24 @@ Harness de benchmark vacío y CI:
   de portabilidad —el puerto `Proactor`— ya está demostrado por `nexus-io`).
 
 ### Bloque D — Cerrar la deuda diferida por *fasing* (punto 1)
-- [~] **D1** **Persistencia en disco del estado persistente de Raft** (`RaftPersistentState::persist`/`load`:
-  `current_term`/`voted_for`). Hoy la FSM (ADR-0015) opera en memoria; un reinicio pierde el término y el
-  voto, lo que **viola la seguridad de Raft** (§5: un nodo podría votar dos veces en un término tras
-  recuperarse). Fichero propio (`raft-state`) con escritura **durable** (`fsync`) y `decode` defensivo
-  con CRC; se carga al abrir el `RaftNode`. TDD determinista (sin red). *(En curso.)*
+- [x] **D1** **Persistencia en disco del estado persistente de Raft** (`current_term`/`voted_for`). La FSM
+  (ADR-0015) operaba en memoria; un reinicio perdía término y voto, lo que **viola la seguridad de Raft**
+  (§5: un nodo podría votar dos veces en un término tras recuperarse). Entregado en dos incrementos:
+  - [x] **D1a** `consensus/raft_state_store.{hpp,cpp}` — `RaftStateStore`: almacén durable del estado en
+    un **registro fijo** (`crc:u32 | term:i64 | has_vote:u8 | voted_for:i32`, 17 B → cabe en un sector,
+    reescritura atómica) con **CRC32C** (delata *bit rot*/escrituras parciales) y **`fsync`** en `save`;
+    `load` defensivo (fichero vacío = estado inicial; `Corrupt` si truncado o CRC no casa). Adaptador de
+    almacenamiento **separado** (SRP): `RaftPersistentState` sigue siendo un tipo de valor puro, con un
+    `restore(term, voto)` para reconstruir desde disco sin la regla de monotonía. 7 tests.
+  - [x] **D1b** Gancho de durabilidad en `RaftNode` consistente con **ADR-0015** (la FSM **no hace E/S**):
+    las mutaciones de `persistent_` (`advance_term`/`record_vote`) marcan `persistent_state_dirty()`; el
+    **portador** persiste `persistent_state()` con `RaftStateStore::save` **antes** de transportar
+    `take_messages()` (regla §5: guardar antes de responder al RPC) y llama `clear_persistent_dirty()`;
+    `restore_persistent_state()` siembra el estado leído de disco al arrancar. Tests: *dirty* tras
+    votar/avanzar término, `restore` no marca *dirty*, y **round-trip** (voto persistido sobrevive a un
+    "reinicio" → el nodo **no revota** a otro candidato en el mismo término). Verde en GCC/Clang/ASan;
+    format/tidy limpios. **Pendiente (D3):** que el portador real (server/arnés) invoque el `save` en el
+    bucle; aquí queda el mecanismo y su prueba de extremo a extremo.
 - [ ] **D2** **Snapshots / compactación** del log de Raft (`InstallSnapshot` ya tiene RPC en C2): truncar
   el prefijo aplicado para acotar el crecimiento del log y poner al día a un seguidor muy rezagado.
 - [ ] **D3** **Swap-in en caliente** del stack Raft + multi-reactor en el `Server` vivo con **transporte

@@ -20,6 +20,7 @@
 #include "consensus/raft_log.hpp"
 #include "consensus/raft_rpc.hpp"
 #include "consensus/raft_state.hpp"
+#include "consensus/raft_state_store.hpp"
 #include "storage/log_config.hpp"
 #include "storage/partition_log.hpp"
 
@@ -37,6 +38,7 @@ public:
     TempDir& operator=(const TempDir&) = delete;
 
     [[nodiscard]] std::string meta_path() const { return (path_ / "raft-meta").string(); }
+    [[nodiscard]] std::string state_path() const { return (path_ / "raft-state").string(); }
     [[nodiscard]] std::filesystem::path log_dir() const { return path_ / "log"; }
 
 private:
@@ -503,6 +505,67 @@ TEST(RaftNode, Learner_NoEsDestinoValidoDeTransferencia) {
     const auto result = a->node->transfer_leadership(3);  // 3 es learner.
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code(), nexus::ErrorCode::InvalidArgument);
+}
+
+// --- D1b: gancho de durabilidad del estado persistente (term/voto) ---
+
+TEST(RaftNode, PersistentDirty_TrasConcederVoto_EsTrueHastaLimpiar) {
+    auto box = make_node(1, {2}, "dirty_vote");
+    EXPECT_FALSE(box->node->persistent_state_dirty());
+
+    const nexus::RequestVoteArgs args{
+        .term = 3, .candidate_id = 2, .last_log_index = 0, .last_log_term = 0, .pre_vote = false};
+    ASSERT_TRUE(box->node->on_request_vote(at(100), args).vote_granted);
+    EXPECT_TRUE(box->node->persistent_state_dirty());  // votar mutó el estado persistente.
+
+    box->node->clear_persistent_dirty();
+    EXPECT_FALSE(box->node->persistent_state_dirty());
+}
+
+TEST(RaftNode, PersistentDirty_TrasAvanzarTermino_EsTrue) {
+    auto box = make_node(1, {}, "dirty_term");  // nodo único: se autoelige.
+    box->node->tick(at(0));
+    box->node->tick(at(2000));  // become_candidate avanza el término y se autovota.
+    ASSERT_TRUE(box->node->is_leader());
+    EXPECT_TRUE(box->node->persistent_state_dirty());
+}
+
+TEST(RaftNode, RestorePersistentState_RecuperaTerminoSinMarcarDirty) {
+    auto box = make_node(1, {2}, "restore");
+    box->node->restore_persistent_state(nexus::RaftPersistentState::restore(8, 2));
+    EXPECT_EQ(box->node->current_term(), 8);
+    EXPECT_FALSE(
+        box->node->persistent_state_dirty());  // recién leído del disco: nada que escribir.
+}
+
+// Round-trip completo: el voto persistido sobrevive a un reinicio y el nodo NO vuelve a votar a
+// otro candidato en el mismo término (§5.2: un voto por término). Sin persistencia, revotaría.
+TEST(RaftNode, Persistencia_VotoSobreviveReinicio_NoRevotaEnElMismoTermino) {
+    auto box = make_node(1, {2, 3}, "persist_vote");
+    const std::string state_path = box->dir->state_path();
+
+    const nexus::RequestVoteArgs first{
+        .term = 5, .candidate_id = 2, .last_log_index = 0, .last_log_term = 0, .pre_vote = false};
+    ASSERT_TRUE(box->node->on_request_vote(at(100), first).vote_granted);
+    ASSERT_TRUE(box->node->persistent_state_dirty());
+
+    // El portador persiste de forma durable y marca como limpio (regla de seguridad de Raft §5).
+    auto store = nexus::RaftStateStore::open(state_path);
+    ASSERT_TRUE(store.has_value());
+    ASSERT_TRUE(store->save(box->node->persistent_state()).has_value());
+    box->node->clear_persistent_dirty();
+
+    // "Reinicio": un nodo nuevo carga el estado del disco antes de la primera entrada.
+    auto restarted = make_node(1, {2, 3}, "persist_vote_restart");
+    const auto loaded = store->load();
+    ASSERT_TRUE(loaded.has_value());
+    restarted->node->restore_persistent_state(*loaded);
+    EXPECT_EQ(restarted->node->current_term(), 5);
+
+    // Otro candidato pide el voto en el mismo término 5: debe denegarse (ya votó al 2).
+    const nexus::RequestVoteArgs second{
+        .term = 5, .candidate_id = 3, .last_log_index = 0, .last_log_term = 0, .pre_vote = false};
+    EXPECT_FALSE(restarted->node->on_request_vote(at(200), second).vote_granted);
 }
 
 }  // namespace

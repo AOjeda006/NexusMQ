@@ -45,7 +45,7 @@ void RaftNode::reset_heartbeat_timer(MonoTime now) {
 
 void RaftNode::become_follower(MonoTime now, Term term) {
     if (term > persistent_.current_term()) {
-        persistent_.advance_term(term);  // término nuevo → resetea el voto.
+        advance_term(term);  // término nuevo → resetea el voto.
     }
     role_ = RaftRole::Follower;
     volatile_.clear_leader_progress();
@@ -70,8 +70,8 @@ void RaftNode::start_pre_election(MonoTime now) {
 }
 
 void RaftNode::become_candidate(MonoTime now) {
-    persistent_.advance_term(persistent_.current_term() + 1);
-    persistent_.record_vote(self_);  // se vota a sí mismo.
+    advance_term(persistent_.current_term() + 1);
+    record_vote(self_);  // se vota a sí mismo.
     role_ = RaftRole::Candidate;
     leader_id_.reset();
     votes_granted_.clear();
@@ -232,7 +232,7 @@ RequestVoteReply RaftNode::on_request_vote(MonoTime now, const RequestVoteArgs& 
     const std::optional<NodeId> voted = persistent_.voted_for();
     const bool can_vote = !voted.has_value() || *voted == args.candidate_id;
     if (can_vote && log_is_up_to_date(args.last_log_index, args.last_log_term)) {
-        persistent_.record_vote(args.candidate_id);
+        record_vote(args.candidate_id);
         reset_election_timer(now);  // conceder un voto cuenta como contacto válido.
         reply.vote_granted = true;
     }
