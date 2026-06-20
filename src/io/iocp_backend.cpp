@@ -6,7 +6,8 @@
 ///   el SO notifica al completarse), así que comparten el puerto `Proactor` y el bucle del reactor.
 ///   Toda la maquinaria Win32/Winsock (puerto, `OVERLAPPED` en vuelo, `AcceptEx`) se confina en el
 ///   *pimpl* `Port` (RAII), sin filtrar `<windows.h>` al resto del árbol. **Compile-verificado con
-///   MinGW-w64**; la verificación en runtime queda pendiente de una máquina/CI Windows.
+///   MinGW-w64** y **verificado en runtime sobre Windows con MSVC** (arnés `tools/wincheck`,
+///   ADR-0023).
 
 #include "io/iocp_backend.hpp"
 

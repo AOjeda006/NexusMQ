@@ -5,10 +5,11 @@
 /// @details Espejo Windows del backend io_uring: ambos son **proactores** (se inicia la operación y
 ///   el SO notifica al completarse), de modo que comparten el puerto `Proactor` sin tocar el bucle
 ///   del reactor. La implementación (`iocp_backend.cpp`) está **compile-verificada con MinGW-w64**
-///   (headers Win32 reales) y enlaza contra `ws2_32`/`mswsock`; la verificación en **runtime**
-///   queda pendiente de una máquina/CI Windows (ver ADR-0022, que reemplaza al ADR-0021). Todo el
-///   contenido va bajo `#ifdef _WIN32`: en Linux este encabezado es vacío y no afecta a la build ni
-///   a la puerta de calidad. La maquinaria Win32/Winsock se confina en el *pimpl* `Port` (no filtra
+///   (headers Win32 reales) y, además, **verificada en runtime sobre Windows con MSVC** (arnés
+///   `tools/wincheck`; ver ADR-0023, que reemplaza al ADR-0022). Enlaza contra `ws2_32`/`mswsock`.
+///   Todo el contenido va bajo `#ifdef _WIN32`: en Linux este encabezado es vacío y no afecta a la
+///   build ni a la puerta de calidad. La maquinaria Win32/Winsock se confina en el *pimpl* `Port`
+///   (no filtra
 ///   `<windows.h>`).
 
 #pragma once
@@ -48,8 +49,8 @@ namespace nexus {
 ///   Toda la maquinaria Win32 (puerto, `OVERLAPPED` en vuelo, punteros a funciones de extensión
 ///   como `AcceptEx`) se confina en un *pimpl* RAII, sin filtrar `<windows.h>`/`<winsock2.h>` al
 ///   árbol.
-/// @note Implementado en `iocp_backend.cpp` (compile-verificado con MinGW; runtime pendiente de
-///   Windows). Ver ADR-0022.
+/// @note Implementado en `iocp_backend.cpp` (compile-verificado con MinGW y verificado en runtime
+///   sobre Windows con MSVC vía `tools/wincheck`). Ver ADR-0023.
 class IocpBackend final : public Proactor {
 public:
     /// @brief Crea el puerto de *completions* dimensionado para @p entries operaciones en vuelo.
