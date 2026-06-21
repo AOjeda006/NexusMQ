@@ -40,23 +40,23 @@ AdminRouter::AdminRouter(RestGateway& rest, HealthMonitor& health, MetricsRegist
                          Clock clock)
     : rest_(rest), health_(health), metrics_(metrics), clock_(std::move(clock)) {}
 
-HttpResponse AdminRouter::handle(const HttpRequest& request) const {
+task<HttpResponse> AdminRouter::handle(const HttpRequest& request) const {
     const std::string_view path = request.path();
     if (path == "/metrics") {
         if (!is_read_method(request.method)) {
-            return text_response(405, "text/plain; charset=utf-8", "method not allowed\n");
+            co_return text_response(405, "text/plain; charset=utf-8", "method not allowed\n");
         }
-        return text_response(200, "text/plain; version=0.0.4; charset=utf-8",
-                             metrics_.render_prometheus());
+        co_return text_response(200, "text/plain; version=0.0.4; charset=utf-8",
+                                metrics_.render_prometheus());
     }
     if (path == "/healthz") {
-        return health_.liveness();
+        co_return health_.liveness();
     }
     if (path == "/readyz") {
-        return health_.readiness();
+        co_return health_.readiness();
     }
     const std::int64_t now = clock_ ? clock_() : system_now_seconds();
-    return rest_.handle(request, now);
+    co_return co_await rest_.handle(request, now);
 }
 
 }  // namespace nexus

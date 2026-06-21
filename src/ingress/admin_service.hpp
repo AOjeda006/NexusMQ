@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "common/error.hpp"
+#include "common/task.hpp"
 #include "ingress/pagination.hpp"
 
 namespace nexus {
@@ -71,11 +72,15 @@ public:
     AdminService& operator=(AdminService&&) = delete;
     virtual ~AdminService() = default;
 
-    /// Crea un topic según @p spec. `InvalidArgument` si ya existe o los parámetros no son válidos.
-    [[nodiscard]] virtual expected<TopicSummary> create_topic(const CreateTopicSpec& spec) = 0;
+    /// @brief Crea un topic según @p spec. `InvalidArgument` si ya existe o los parámetros no son
+    ///   válidos.
+    /// @details Corrutina: la creación puede propagarse a varios núcleos por paso de mensajes
+    ///   (`call_on`, ADR-0026), por eso devuelve `task` (el borde REST la `co_await`ea).
+    [[nodiscard]] virtual task<expected<TopicSummary>> create_topic(
+        const CreateTopicSpec& spec) = 0;
 
-    /// Borra el topic @p name. `NotFound` si no existe.
-    [[nodiscard]] virtual expected<void> delete_topic(std::string_view name) = 0;
+    /// @brief Borra el topic @p name. `NotFound` si no existe. Corrutina (fan-out cross-core).
+    [[nodiscard]] virtual task<expected<void>> delete_topic(std::string_view name) = 0;
 
     /// Describe el topic @p name (resumen + particiones). `NotFound` si no existe.
     [[nodiscard]] virtual expected<TopicDescription> describe_topic(

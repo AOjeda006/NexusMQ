@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 
+#include "common/task.hpp"
 #include "ingress/admin_service.hpp"
 #include "ingress/http.hpp"
 #include "ingress/jwt.hpp"
@@ -38,20 +39,23 @@ public:
     RestGateway(AdminService& admin, const JwtVerifier* verifier, Config config);
 
     /// @brief Atiende una petición HTTP ya parseada. @p now_unix_seconds: «ahora» para el JWT.
-    [[nodiscard]] HttpResponse handle(const HttpRequest& request,
-                                      std::int64_t now_unix_seconds) const;
+    /// @details Corrutina: las rutas que mutan topics (POST/DELETE) pueden propagar el cambio a
+    ///   varios núcleos por paso de mensajes (ADR-0026); las de solo lectura completan sin
+    ///   suspenderse.
+    [[nodiscard]] task<HttpResponse> handle(const HttpRequest& request,
+                                            std::int64_t now_unix_seconds) const;
 
 private:
     [[nodiscard]] expected<Principal> authenticate(const HttpRequest& request,
                                                    std::int64_t now_unix_seconds) const;
-    [[nodiscard]] HttpResponse route_topics(const HttpRequest& request,
-                                            std::string_view resource) const;
+    [[nodiscard]] task<HttpResponse> route_topics(const HttpRequest& request,
+                                                  std::string_view resource) const;
     [[nodiscard]] HttpResponse route_groups(const HttpRequest& request) const;
     [[nodiscard]] HttpResponse list_topics(const HttpRequest& request) const;
-    [[nodiscard]] HttpResponse create_topic(const HttpRequest& request) const;
+    [[nodiscard]] task<HttpResponse> create_topic(const HttpRequest& request) const;
     [[nodiscard]] HttpResponse describe_topic(const HttpRequest& request,
                                               std::string_view name) const;
-    [[nodiscard]] HttpResponse delete_topic(std::string_view name) const;
+    [[nodiscard]] task<HttpResponse> delete_topic(std::string_view name) const;
 
     AdminService& admin_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     const JwtVerifier* verifier_;

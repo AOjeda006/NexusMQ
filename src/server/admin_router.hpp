@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 
+#include "common/task.hpp"
 #include "ingress/health_monitor.hpp"
 #include "ingress/http.hpp"
 #include "ingress/rest_gateway.hpp"
@@ -35,7 +36,9 @@ public:
                 Clock clock = {});
 
     /// @brief Atiende una petición HTTP ya parseada y devuelve la respuesta.
-    [[nodiscard]] HttpResponse handle(const HttpRequest& request) const;
+    /// @details Corrutina: health/metrics completan sin suspenderse; el REST admin se delega al
+    ///   `RestGateway` (que puede propagar cambios de topic a varios núcleos, ADR-0026).
+    [[nodiscard]] task<HttpResponse> handle(const HttpRequest& request) const;
 
 private:
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)

@@ -6,13 +6,26 @@
 
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "broker/topic_manager.hpp"
 #include "common/error.hpp"
+#include "common/task.hpp"
+#include "ingress/admin_service.hpp"
 #include "ingress/pagination.hpp"
 
 namespace {
+
+// `create_topic`/`delete_topic` son ahora corrutinas; se conducen a término con `sync_wait` (sin
+// E/S real en tests). Azúcar para no repetirlo en cada caso.
+nexus::expected<nexus::TopicSummary> run_create(nexus::AdminApi& admin,
+                                                const nexus::CreateTopicSpec& spec) {
+    return nexus::sync_wait(admin.create_topic(spec));
+}
+nexus::expected<void> run_delete(nexus::AdminApi& admin, std::string_view name) {
+    return nexus::sync_wait(admin.delete_topic(name));
+}
 
 class TempDir {
 public:
@@ -40,7 +53,7 @@ TEST(AdminApi, CreateTopic_DevuelveResumen) {
     nexus::AdminApi admin{topics, kNodeId};
 
     const nexus::CreateTopicSpec spec{.name = "orders", .partition_count = 3};
-    const auto summary = admin.create_topic(spec);
+    const auto summary = run_create(admin, spec);
     ASSERT_TRUE(summary.has_value());
     EXPECT_EQ(summary->name, "orders");
     EXPECT_EQ(summary->partition_count, 3);
@@ -52,8 +65,7 @@ TEST(AdminApi, CreateTopic_NombreVacio_Rechaza) {
     nexus::TopicManager topics{dir.path()};
     nexus::AdminApi admin{topics, kNodeId};
 
-    const auto result =
-        admin.create_topic(nexus::CreateTopicSpec{.name = "", .partition_count = 1});
+    const auto result = run_create(admin, nexus::CreateTopicSpec{.name = "", .partition_count = 1});
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code(), nexus::ErrorCode::InvalidArgument);
 }
@@ -63,26 +75,26 @@ TEST(AdminApi, CreateTopic_Duplicado_Rechaza) {
     nexus::TopicManager topics{dir.path()};
     nexus::AdminApi admin{topics, kNodeId};
 
-    ASSERT_TRUE(admin.create_topic(nexus::CreateTopicSpec{.name = "t", .partition_count = 1}));
-    EXPECT_FALSE(admin.create_topic(nexus::CreateTopicSpec{.name = "t", .partition_count = 1}));
+    ASSERT_TRUE(run_create(admin, nexus::CreateTopicSpec{.name = "t", .partition_count = 1}));
+    EXPECT_FALSE(run_create(admin, nexus::CreateTopicSpec{.name = "t", .partition_count = 1}));
 }
 
 TEST(AdminApi, DeleteTopic_QuitaElTopic) {
     TempDir dir{"del"};
     nexus::TopicManager topics{dir.path()};
     nexus::AdminApi admin{topics, kNodeId};
-    ASSERT_TRUE(admin.create_topic(nexus::CreateTopicSpec{.name = "t", .partition_count = 1}));
+    ASSERT_TRUE(run_create(admin, nexus::CreateTopicSpec{.name = "t", .partition_count = 1}));
 
-    EXPECT_TRUE(admin.delete_topic("t").has_value());
+    EXPECT_TRUE(run_delete(admin, "t").has_value());
     EXPECT_EQ(topics.topic_count(), 0U);
-    EXPECT_FALSE(admin.delete_topic("t").has_value());  // ya no existe.
+    EXPECT_FALSE(run_delete(admin, "t").has_value());  // ya no existe.
 }
 
 TEST(AdminApi, DescribeTopic_DevuelveParticiones) {
     TempDir dir{"desc"};
     nexus::TopicManager topics{dir.path()};
     nexus::AdminApi admin{topics, kNodeId};
-    ASSERT_TRUE(admin.create_topic(nexus::CreateTopicSpec{.name = "orders", .partition_count = 2}));
+    ASSERT_TRUE(run_create(admin, nexus::CreateTopicSpec{.name = "orders", .partition_count = 2}));
 
     const auto description = admin.describe_topic("orders");
     ASSERT_TRUE(description.has_value());
@@ -108,7 +120,7 @@ TEST(AdminApi, ListTopics_OrdenadosYPaginados) {
     nexus::TopicManager topics{dir.path()};
     nexus::AdminApi admin{topics, kNodeId};
     for (const char* name : {"charlie", "alpha", "bravo", "delta"}) {
-        ASSERT_TRUE(admin.create_topic(nexus::CreateTopicSpec{.name = name, .partition_count = 1}));
+        ASSERT_TRUE(run_create(admin, nexus::CreateTopicSpec{.name = name, .partition_count = 1}));
     }
 
     const auto first = admin.list_topics(nexus::Page{.number = 1, .size = 2});

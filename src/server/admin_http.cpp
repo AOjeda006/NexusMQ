@@ -142,7 +142,7 @@ task<void> serve_admin_connection(Proactor& proactor, Socket sock, const AdminRo
     const expected<HttpRequest> request = co_await read_http_request(proactor, sock, limits);
     HttpResponse response;
     if (request) {
-        response = router.handle(*request);
+        response = co_await router.handle(*request);
     } else if (request.error().code() == ErrorCode::Shutdown) {
         co_return;  // cierre limpio sin datos: nada que responder.
     } else {

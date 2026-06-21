@@ -12,6 +12,7 @@
 #include "common/base64.hpp"
 #include "common/error.hpp"
 #include "common/sha256.hpp"
+#include "common/task.hpp"
 #include "ingress/admin_service.hpp"
 #include "ingress/http.hpp"
 #include "ingress/jwt.hpp"
@@ -28,22 +29,23 @@ public:
     bool describe_fails = false;
     bool delete_fails = false;
 
-    nexus::expected<nexus::TopicSummary> create_topic(const nexus::CreateTopicSpec& spec) override {
+    nexus::task<nexus::expected<nexus::TopicSummary>> create_topic(
+        const nexus::CreateTopicSpec& spec) override {
         last_spec = spec;
         if (create_fails) {
-            return nexus::make_error(nexus::ErrorCode::InvalidArgument, "el topic ya existe");
+            co_return nexus::make_error(nexus::ErrorCode::InvalidArgument, "el topic ya existe");
         }
-        return nexus::TopicSummary{.name = spec.name,
-                                   .partition_count = spec.partition_count,
-                                   .replication_factor = spec.replication_factor,
-                                   .created_at_ms = 123};
+        co_return nexus::TopicSummary{.name = spec.name,
+                                      .partition_count = spec.partition_count,
+                                      .replication_factor = spec.replication_factor,
+                                      .created_at_ms = 123};
     }
 
-    nexus::expected<void> delete_topic(std::string_view /*name*/) override {
+    nexus::task<nexus::expected<void>> delete_topic(std::string_view /*name*/) override {
         if (delete_fails) {
-            return nexus::make_error(nexus::ErrorCode::NotFound, "topic inexistente");
+            co_return nexus::make_error(nexus::ErrorCode::NotFound, "topic inexistente");
         }
-        return {};
+        co_return nexus::expected<void>{};
     }
 
     nexus::expected<nexus::TopicDescription> describe_topic(std::string_view name) const override {
@@ -79,6 +81,13 @@ nexus::HttpRequest make_request(nexus::HttpMethod method, std::string target,
     return request;
 }
 
+// `handle` es ahora una corrutina (`task<HttpResponse>`); en los tests no hace E/S y se conduce a
+// término con `sync_wait`. Azúcar para no repetirlo en cada caso.
+nexus::HttpResponse run_handle(const nexus::RestGateway& gateway, const nexus::HttpRequest& request,
+                               std::int64_t now_unix_seconds) {
+    return nexus::sync_wait(gateway.handle(request, now_unix_seconds));
+}
+
 constexpr std::string_view kSecret = "clave-del-gateway";
 
 std::string make_token(std::string_view payload_json) {
@@ -94,7 +103,8 @@ TEST(RestGateway, ListTopics_200ConItems) {
     admin.topics = {nexus::TopicSummary{.name = "orders", .partition_count = 3}};
     const nexus::RestGateway gateway{admin, nullptr};
 
-    const auto response = gateway.handle(make_request(nexus::HttpMethod::Get, "/api/v1/topics"), 0);
+    const auto response =
+        run_handle(gateway, make_request(nexus::HttpMethod::Get, "/api/v1/topics"), 0);
     EXPECT_EQ(response.status, 200);
     EXPECT_NE(response.body.find(R"("items":[)"), std::string::npos);
     EXPECT_NE(response.body.find(R"("name":"orders")"), std::string::npos);
@@ -105,10 +115,11 @@ TEST(RestGateway, CreateTopic_201ConLocationYSpec) {
     FakeAdmin admin;
     const nexus::RestGateway gateway{admin, nullptr};
 
-    const auto response = gateway.handle(
-        make_request(nexus::HttpMethod::Post, "/api/v1/topics",
-                     R"({"name":"orders","partitionCount":4,"replicationFactor":1})"),
-        0);
+    const auto response =
+        run_handle(gateway,
+                   make_request(nexus::HttpMethod::Post, "/api/v1/topics",
+                                R"({"name":"orders","partitionCount":4,"replicationFactor":1})"),
+                   0);
     EXPECT_EQ(response.status, 201);
     EXPECT_EQ(admin.last_spec.name, "orders");
     EXPECT_EQ(admin.last_spec.partition_count, 4);
@@ -126,15 +137,15 @@ TEST(RestGateway, CreateTopic_CuerpoNoJson_400) {
     FakeAdmin admin;
     const nexus::RestGateway gateway{admin, nullptr};
     const auto response =
-        gateway.handle(make_request(nexus::HttpMethod::Post, "/api/v1/topics", "no-json"), 0);
+        run_handle(gateway, make_request(nexus::HttpMethod::Post, "/api/v1/topics", "no-json"), 0);
     EXPECT_EQ(response.status, 400);
 }
 
 TEST(RestGateway, CreateTopic_SinName_400) {
     FakeAdmin admin;
     const nexus::RestGateway gateway{admin, nullptr};
-    const auto response =
-        gateway.handle(make_request(nexus::HttpMethod::Post, "/api/v1/topics", R"({"x":1})"), 0);
+    const auto response = run_handle(
+        gateway, make_request(nexus::HttpMethod::Post, "/api/v1/topics", R"({"x":1})"), 0);
     EXPECT_EQ(response.status, 400);
 }
 
@@ -142,8 +153,8 @@ TEST(RestGateway, CreateTopic_ErrorDelAdmin_SeTraduceRfc7807) {
     FakeAdmin admin;
     admin.create_fails = true;
     const nexus::RestGateway gateway{admin, nullptr};
-    const auto response = gateway.handle(
-        make_request(nexus::HttpMethod::Post, "/api/v1/topics", R"({"name":"dup"})"), 0);
+    const auto response = run_handle(
+        gateway, make_request(nexus::HttpMethod::Post, "/api/v1/topics", R"({"name":"dup"})"), 0);
     EXPECT_EQ(response.status, 400);  // InvalidArgument → 400.
     bool problem_ct = false;
     for (const auto& [key, value] : response.headers) {
@@ -158,7 +169,7 @@ TEST(RestGateway, DescribeTopic_200ConParticiones) {
     FakeAdmin admin;
     const nexus::RestGateway gateway{admin, nullptr};
     const auto response =
-        gateway.handle(make_request(nexus::HttpMethod::Get, "/api/v1/topics/orders"), 0);
+        run_handle(gateway, make_request(nexus::HttpMethod::Get, "/api/v1/topics/orders"), 0);
     EXPECT_EQ(response.status, 200);
     EXPECT_NE(response.body.find(R"("partitions":[)"), std::string::npos);
     EXPECT_NE(response.body.find(R"("highWatermark":9)"), std::string::npos);
@@ -169,7 +180,7 @@ TEST(RestGateway, DescribeTopic_NoExiste_404) {
     admin.describe_fails = true;
     const nexus::RestGateway gateway{admin, nullptr};
     const auto response =
-        gateway.handle(make_request(nexus::HttpMethod::Get, "/api/v1/topics/x"), 0);
+        run_handle(gateway, make_request(nexus::HttpMethod::Get, "/api/v1/topics/x"), 0);
     EXPECT_EQ(response.status, 404);
 }
 
@@ -177,7 +188,7 @@ TEST(RestGateway, DeleteTopic_204) {
     FakeAdmin admin;
     const nexus::RestGateway gateway{admin, nullptr};
     const auto response =
-        gateway.handle(make_request(nexus::HttpMethod::Delete, "/api/v1/topics/orders"), 0);
+        run_handle(gateway, make_request(nexus::HttpMethod::Delete, "/api/v1/topics/orders"), 0);
     EXPECT_EQ(response.status, 204);
     EXPECT_TRUE(response.body.empty());
 }
@@ -187,7 +198,7 @@ TEST(RestGateway, DeleteTopic_NoExiste_404) {
     admin.delete_fails = true;
     const nexus::RestGateway gateway{admin, nullptr};
     const auto response =
-        gateway.handle(make_request(nexus::HttpMethod::Delete, "/api/v1/topics/x"), 0);
+        run_handle(gateway, make_request(nexus::HttpMethod::Delete, "/api/v1/topics/x"), 0);
     EXPECT_EQ(response.status, 404);
 }
 
@@ -195,14 +206,15 @@ TEST(RestGateway, ListTopics_PaginacionInvalida_400) {
     FakeAdmin admin;
     const nexus::RestGateway gateway{admin, nullptr};
     const auto response =
-        gateway.handle(make_request(nexus::HttpMethod::Get, "/api/v1/topics?page=0"), 0);
+        run_handle(gateway, make_request(nexus::HttpMethod::Get, "/api/v1/topics?page=0"), 0);
     EXPECT_EQ(response.status, 400);
 }
 
 TEST(RestGateway, MetodoNoPermitido_405) {
     FakeAdmin admin;
     const nexus::RestGateway gateway{admin, nullptr};
-    const auto response = gateway.handle(make_request(nexus::HttpMethod::Put, "/api/v1/topics"), 0);
+    const auto response =
+        run_handle(gateway, make_request(nexus::HttpMethod::Put, "/api/v1/topics"), 0);
     EXPECT_EQ(response.status, 405);
 }
 
@@ -210,7 +222,7 @@ TEST(RestGateway, RutaDesconocida_404) {
     FakeAdmin admin;
     const nexus::RestGateway gateway{admin, nullptr};
     const auto response =
-        gateway.handle(make_request(nexus::HttpMethod::Get, "/api/v1/desconocido"), 0);
+        run_handle(gateway, make_request(nexus::HttpMethod::Get, "/api/v1/desconocido"), 0);
     EXPECT_EQ(response.status, 404);
 }
 
@@ -219,7 +231,8 @@ TEST(RestGateway, ListGroups_200) {
     admin.groups = {nexus::GroupSummary{
         .group_id = "g1", .state = "Stable", .generation = 2, .member_count = 3}};
     const nexus::RestGateway gateway{admin, nullptr};
-    const auto response = gateway.handle(make_request(nexus::HttpMethod::Get, "/api/v1/groups"), 0);
+    const auto response =
+        run_handle(gateway, make_request(nexus::HttpMethod::Get, "/api/v1/groups"), 0);
     EXPECT_EQ(response.status, 200);
     EXPECT_NE(response.body.find(R"("groupId":"g1")"), std::string::npos);
     EXPECT_NE(response.body.find(R"("memberCount":3)"), std::string::npos);
@@ -229,7 +242,8 @@ TEST(RestGateway, Auth_SinToken_401) {
     FakeAdmin admin;
     const nexus::JwtVerifier verifier{std::string{kSecret}};
     const nexus::RestGateway gateway{admin, &verifier};
-    const auto response = gateway.handle(make_request(nexus::HttpMethod::Get, "/api/v1/topics"), 0);
+    const auto response =
+        run_handle(gateway, make_request(nexus::HttpMethod::Get, "/api/v1/topics"), 0);
     EXPECT_EQ(response.status, 401);
 }
 
@@ -241,7 +255,7 @@ TEST(RestGateway, Auth_TokenValido_200) {
     nexus::HttpRequest request = make_request(nexus::HttpMethod::Get, "/api/v1/topics");
     request.headers.emplace_back("Authorization",
                                  "Bearer " + make_token(R"({"sub":"admin","exp":2000})"));
-    const auto response = gateway.handle(request, 1000);
+    const auto response = run_handle(gateway, request, 1000);
     EXPECT_EQ(response.status, 200);
 }
 
@@ -253,7 +267,7 @@ TEST(RestGateway, Auth_TokenExpirado_401) {
     nexus::HttpRequest request = make_request(nexus::HttpMethod::Get, "/api/v1/topics");
     request.headers.emplace_back("Authorization",
                                  "Bearer " + make_token(R"({"sub":"admin","exp":500})"));
-    const auto response = gateway.handle(request, 1000);  // 1000 > 500 → expirado.
+    const auto response = run_handle(gateway, request, 1000);  // 1000 > 500 → expirado.
     EXPECT_EQ(response.status, 401);
 }
 

@@ -957,6 +957,12 @@ Harness de benchmark vacío y CI:
       `managers()` para `bind_cluster`; `create_topic` pre-run replica a todos). En N=1 (por defecto) es
       idéntico al manager único previo; con N>1 cada partición opera ya sobre el manager de su reactor dueño.
       Test del catálogo (réplica por núcleo, duplicado, conteo inválido). 661/661 en GCC/Clang/ASan/**TSan**.
+    - [x] **D3.4c-6a** Cadena de admin **asíncrona** (prepara el fan-out cross-core del admin REST, ADR-0026):
+      `AdminService::create_topic`/`delete_topic` pasan a `task<expected<...>>` (corrutinas virtuales);
+      `RestGateway::handle`/`route_topics`/`create_topic`/`delete_topic` y `AdminRouter::handle` devuelven
+      `task<HttpResponse>` (las rutas de solo lectura completan sin suspenderse); `serve_admin_connection`
+      `co_await`ea. Cambio **sin alterar comportamiento** (el admin sigue tocando solo el núcleo 0); dobles de
+      test y casos `handle` conducidos con `sync_wait`. 661/661 en GCC/Clang/ASan/**TSan**; format + tidy limpios.
     - [ ] **D3.4c** *(resto)* Fan-out de **admin REST** CreateTopic/DeleteTopic a todos los núcleos (necesita
       ruta **async** en `AdminApi`/`RestGateway`/`AdminRouter`; hoy el admin solo toca el manager del núcleo 0
       → N>1 no activado por defecto); grupos/offsets por `hash(group_id)`; encender N>1 por defecto + TSan/estrés.

@@ -41,9 +41,10 @@ std::vector<T> apply_page(std::vector<T> items, Page page) {
 AdminApi::AdminApi(TopicManager& topics, NodeId node_id, GroupLister group_lister)
     : topics_(topics), node_id_(node_id), group_lister_(std::move(group_lister)) {}
 
-expected<TopicSummary> AdminApi::create_topic(const CreateTopicSpec& spec) {
+task<expected<TopicSummary>> AdminApi::create_topic(const CreateTopicSpec& spec) {
     if (spec.name.empty()) {
-        return make_error(ErrorCode::InvalidArgument, "el nombre del topic no puede estar vacío");
+        co_return make_error(ErrorCode::InvalidArgument,
+                             "el nombre del topic no puede estar vacío");
     }
     TopicConfig config;
     if (spec.segment_bytes > 0) {
@@ -52,15 +53,16 @@ expected<TopicSummary> AdminApi::create_topic(const CreateTopicSpec& spec) {
     config.retention_ms = spec.retention_ms;
     config.retention_bytes = spec.retention_bytes;
 
-    auto meta = topics_.create_topic(spec.name, spec.partition_count, config);
+    const expected<TopicMetadata> meta =
+        topics_.create_topic(spec.name, spec.partition_count, config);
     if (!meta) {
-        return std::unexpected{meta.error()};
+        co_return std::unexpected{meta.error()};
     }
-    return to_summary(*meta);
+    co_return to_summary(*meta);
 }
 
-expected<void> AdminApi::delete_topic(std::string_view name) {
-    return topics_.delete_topic(name);
+task<expected<void>> AdminApi::delete_topic(std::string_view name) {
+    co_return topics_.delete_topic(name);
 }
 
 expected<TopicDescription> AdminApi::describe_topic(std::string_view name) const {

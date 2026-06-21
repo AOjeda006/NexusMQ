@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "common/error.hpp"
+#include "common/task.hpp"
 #include "ingress/admin_service.hpp"
 #include "ingress/health_monitor.hpp"
 #include "ingress/http.hpp"
@@ -23,10 +24,13 @@ class FakeAdmin : public nexus::AdminService {
 public:
     std::vector<nexus::TopicSummary> topics;
 
-    nexus::expected<nexus::TopicSummary> create_topic(const nexus::CreateTopicSpec& spec) override {
-        return nexus::TopicSummary{.name = spec.name};
+    nexus::task<nexus::expected<nexus::TopicSummary>> create_topic(
+        const nexus::CreateTopicSpec& spec) override {
+        co_return nexus::TopicSummary{.name = spec.name};
     }
-    nexus::expected<void> delete_topic(std::string_view /*name*/) override { return {}; }
+    nexus::task<nexus::expected<void>> delete_topic(std::string_view /*name*/) override {
+        co_return nexus::expected<void>{};
+    }
     nexus::expected<nexus::TopicDescription> describe_topic(
         std::string_view /*name*/) const override {
         return nexus::make_error(nexus::ErrorCode::NotFound, "no");
@@ -45,6 +49,12 @@ nexus::HttpRequest make_request(nexus::HttpMethod method, std::string target) {
     return request;
 }
 
+// `handle` es ahora una corrutina; se conduce a término con `sync_wait` (sin E/S real en tests).
+nexus::HttpResponse run_handle(const nexus::AdminRouter& router,
+                               const nexus::HttpRequest& request) {
+    return nexus::sync_wait(router.handle(request));
+}
+
 TEST(AdminRouter, Metrics_200ExposicionPrometheus) {
     FakeAdmin admin;
     nexus::RestGateway rest{admin, nullptr};
@@ -53,7 +63,7 @@ TEST(AdminRouter, Metrics_200ExposicionPrometheus) {
     metrics.counter("nexus_requests_total").inc(7);
     const nexus::AdminRouter router{rest, health, metrics};
 
-    const auto response = router.handle(make_request(nexus::HttpMethod::Get, "/metrics"));
+    const auto response = run_handle(router, make_request(nexus::HttpMethod::Get, "/metrics"));
     EXPECT_EQ(response.status, 200);
     EXPECT_NE(response.body.find("nexus_requests_total"), std::string::npos);
     bool prometheus_ct = false;
@@ -72,7 +82,7 @@ TEST(AdminRouter, Metrics_MetodoNoGet_405) {
     nexus::MetricsRegistry metrics;
     const nexus::AdminRouter router{rest, health, metrics};
 
-    const auto response = router.handle(make_request(nexus::HttpMethod::Post, "/metrics"));
+    const auto response = run_handle(router, make_request(nexus::HttpMethod::Post, "/metrics"));
     EXPECT_EQ(response.status, 405);
 }
 
@@ -83,7 +93,7 @@ TEST(AdminRouter, Healthz_200Liveness) {
     nexus::MetricsRegistry metrics;
     const nexus::AdminRouter router{rest, health, metrics};
 
-    const auto response = router.handle(make_request(nexus::HttpMethod::Get, "/healthz"));
+    const auto response = run_handle(router, make_request(nexus::HttpMethod::Get, "/healthz"));
     EXPECT_EQ(response.status, 200);
     EXPECT_NE(response.body.find(R"("status":"ok")"), std::string::npos);
 }
@@ -95,7 +105,7 @@ TEST(AdminRouter, Readyz_AntesDeArrancar_503) {
     nexus::MetricsRegistry metrics;
     const nexus::AdminRouter router{rest, health, metrics};
 
-    const auto response = router.handle(make_request(nexus::HttpMethod::Get, "/readyz"));
+    const auto response = run_handle(router, make_request(nexus::HttpMethod::Get, "/readyz"));
     EXPECT_EQ(response.status, 503);
     EXPECT_NE(response.body.find(R"("status":"not_ready")"), std::string::npos);
 }
@@ -108,7 +118,8 @@ TEST(AdminRouter, Rest_DelegaEnGateway_200) {
     nexus::MetricsRegistry metrics;
     const nexus::AdminRouter router{rest, health, metrics};
 
-    const auto response = router.handle(make_request(nexus::HttpMethod::Get, "/api/v1/topics"));
+    const auto response =
+        run_handle(router, make_request(nexus::HttpMethod::Get, "/api/v1/topics"));
     EXPECT_EQ(response.status, 200);
     EXPECT_NE(response.body.find(R"("name":"orders")"), std::string::npos);
 }
@@ -120,7 +131,7 @@ TEST(AdminRouter, RutaDesconocida_DelegaEnGateway_404) {
     nexus::MetricsRegistry metrics;
     const nexus::AdminRouter router{rest, health, metrics};
 
-    const auto response = router.handle(make_request(nexus::HttpMethod::Get, "/desconocido"));
+    const auto response = run_handle(router, make_request(nexus::HttpMethod::Get, "/desconocido"));
     EXPECT_EQ(response.status, 404);
 }
 
@@ -134,7 +145,8 @@ TEST(AdminRouter, Rest_RelojInyectado_AplicaAlJwt) {
     const nexus::AdminRouter router{rest, health, metrics, []() -> std::int64_t { return 5000; }};
 
     // Sin token: el gateway exige autenticación → 401 (la ruta REST sí pasa por auth).
-    const auto response = router.handle(make_request(nexus::HttpMethod::Get, "/api/v1/topics"));
+    const auto response =
+        run_handle(router, make_request(nexus::HttpMethod::Get, "/api/v1/topics"));
     EXPECT_EQ(response.status, 401);
 }
 

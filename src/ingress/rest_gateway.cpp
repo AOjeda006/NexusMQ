@@ -104,47 +104,48 @@ expected<Principal> RestGateway::authenticate(const HttpRequest& request,
     return verifier_->verify(value.substr(kBearer.size()), now_unix_seconds);
 }
 
-HttpResponse RestGateway::handle(const HttpRequest& request, std::int64_t now_unix_seconds) const {
+task<HttpResponse> RestGateway::handle(const HttpRequest& request,
+                                       std::int64_t now_unix_seconds) const {
     const std::string_view path = request.path();
     if (const auto principal = authenticate(request, now_unix_seconds); !principal) {
-        return problem_explicit(401, std::string{principal.error().message()}, path);
+        co_return problem_explicit(401, std::string{principal.error().message()}, path);
     }
     if (!path.starts_with(config_.api_prefix)) {
-        return problem_explicit(404, "recurso no encontrado", path);
+        co_return problem_explicit(404, "recurso no encontrado", path);
     }
     const std::string_view resource = path.substr(config_.api_prefix.size());
     if (resource == "/topics" || resource.starts_with("/topics/")) {
-        return route_topics(request, resource);
+        co_return co_await route_topics(request, resource);
     }
     if (resource == "/groups") {
-        return route_groups(request);
+        co_return route_groups(request);
     }
-    return problem_explicit(404, "recurso no encontrado", path);
+    co_return problem_explicit(404, "recurso no encontrado", path);
 }
 
-HttpResponse RestGateway::route_topics(const HttpRequest& request,
-                                       std::string_view resource) const {
+task<HttpResponse> RestGateway::route_topics(const HttpRequest& request,
+                                             std::string_view resource) const {
     const std::string_view rest = resource.substr(std::string_view{"/topics"}.size());
     if (rest.empty()) {
         if (request.method == HttpMethod::Get) {
-            return list_topics(request);
+            co_return list_topics(request);
         }
         if (request.method == HttpMethod::Post) {
-            return create_topic(request);
+            co_return co_await create_topic(request);
         }
-        return problem_explicit(405, "método no permitido en /topics", request.path());
+        co_return problem_explicit(405, "método no permitido en /topics", request.path());
     }
     const std::string_view name = rest.substr(1);  // rest empieza por '/'.
     if (name.empty() || name.contains('/')) {
-        return problem_explicit(404, "recurso no encontrado", request.path());
+        co_return problem_explicit(404, "recurso no encontrado", request.path());
     }
     if (request.method == HttpMethod::Get) {
-        return describe_topic(request, name);
+        co_return describe_topic(request, name);
     }
     if (request.method == HttpMethod::Delete) {
-        return delete_topic(name);
+        co_return co_await delete_topic(name);
     }
-    return problem_explicit(405, "método no permitido en /topics/{name}", request.path());
+    co_return problem_explicit(405, "método no permitido en /topics/{name}", request.path());
 }
 
 HttpResponse RestGateway::list_topics(const HttpRequest& request) const {
@@ -156,14 +157,14 @@ HttpResponse RestGateway::list_topics(const HttpRequest& request) const {
     return json_response(200, paged_json(*page, topics, write_topic_summary));
 }
 
-HttpResponse RestGateway::create_topic(const HttpRequest& request) const {
+task<HttpResponse> RestGateway::create_topic(const HttpRequest& request) const {
     const auto json = parse_json(request.body);
     if (!json || !json->is_object()) {
-        return problem_explicit(400, "el cuerpo debe ser un objeto JSON", request.path());
+        co_return problem_explicit(400, "el cuerpo debe ser un objeto JSON", request.path());
     }
     const JsonValue* name = json->find("name");
     if (name == nullptr || !name->is_string()) {
-        return problem_explicit(400, "falta el campo 'name' (cadena)", request.path());
+        co_return problem_explicit(400, "falta el campo 'name' (cadena)", request.path());
     }
     CreateTopicSpec spec;
     spec.name = name->as_string();
@@ -177,15 +178,15 @@ HttpResponse RestGateway::create_topic(const HttpRequest& request) const {
     spec.partition_count = static_cast<std::int32_t>(partition_count);
     spec.replication_factor = static_cast<std::int16_t>(replication_factor);
 
-    const auto summary = admin_.create_topic(spec);
+    const expected<TopicSummary> summary = co_await admin_.create_topic(spec);
     if (!summary) {
-        return problem_response(summary.error(), request.path());
+        co_return problem_response(summary.error(), request.path());
     }
     JsonWriter writer;
     write_topic_summary(writer, *summary);
     HttpResponse response = json_response(201, writer.take());
     response.set_header("Location", config_.api_prefix + "/topics/" + summary->name);
-    return response;
+    co_return response;
 }
 
 HttpResponse RestGateway::describe_topic(const HttpRequest& request, std::string_view name) const {
@@ -214,16 +215,16 @@ HttpResponse RestGateway::describe_topic(const HttpRequest& request, std::string
     return json_response(200, writer.take());
 }
 
-HttpResponse RestGateway::delete_topic(std::string_view name) const {
-    const auto result = admin_.delete_topic(name);
+task<HttpResponse> RestGateway::delete_topic(std::string_view name) const {
+    const expected<void> result = co_await admin_.delete_topic(name);
     if (!result) {
-        return problem_response(result.error(),
-                                std::string{config_.api_prefix} + "/topics/" + std::string{name});
+        co_return problem_response(
+            result.error(), std::string{config_.api_prefix} + "/topics/" + std::string{name});
     }
     HttpResponse response;
     response.status = 204;
     response.reason = std::string{http_reason(204)};
-    return response;
+    co_return response;
 }
 
 HttpResponse RestGateway::route_groups(const HttpRequest& request) const {

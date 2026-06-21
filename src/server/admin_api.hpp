@@ -30,8 +30,8 @@ public:
 
     AdminApi(TopicManager& topics, NodeId node_id, GroupLister group_lister = {});
 
-    [[nodiscard]] expected<TopicSummary> create_topic(const CreateTopicSpec& spec) override;
-    [[nodiscard]] expected<void> delete_topic(std::string_view name) override;
+    [[nodiscard]] task<expected<TopicSummary>> create_topic(const CreateTopicSpec& spec) override;
+    [[nodiscard]] task<expected<void>> delete_topic(std::string_view name) override;
     [[nodiscard]] expected<TopicDescription> describe_topic(std::string_view name) const override;
     [[nodiscard]] std::vector<TopicSummary> list_topics(Page page) const override;
     [[nodiscard]] std::vector<GroupSummary> list_groups(Page page) const override;
