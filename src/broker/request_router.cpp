@@ -211,21 +211,21 @@ std::vector<ApiVersionRange> RequestRouter::supported_versions() {
     };
 }
 
-expected<void> RequestRouter::dispatch(ApiKey key, std::uint16_t /*api_version*/, Decoder& body,
-                                       Buffer& out) {
+task<expected<void>> RequestRouter::dispatch(ApiKey key, std::uint16_t /*api_version*/,
+                                             Decoder& body, Buffer& out) {
     Encoder enc{out};
     switch (key) {
         case ApiKey::ApiVersions: {
             const ApiVersionsResponse resp{.ranges = supported_versions()};
             resp.encode(enc);
-            return {};
+            co_return expected<void>{};
         }
         case ApiKey::Metadata: {
             const expected<MetadataRequest> req = MetadataRequest::decode(body);
             const MetadataResponse resp =
                 req ? handle_metadata(topics_, node_id_, host_, port_, *req) : MetadataResponse{};
             resp.encode(enc);
-            return {};
+            co_return expected<void>{};
         }
         case ApiKey::Produce: {
             const expected<ProduceRequest> req = ProduceRequest::decode(body);
@@ -233,7 +233,7 @@ expected<void> RequestRouter::dispatch(ApiKey key, std::uint16_t /*api_version*/
                 req ? handle_produce(topics_, *req)
                     : ProduceResponse{.error_code = WireError::InvalidRequest};
             resp.encode(enc);
-            return {};
+            co_return expected<void>{};
         }
         case ApiKey::Fetch: {
             const expected<FetchRequest> req = FetchRequest::decode(body);
@@ -241,13 +241,13 @@ expected<void> RequestRouter::dispatch(ApiKey key, std::uint16_t /*api_version*/
             if (!req) {
                 resp.error_code = WireError::InvalidRequest;
                 resp.encode(enc);
-                return {};
+                co_return expected<void>{};
             }
             const Partition* part = find_partition(topics_, req->topic, req->partition);
             if (part == nullptr) {
                 resp.error_code = WireError::UnknownTopicOrPartition;
                 resp.encode(enc);
-                return {};
+                co_return expected<void>{};
             }
             const std::size_t max_bytes =
                 req->max_bytes > 0 ? static_cast<std::size_t>(req->max_bytes) : kDefaultFetchBytes;
@@ -255,14 +255,14 @@ expected<void> RequestRouter::dispatch(ApiKey key, std::uint16_t /*api_version*/
             if (!result) {
                 resp.error_code = from_error(result.error());
                 resp.encode(enc);
-                return {};
+                co_return expected<void>{};
             }
             // `result` posee los bytes; se codifican mientras sigue vivo (vista zero-copy).
             resp.batches = result->batches.as_span();
             resp.high_watermark = part->high_watermark();
             resp.log_start_offset = part->log().log_start_offset();
             resp.encode(enc);
-            return {};
+            co_return expected<void>{};
         }
         case ApiKey::CreateTopic: {
             const expected<CreateTopicRequest> req = CreateTopicRequest::decode(body);
@@ -275,7 +275,7 @@ expected<void> RequestRouter::dispatch(ApiKey key, std::uint16_t /*api_version*/
                 resp.error_code = from_error(meta.error());
             }
             resp.encode(enc);
-            return {};
+            co_return expected<void>{};
         }
         case ApiKey::DeleteTopic: {
             const expected<DeleteTopicRequest> req = DeleteTopicRequest::decode(body);
@@ -286,34 +286,34 @@ expected<void> RequestRouter::dispatch(ApiKey key, std::uint16_t /*api_version*/
                 resp.error_code = from_error(deleted.error());
             }
             resp.encode(enc);
-            return {};
+            co_return expected<void>{};
         }
         case ApiKey::OffsetCommit: {
             handle_offset_commit(offsets_, body).encode(enc);
-            return {};
+            co_return expected<void>{};
         }
         case ApiKey::OffsetFetch: {
             handle_offset_fetch(offsets_, body).encode(enc);
-            return {};
+            co_return expected<void>{};
         }
         case ApiKey::JoinGroup: {
             handle_join_group(groups_, std::chrono::steady_clock::now(), body).encode(enc);
-            return {};
+            co_return expected<void>{};
         }
         case ApiKey::SyncGroup: {
             handle_sync_group(groups_, std::chrono::steady_clock::now(), body).encode(enc);
-            return {};
+            co_return expected<void>{};
         }
         case ApiKey::Heartbeat: {
             handle_heartbeat(groups_, std::chrono::steady_clock::now(), body).encode(enc);
-            return {};
+            co_return expected<void>{};
         }
         case ApiKey::LeaveGroup: {
             handle_leave_group(groups_, body).encode(enc);
-            return {};
+            co_return expected<void>{};
         }
     }
-    return make_error(ErrorCode::InvalidArgument, "ApiKey desconocida");
+    co_return make_error(ErrorCode::InvalidArgument, "ApiKey desconocida");
 }
 
 }  // namespace nexus

@@ -35,8 +35,8 @@ task<void> serve_connection(Proactor& proactor, Socket sock, RequestRouter& rout
 
         response_body.clear();
         Decoder body{frame->payload};
-        const expected<void> dispatched =
-            router.dispatch(frame->header.api_key, frame->header.api_version, body, response_body);
+        const expected<void> dispatched = co_await router.dispatch(
+            frame->header.api_key, frame->header.api_version, body, response_body);
         if (!dispatched) {
             break;  // ApiKey no soportada / petición irrecuperable → cerramos.
         }

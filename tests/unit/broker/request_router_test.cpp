@@ -13,6 +13,7 @@
 #include "common/bytes.hpp"
 #include "common/error.hpp"
 #include "common/record.hpp"
+#include "common/task.hpp"
 #include "common/types.hpp"
 #include "protocol/codec.hpp"
 #include "protocol/error_code.hpp"
@@ -60,6 +61,14 @@ std::vector<std::byte> encode_batch(std::int32_t count) {
     return {span.begin(), span.end()};
 }
 
+// `dispatch` es una corrutina (`task<expected<void>>`); en los tests se conduce a término con
+// `sync_wait` (no se suspende en E/S). Helper para no repetirlo en cada caso.
+nexus::expected<void> run_dispatch(nexus::RequestRouter& router, nexus::ApiKey key,
+                                   std::uint16_t version, nexus::Decoder& body,
+                                   nexus::Buffer& out) {
+    return nexus::sync_wait(router.dispatch(key, version, body, out));
+}
+
 TEST(RequestRouter, ApiVersions_DevuelveRangosSoportados) {
     TempDir dir{"apiver"};
     nexus::TopicManager topics{dir.path()};
@@ -68,7 +77,7 @@ TEST(RequestRouter, ApiVersions_DevuelveRangosSoportados) {
     const nexus::Buffer body = encode_request(nexus::ApiVersionsRequest{.client_version = 0});
     nexus::Decoder dec{body.as_span()};
     nexus::Buffer out;
-    ASSERT_TRUE(router.dispatch(nexus::ApiKey::ApiVersions, 0, dec, out).has_value());
+    ASSERT_TRUE(run_dispatch(router, nexus::ApiKey::ApiVersions, 0, dec, out).has_value());
 
     nexus::Decoder resp_dec{out.as_span()};
     const nexus::expected<nexus::ApiVersionsResponse> resp =
@@ -92,7 +101,7 @@ TEST(RequestRouter, Produce_AnexaYDevuelveBaseOffset) {
 
     nexus::Decoder dec{body.as_span()};
     nexus::Buffer out;
-    ASSERT_TRUE(router.dispatch(nexus::ApiKey::Produce, 0, dec, out).has_value());
+    ASSERT_TRUE(run_dispatch(router, nexus::ApiKey::Produce, 0, dec, out).has_value());
 
     nexus::Decoder resp_dec{out.as_span()};
     const nexus::expected<nexus::ProduceResponse> resp = nexus::ProduceResponse::decode(resp_dec);
@@ -114,7 +123,7 @@ TEST(RequestRouter, Produce_TopicInexistente_DevuelveUnknownTopic) {
 
     nexus::Decoder dec{body.as_span()};
     nexus::Buffer out;
-    ASSERT_TRUE(router.dispatch(nexus::ApiKey::Produce, 0, dec, out).has_value());
+    ASSERT_TRUE(run_dispatch(router, nexus::ApiKey::Produce, 0, dec, out).has_value());
 
     nexus::Decoder resp_dec{out.as_span()};
     const nexus::expected<nexus::ProduceResponse> resp = nexus::ProduceResponse::decode(resp_dec);
@@ -135,7 +144,7 @@ TEST(RequestRouter, ProduceLuegoFetch_DevuelveLosBytes) {
     nexus::Buffer pbody = encode_request(preq);
     nexus::Decoder pdec{pbody.as_span()};
     nexus::Buffer pout;
-    ASSERT_TRUE(router.dispatch(nexus::ApiKey::Produce, 0, pdec, pout).has_value());
+    ASSERT_TRUE(run_dispatch(router, nexus::ApiKey::Produce, 0, pdec, pout).has_value());
 
     nexus::FetchRequest freq;
     freq.topic = "t";
@@ -145,7 +154,7 @@ TEST(RequestRouter, ProduceLuegoFetch_DevuelveLosBytes) {
     nexus::Buffer fbody = encode_request(freq);
     nexus::Decoder fdec{fbody.as_span()};
     nexus::Buffer fout;
-    ASSERT_TRUE(router.dispatch(nexus::ApiKey::Fetch, 0, fdec, fout).has_value());
+    ASSERT_TRUE(run_dispatch(router, nexus::ApiKey::Fetch, 0, fdec, fout).has_value());
 
     nexus::Decoder resp_dec{fout.as_span()};
     const nexus::expected<nexus::FetchResponse> resp = nexus::FetchResponse::decode(resp_dec);
@@ -164,7 +173,7 @@ TEST(RequestRouter, CreateTopic_CreaYLuegoMetadataLoLista) {
         nexus::CreateTopicRequest{.name = "nuevo", .partition_count = 2, .replication_factor = 1});
     nexus::Decoder cdec{cbody.as_span()};
     nexus::Buffer cout;
-    ASSERT_TRUE(router.dispatch(nexus::ApiKey::CreateTopic, 0, cdec, cout).has_value());
+    ASSERT_TRUE(run_dispatch(router, nexus::ApiKey::CreateTopic, 0, cdec, cout).has_value());
     nexus::Decoder cresp_dec{cout.as_span()};
     const nexus::expected<nexus::CreateTopicResponse> cresp =
         nexus::CreateTopicResponse::decode(cresp_dec);
@@ -175,7 +184,7 @@ TEST(RequestRouter, CreateTopic_CreaYLuegoMetadataLoLista) {
     nexus::Buffer mbody = encode_request(nexus::MetadataRequest{});
     nexus::Decoder mdec{mbody.as_span()};
     nexus::Buffer mout;
-    ASSERT_TRUE(router.dispatch(nexus::ApiKey::Metadata, 0, mdec, mout).has_value());
+    ASSERT_TRUE(run_dispatch(router, nexus::ApiKey::Metadata, 0, mdec, mout).has_value());
     nexus::Decoder mresp_dec{mout.as_span()};
     const nexus::expected<nexus::MetadataResponse> mresp =
         nexus::MetadataResponse::decode(mresp_dec);
@@ -195,7 +204,7 @@ TEST(RequestRouter, OffsetCommitLuegoFetch_DevuelveElOffset) {
         .group = "g", .topic = "t", .partition = 0, .offset = 7, .metadata = ""});
     nexus::Decoder cdec{cbody.as_span()};
     nexus::Buffer cout;
-    ASSERT_TRUE(router.dispatch(nexus::ApiKey::OffsetCommit, 0, cdec, cout).has_value());
+    ASSERT_TRUE(run_dispatch(router, nexus::ApiKey::OffsetCommit, 0, cdec, cout).has_value());
     nexus::Decoder cresp_dec{cout.as_span()};
     const nexus::expected<nexus::OffsetCommitResponse> cresp =
         nexus::OffsetCommitResponse::decode(cresp_dec);
@@ -206,7 +215,7 @@ TEST(RequestRouter, OffsetCommitLuegoFetch_DevuelveElOffset) {
         encode_request(nexus::OffsetFetchRequest{.group = "g", .topic = "t", .partition = 0});
     nexus::Decoder fdec{fbody.as_span()};
     nexus::Buffer fout;
-    ASSERT_TRUE(router.dispatch(nexus::ApiKey::OffsetFetch, 0, fdec, fout).has_value());
+    ASSERT_TRUE(run_dispatch(router, nexus::ApiKey::OffsetFetch, 0, fdec, fout).has_value());
     nexus::Decoder fresp_dec{fout.as_span()};
     const nexus::expected<nexus::OffsetFetchResponse> fresp =
         nexus::OffsetFetchResponse::decode(fresp_dec);
@@ -224,7 +233,7 @@ TEST(RequestRouter, OffsetFetch_SinCommit_DevuelveMenosUno) {
         encode_request(nexus::OffsetFetchRequest{.group = "nuevo", .topic = "t", .partition = 0});
     nexus::Decoder fdec{fbody.as_span()};
     nexus::Buffer fout;
-    ASSERT_TRUE(router.dispatch(nexus::ApiKey::OffsetFetch, 0, fdec, fout).has_value());
+    ASSERT_TRUE(run_dispatch(router, nexus::ApiKey::OffsetFetch, 0, fdec, fout).has_value());
     nexus::Decoder fresp_dec{fout.as_span()};
     const nexus::expected<nexus::OffsetFetchResponse> fresp =
         nexus::OffsetFetchResponse::decode(fresp_dec);
@@ -243,7 +252,7 @@ TEST(RequestRouter, JoinSyncHeartbeatLeave_FlujoDeGrupo) {
         .group = "g", .member_id = "", .session_timeout_ms = 30000, .subscription = {}});
     nexus::Decoder jdec{jbody.as_span()};
     nexus::Buffer jout;
-    ASSERT_TRUE(router.dispatch(nexus::ApiKey::JoinGroup, 0, jdec, jout).has_value());
+    ASSERT_TRUE(run_dispatch(router, nexus::ApiKey::JoinGroup, 0, jdec, jout).has_value());
     nexus::Decoder jresp_dec{jout.as_span()};
     const nexus::expected<nexus::JoinGroupResponse> jresp =
         nexus::JoinGroupResponse::decode(jresp_dec);
@@ -263,7 +272,7 @@ TEST(RequestRouter, JoinSyncHeartbeatLeave_FlujoDeGrupo) {
     nexus::Buffer sbody = encode_request(sreq);
     nexus::Decoder sdec{sbody.as_span()};
     nexus::Buffer sout;
-    ASSERT_TRUE(router.dispatch(nexus::ApiKey::SyncGroup, 0, sdec, sout).has_value());
+    ASSERT_TRUE(run_dispatch(router, nexus::ApiKey::SyncGroup, 0, sdec, sout).has_value());
     nexus::Decoder sresp_dec{sout.as_span()};
     const nexus::expected<nexus::SyncGroupResponse> sresp =
         nexus::SyncGroupResponse::decode(sresp_dec);
@@ -276,7 +285,7 @@ TEST(RequestRouter, JoinSyncHeartbeatLeave_FlujoDeGrupo) {
         .group = "g", .member_id = jresp->member_id, .generation = jresp->generation});
     nexus::Decoder hdec{hbody.as_span()};
     nexus::Buffer hout;
-    ASSERT_TRUE(router.dispatch(nexus::ApiKey::Heartbeat, 0, hdec, hout).has_value());
+    ASSERT_TRUE(run_dispatch(router, nexus::ApiKey::Heartbeat, 0, hdec, hout).has_value());
     nexus::Decoder hresp_dec{hout.as_span()};
     const nexus::expected<nexus::HeartbeatResponse> hresp =
         nexus::HeartbeatResponse::decode(hresp_dec);
@@ -288,7 +297,7 @@ TEST(RequestRouter, JoinSyncHeartbeatLeave_FlujoDeGrupo) {
         encode_request(nexus::LeaveGroupRequest{.group = "g", .member_id = jresp->member_id});
     nexus::Decoder ldec{lbody.as_span()};
     nexus::Buffer lout;
-    ASSERT_TRUE(router.dispatch(nexus::ApiKey::LeaveGroup, 0, ldec, lout).has_value());
+    ASSERT_TRUE(run_dispatch(router, nexus::ApiKey::LeaveGroup, 0, ldec, lout).has_value());
     nexus::Decoder lresp_dec{lout.as_span()};
     const nexus::expected<nexus::LeaveGroupResponse> lresp =
         nexus::LeaveGroupResponse::decode(lresp_dec);
@@ -305,7 +314,7 @@ TEST(RequestRouter, Heartbeat_GrupoDesconocido_DevuelveError) {
         nexus::HeartbeatRequest{.group = "fantasma", .member_id = "m", .generation = 1});
     nexus::Decoder dec{body.as_span()};
     nexus::Buffer out;
-    ASSERT_TRUE(router.dispatch(nexus::ApiKey::Heartbeat, 0, dec, out).has_value());
+    ASSERT_TRUE(run_dispatch(router, nexus::ApiKey::Heartbeat, 0, dec, out).has_value());
     nexus::Decoder resp_dec{out.as_span()};
     const nexus::expected<nexus::HeartbeatResponse> resp =
         nexus::HeartbeatResponse::decode(resp_dec);
@@ -321,7 +330,7 @@ TEST(RequestRouter, ApiKeyDesconocida_DevuelveError) {
     nexus::Decoder dec{body.as_span()};
     nexus::Buffer out;
     const auto unknown = static_cast<nexus::ApiKey>(0xFFFF);
-    EXPECT_FALSE(router.dispatch(unknown, 0, dec, out).has_value());
+    EXPECT_FALSE(run_dispatch(router, unknown, 0, dec, out).has_value());
 }
 
 }  // namespace

@@ -13,6 +13,7 @@
 #include "broker/topic_manager.hpp"
 #include "common/bytes.hpp"
 #include "common/error.hpp"
+#include "common/task.hpp"
 #include "protocol/frame.hpp"
 #include "protocol/versioning.hpp"
 
@@ -26,6 +27,10 @@ class Decoder;
 ///   `TopicManager`/`Partition` y **codifica la respuesta** en un búfer. No toca framing ni sockets
 ///   (eso es la `Connection` del servidor): así es testeable sin red. Los errores del núcleo se
 ///   traducen a `WireError` con `from_error` en el borde (ADR-0009).
+/// @note `dispatch` es una **corrutina** (`task<expected<void>>`): hoy completa sin suspenderse
+///   (un solo reactor), pero la firma asíncrona habilita el enrutado **cross-core** —en el
+///   multi-reactor, una operación de partición se `co_await`eará en el reactor dueño (`call_on`,
+///   ADR-0025)— sin volver a tocar el borde de la conexión.
 class RequestRouter {
 public:
     RequestRouter(TopicManager& topics, NodeId node_id, std::string host,
@@ -35,8 +40,10 @@ public:
     /// @brief Despacha @p key (cuerpo en @p body) y escribe la respuesta codificada en @p out.
     /// @return Éxito (con @p out relleno) o un error si la `ApiKey` no se soporta o el cuerpo es
     ///   indecodificable de forma irrecuperable (la `Connection` cierra entonces la conexión).
-    [[nodiscard]] expected<void> dispatch(ApiKey key, std::uint16_t api_version, Decoder& body,
-                                          Buffer& out);
+    /// @note @p body y @p out deben seguir vivos hasta que la corrutina complete (lo están: viven
+    ///   en el *frame* de la conexión que la `co_await`ea).
+    [[nodiscard]] task<expected<void>> dispatch(ApiKey key, std::uint16_t api_version,
+                                                Decoder& body, Buffer& out);
 
     /// Rangos de versión que soporta este servidor (para `ApiVersions` y la negociación).
     [[nodiscard]] static std::vector<ApiVersionRange> supported_versions();
