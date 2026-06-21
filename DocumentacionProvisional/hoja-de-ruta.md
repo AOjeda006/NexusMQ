@@ -903,16 +903,23 @@ Harness de benchmark vacío y CI:
     `topic | partition | from | to | type:u8 | payload`; el discriminante del `variant` viaja como `type`
     y el payload reutiliza el `encode`/`decode` por RPC (ADR-0014). Pieza pura, decodificador defensivo
     (rechaza truncado y `type` desconocido). 10 tests de round-trip + límites. Verde GCC/Clang/ASan.
-  - [ ] **D3.2** Transporte inter-nodo real: conexiones TCP persistentes a peers (direccionadas por
-    config), envío con longitud-prefijo del `RaftEnvelope` y recepción/desencuadre por el `FrameReader`.
-  - [ ] **D3.3** `RaftCarrier` (portador por partición): `tick` periódico local al reactor dueño, drena
-    `take_messages()` → transporte; aplica RPC entrantes (`on_*`); persiste el estado de Raft (D1) **antes**
-    de enviar (regla §5) y carga `RaftStateStore` al abrir.
+  - [x] **D3.2** `consensus/raft_carrier.{hpp,cpp}` — **`RaftCarrier`**: portador de la FSM de una
+    réplica (lógica primero, con doble inyectado, por la normativa de determinismo). `on_tick` avanza la
+    FSM y transporta su *outbox*; `on_message` enruta un RPC entrante al `on_*` del `RaftNode` y devuelve
+    la *reply* por un `RaftMessageSink` (interfaz, DIP). Envuelve cada mensaje en `RaftEnvelope`; no
+    serializa ni toca sockets. Test: 3 réplicas conducidas por sus portadores sobre red virtual que
+    serializa cada sobre por el wire → líder único, replicación a quórum, rechazo en no-líder. 3 tests.
+  - [ ] **D3.3** Persistencia en el portador: `RaftStateStore::load` → `restore_persistent_state` al
+    abrir; `save` con `fsync` **antes** de transportar `take_messages()` si `persistent_state_dirty()`
+    (regla §5). *(Reordenado: el transporte TCP real pasa a D3.5; la lógica del portador va primero.)*
   - [ ] **D3.4** `Server` sobre `ReactorPool` (uno por núcleo) y `RequestRouter` **asíncrono** que enruta
     por reactor dueño (`call_on`); `ReplicatedPartition` cuando `replication_factor > 1`.
-  - [ ] **D3.5** Disparo de la **compactación** (`compact_to`, D2) por política desde el portador, ya con
+  - [ ] **D3.5** Transporte inter-nodo **real** detrás del `RaftMessageSink`: conexiones TCP persistentes
+    a peers (direccionadas por config), envío con longitud-prefijo del `RaftEnvelope` y recepción/
+    desencuadre por el `FrameReader`; recepción → `RaftCarrier::on_message`.
+  - [ ] **D3.6** Disparo de la **compactación** (`compact_to`, D2) por política desde el portador, ya con
     seguridad en el servidor vivo.
-  - [ ] **D3.6** Tests e2e: cluster de 3 nodos reales (sockets), elección, replicación a quórum y failover
+  - [ ] **D3.7** Tests e2e: cluster de 3 nodos reales (sockets), elección, replicación a quórum y failover
     de líder bajo caos.
 - [ ] **D4** **Cableado de TLS + proxy** en el plano de datos del server (la criptografía/`TlsContext` y el
   `Proxy` existen, ADR-0019; falta enchufarlos al flujo de conexiones real).
