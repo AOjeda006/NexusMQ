@@ -18,6 +18,7 @@ add_executable(nexus-tests
   unit/common/sha256_test.cpp
   unit/common/base64_test.cpp
   unit/common/task_test.cpp
+  unit/common/fnv1a_test.cpp
   unit/io/file_test.cpp
   unit/io/aligned_buffer_test.cpp
   unit/io/block_reader_test.cpp

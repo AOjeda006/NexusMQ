@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <string>
 
+#include "common/fnv1a.hpp"
+
 namespace nexus {
 
 LoadBalancer::LoadBalancer(BalanceStrategy strategy, std::uint32_t vnodes)
@@ -94,12 +96,7 @@ std::size_t LoadBalancer::active(NodeId node) const {
 }
 
 std::uint64_t LoadBalancer::hash64(std::string_view bytes) noexcept {
-    std::uint64_t hash = 14695981039346656037ULL;  // offset basis FNV-1a 64.
-    for (const char byte : bytes) {
-        hash ^= static_cast<std::uint8_t>(byte);
-        hash *= 1099511628211ULL;  // primo FNV.
-    }
-    return hash;
+    return fnv1a_64(bytes);
 }
 
 void LoadBalancer::rebuild_ring() {
