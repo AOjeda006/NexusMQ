@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -19,18 +20,24 @@
 #include "ingress/rest_gateway.hpp"
 #include "io/socket.hpp"
 #include "reactor/reactor.hpp"
+#include "reactor/reactor_pool.hpp"
 #include "server/admin_api.hpp"
 #include "server/admin_router.hpp"
 #include "telemetry/metrics.hpp"
 
 namespace nexus {
 
-/// @brief Daemon del broker en un nodo (Fase 1b: un solo reactor). Afinidad: el bucle corre en el
-///   hilo del reactor; `stop` es seguro desde otro hilo (incluido un *signal handler*).
-/// @details Orquesta `TopicManager` + `RequestRouter` + un `Reactor` (io_uring) + un `Listener`.
-///   `bind` enlaza el puerto (plano de control), `run` lanza el bucle de aceptación y corre el
-///   reactor (bloquea), `stop` lo despierta para salir. El multi-reactor (un reactor por núcleo
-///   con routing por partición) llega con la escalada thread-per-core; aquí N=1.
+/// @brief Daemon del broker en un nodo, sobre un `ReactorPool` *thread-per-core* (ADR-0025).
+///   Afinidad: `run` corre el **núcleo 0** en el hilo llamante (los demás en sus hilos); `stop` es
+///   seguro desde otro hilo (incluido un *signal handler*).
+/// @details Orquesta `TopicManager` + `RequestRouter` + un `ReactorPool` (io_uring) + un
+/// `Listener`.
+///   `bind` enlaza el puerto (plano de control), `run` arranca el pool (`start_main_inline`:
+///   workers 1..N-1 en hilos, núcleo 0 inline), lanza el bucle de aceptación en el núcleo 0 y lo
+///   corre (bloquea), `stop` lo despierta para salir y une el pool. El plano de datos vive de
+///   momento en el núcleo 0 (correcto, sin *data races*); el **sharding** de particiones por núcleo
+///   y el enrutado cross-core llegan en los siguientes incrementos de D3.4. `num_reactors` fija N
+///   (por defecto 1 → equivalente al mono-reactor previo hasta que el sharding lo aproveche).
 class Server {
 public:
     struct Config {
@@ -51,11 +58,16 @@ public:
         std::string jwt_secret;
         /// Mínimo de espacio libre en disco (bytes) para `/readyz`. `0` = sin chequeo de disco.
         std::uintmax_t min_free_disk_bytes = 0;
+        /// Número de reactores del pool (uno por núcleo). `<= 0` se trata como 1.
+        int num_reactors = 1;
     };
 
-    /// Crea el reactor (io_uring) y el resto de piezas. Lanza `std::system_error` si io_uring no
-    /// está disponible (plano de control).
-    explicit Server(Config config);
+    /// @brief Crea las piezas del broker y **valida** que el proactor (io_uring) se puede crear.
+    /// @param config Configuración del nodo.
+    /// @param proactor_factory Factoría del `Proactor` de cada reactor (DIP, testable). Vacía =
+    ///   io_uring por defecto. Se valida construyendo un proactor de prueba en el constructor.
+    /// @throws std::system_error si io_uring no está disponible (plano de control).
+    explicit Server(Config config, ReactorPool::ProactorFactory proactor_factory = {});
     ~Server() = default;
     Server(const Server&) = delete;
     Server& operator=(const Server&) = delete;
@@ -89,7 +101,14 @@ private:
     TopicManager topics_;
     MetricsRegistry metrics_;
     HealthMonitor health_;
-    Reactor reactor_;
+    ReactorPool pool_;
+    ReactorPool::ProactorFactory proactor_factory_;
+    /// Núcleo 0 (lo corre `run` inline), publicado para que `stop` lo despierte desde otro hilo /
+    /// signal handler. `nullptr` hasta que `run` arranca el pool (carrera resuelta con
+    /// `stop_requested_`).
+    std::atomic<Reactor*> main_reactor_{nullptr};
+    /// Marca de apagado: si `stop` llega antes de que `run` publique el núcleo 0, `run` no arranca.
+    std::atomic<bool> stop_requested_{false};
     std::optional<JwtVerifier> jwt_;
     std::optional<AdminApi> admin_api_;
     std::optional<RestGateway> rest_;

@@ -21,8 +21,13 @@ namespace nexus {
 
 namespace {
 
-/// Profundidad de la cola del anillo io_uring del reactor del servidor.
+/// Profundidad de la cola del anillo io_uring de cada reactor del servidor.
 constexpr unsigned int kRingDepth = 256;
+
+/// Factoría por defecto del `Proactor` de cada reactor: io_uring (plano de control).
+std::unique_ptr<Proactor> make_io_uring_proactor(int /*core_id*/) {
+    return std::make_unique<IoUringBackend>(kRingDepth);
+}
 
 /// Bucle de aceptación del plano de datos: una corrutina de servicio por conexión.
 task<void> accept_loop(Reactor& reactor, Listener& listener, RequestRouter& router) {
@@ -48,10 +53,17 @@ task<void> admin_accept_loop(Reactor& reactor, Listener& listener, const AdminRo
 
 }  // namespace
 
-Server::Server(Config config)
+Server::Server(Config config, ReactorPool::ProactorFactory proactor_factory)
     : config_(std::move(config)),
       topics_(config_.data_dir),
-      reactor_(/*core_id=*/0, /*num_cores=*/1, std::make_unique<IoUringBackend>(kRingDepth)) {
+      proactor_factory_(proactor_factory ? std::move(proactor_factory) : make_io_uring_proactor) {
+    if (config_.num_reactors <= 0) {
+        config_.num_reactors = 1;
+    }
+    // Valida el plano de control en construcción: si io_uring no está disponible, la factoría por
+    // defecto lanza aquí (no en el hilo del reactor), preservando el contrato de fallo previo.
+    static_cast<void>(proactor_factory_(0));
+
     const JwtVerifier* verifier = nullptr;
     if (!config_.jwt_secret.empty()) {
         verifier = &jwt_.emplace(config_.jwt_secret);
@@ -129,17 +141,34 @@ void Server::run() {
     if (!listener_ || !router_) {
         return;  // Precondición: `bind()` antes de `run()`; sin listener no hay nada que servir.
     }
-    reactor_.spawn(accept_loop(reactor_, *listener_, *router_));
+    // Arranca el pool: workers 1..N-1 en sus hilos, núcleo 0 inline (lo corremos aquí). El plano de
+    // datos vive en el núcleo 0 mientras no haya sharding (D3.4c): sin estado compartido entre
+    // hilos.
+    pool_.start_main_inline(config_.num_reactors, proactor_factory_);
+    Reactor& main = pool_.reactor(0);
+    main_reactor_.store(&main, std::memory_order_release);
+    if (stop_requested_.load(std::memory_order_acquire)) {
+        pool_.shutdown();  // `stop()` llegó durante el arranque: no servimos.
+        return;
+    }
+
+    main.spawn(accept_loop(main, *listener_, *router_));
     if (admin_listener_ && admin_router_) {
-        reactor_.spawn(admin_accept_loop(reactor_, *admin_listener_, *admin_router_));
+        main.spawn(admin_accept_loop(main, *admin_listener_, *admin_router_));
     }
     health_.set_started(true);  // ya servimos: `/readyz` puede dar 200.
-    reactor_.run();
+    main.run();                 // bloquea el hilo llamante hasta `stop()`.
+    pool_.shutdown();           // para y une los workers (el núcleo 0 ya salió de su bucle).
+    main_reactor_.store(nullptr, std::memory_order_release);
 }
 
 void Server::stop() noexcept {
     health_.set_live(false);  // drenando: `/healthz` da 503 para sacarnos del balanceador.
-    reactor_.stop();
+    stop_requested_.store(true, std::memory_order_release);
+    // Despierta el núcleo 0 si `run` ya lo publicó (atómico + eventfd: async-signal-safe).
+    if (Reactor* main = main_reactor_.load(std::memory_order_acquire); main != nullptr) {
+        main->stop();
+    }
 }
 
 }  // namespace nexus
