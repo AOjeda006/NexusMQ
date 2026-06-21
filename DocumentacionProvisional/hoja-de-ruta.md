@@ -909,9 +909,11 @@ Harness de benchmark vacío y CI:
     la *reply* por un `RaftMessageSink` (interfaz, DIP). Envuelve cada mensaje en `RaftEnvelope`; no
     serializa ni toca sockets. Test: 3 réplicas conducidas por sus portadores sobre red virtual que
     serializa cada sobre por el wire → líder único, replicación a quórum, rechazo en no-líder. 3 tests.
-  - [ ] **D3.3** Persistencia en el portador: `RaftStateStore::load` → `restore_persistent_state` al
-    abrir; `save` con `fsync` **antes** de transportar `take_messages()` si `persistent_state_dirty()`
-    (regla §5). *(Reordenado: el transporte TCP real pasa a D3.5; la lógica del portador va primero.)*
+  - [x] **D3.3** Persistencia en el portador: `recover()` carga `RaftStateStore` →
+    `restore_persistent_state` al abrir; `flush_outbox` hace `save` con `fsync` **antes** de transportar
+    si `persistent_state_dirty()` (regla §5; si el `save` falla, no transporta y reintenta). Almacén
+    inyectado como puntero opcional (DIP). 2 tests (estado en disco antes de transportar; `recover`
+    sobrevive a un "reinicio"). *(Reordenado: el transporte TCP real pasa a D3.5; la lógica va primero.)*
   - [ ] **D3.4** `Server` sobre `ReactorPool` (uno por núcleo) y `RequestRouter` **asíncrono** que enruta
     por reactor dueño (`call_on`); `ReplicatedPartition` cuando `replication_factor > 1`.
   - [ ] **D3.5** Transporte inter-nodo **real** detrás del `RaftMessageSink`: conexiones TCP persistentes
