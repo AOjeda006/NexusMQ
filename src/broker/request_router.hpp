@@ -71,6 +71,22 @@ public:
     [[nodiscard]] const GroupCoordinator& group_coordinator() const noexcept { return groups_; }
 
 private:
+    /// @brief Crea @p name (con @p partition_count particiones) en **todos** los núcleos vía
+    ///   `call_on` (fan-out de control, ADR-0026): cada reactor crea el topic en su propio
+    ///   `TopicManager` —tocándolo solo desde su hilo— y abre únicamente las particiones que le
+    ///   tocan; los metadatos se registran completos en cada núcleo.
+    /// @return Éxito, o el primer error (con **rollback** de los núcleos ya creados: garantía
+    ///   fuerte).
+    /// @note Sin cablear al clúster (`partitions_ == nullptr`, tests unitarios) crea localmente
+    ///   sobre el único `TopicManager`.
+    [[nodiscard]] task<expected<void>> create_topic_cluster(const std::string& name,
+                                                            std::int32_t partition_count);
+
+    /// @brief Borra @p name de **todos** los núcleos vía `call_on` (fan-out de control, ADR-0026).
+    /// @return El resultado del núcleo 0 (autoritativo); el borrado es idempotente en los demás.
+    /// @note Sin cablear al clúster (`partitions_ == nullptr`, tests unitarios) borra localmente.
+    [[nodiscard]] task<expected<void>> delete_topic_cluster(const std::string& name);
+
     TopicManager& topics_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     NodeId node_id_;
     std::string host_;

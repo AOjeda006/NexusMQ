@@ -944,9 +944,18 @@ Harness de benchmark vacío y CI:
       en el hilo del reactor (cerraba el `eventfd` mientras `stop()→wake()` lo escribía desde otro hilo). La
       destrucción del pool se difiere a `~ReactorPool` (al destruir el `Server`), tras el `join` del llamante,
       que ordena el `close` después del `wake`. Suite completa **bajo TSan** verde (655/655), además de GCC/Clang/ASan.
-    - [ ] **D3.4c** *(resto)* CreateTopic/DeleteTopic con fan-out a todos los núcleos; `TopicManager` por núcleo
-      real en el `Server` (hoy comparten uno); grupos/offsets por `hash(group_id)`; encender N>1 + TSan/estrés. Estado del broker **fragmentado por reactor** (shared-nothing): el `TopicManager`/`Partition`
-      de cada partición vive en su reactor dueño; `dispatch` enruta la operación al dueño con `call_on`.
+    - [x] **D3.4c-4** `RequestRouter` enruta **CreateTopic/DeleteTopic con fan-out cross-core** (message-passing,
+      ADR-0026): `create_topic_cluster`/`delete_topic_cluster` (corrutinas) recorren los núcleos y crean/borran
+      el topic en cada `TopicManager` vía `call_on` (cada reactor lo toca solo desde su hilo; abre solo sus
+      particiones, registra metadatos completos). CreateTopic con **rollback** si un núcleo falla (garantía
+      fuerte). `PartitionRouter::reactor(core)` para el fan-out. Sin cablear (`partitions_==nullptr`, tests) cae
+      al manager local → los 15 tests `sync_wait` intactos. Test cross-core N=2 (Create→ambos managers, Produce
+      a partición de otro núcleo, Delete→ambos). 656/656 en GCC/Clang/ASan/**TSan**; format + tidy limpios.
+    - [ ] **D3.4c** *(resto)* `TopicManager` por núcleo real en el `Server` (hoy comparten uno) + cablear el
+      fan-out de admin REST (necesita ruta async en `AdminApi`/`RestGateway`); grupos/offsets por
+      `hash(group_id)`; encender N>1 por defecto + TSan/estrés. Estado del broker **fragmentado por reactor**
+      (shared-nothing): el `TopicManager`/`Partition` de cada partición vive en su reactor dueño; `dispatch`
+      enruta la operación al dueño con `call_on`.
     - [ ] **D3.4d** `ReplicatedPartition` (en vez de `Partition`) cuando `replication_factor > 1`, conducida por
       su `RaftCarrier` en el reactor dueño (tick desde el bucle del reactor).
   - [ ] **D3.5** Transporte inter-nodo **real** detrás del `RaftMessageSink`: conexiones TCP persistentes

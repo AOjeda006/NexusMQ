@@ -417,4 +417,83 @@ TEST(RequestRouter, ProduceLuegoFetch_EnrutadoAlNucleoDueno) {
     EXPECT_FALSE(fresp->batches.empty());
 }
 
+TEST(RequestRouter, CreateLuegoDeleteTopic_FanOutATodosLosNucleos) {
+    TempDir dir{"fanout"};
+    // Dos reactores cableados; dos TopicManager sharded (núcleo 0 dueño de p0; núcleo 1 de p1).
+    nexus::Reactor r0{0, 2, std::make_unique<nexus::FakeProactor>()};
+    nexus::Reactor r1{1, 2, std::make_unique<nexus::FakeProactor>()};
+    r0.connect_peers({&r0, &r1});
+    r1.connect_peers({&r0, &r1});
+    nexus::TopicManager t0{dir.path(), /*num_cores=*/2, /*owner_core=*/0};
+    nexus::TopicManager t1{dir.path(), /*num_cores=*/2, /*owner_core=*/1};
+    nexus::PartitionRouter partitions{{&r0, &r1}};
+    nexus::RequestRouter router{t0, 0, "127.0.0.1", 9092};
+    router.bind_cluster(r0, partitions, {&t0, &t1});
+
+    auto pump = [&](bool& done) {
+        for (int i = 0; i < 64 && !done; ++i) {
+            r0.poll_once();
+            r1.poll_once();
+        }
+    };
+
+    // CreateTopic atendido en el núcleo 0 → fan-out cross-core: ambos managers registran el topic,
+    // cada uno abriendo solo la partición que le toca (ADR-0026).
+    nexus::Buffer cbody = encode_request(
+        nexus::CreateTopicRequest{.name = "t", .partition_count = 2, .replication_factor = 1});
+    nexus::Decoder cdec{cbody.as_span()};
+    nexus::Buffer cout;
+    bool cdone = false;
+    r0.spawn(drive_dispatch(router, nexus::ApiKey::CreateTopic, cdec, cout, cdone));
+    pump(cdone);
+    ASSERT_TRUE(cdone);
+    nexus::Decoder cresp_dec{cout.as_span()};
+    const nexus::expected<nexus::CreateTopicResponse> cresp =
+        nexus::CreateTopicResponse::decode(cresp_dec);
+    ASSERT_TRUE(cresp.has_value());
+    EXPECT_EQ(cresp->error_code, nexus::WireError::None);
+    EXPECT_EQ(t0.topic_count(), 1U);
+    EXPECT_EQ(t1.topic_count(), 1U);
+    ASSERT_NE(t0.get("t"), nullptr);
+    ASSERT_NE(t1.get("t"), nullptr);
+    EXPECT_NE(t0.get("t")->partition(0), nullptr);  // p0 vive en el núcleo 0
+    EXPECT_EQ(t0.get("t")->partition(1), nullptr);
+    EXPECT_NE(t1.get("t")->partition(1), nullptr);  // p1 vive en el núcleo 1
+    EXPECT_EQ(t1.get("t")->partition(0), nullptr);
+
+    // Produce a la partición 1 (núcleo 1): funciona porque el fan-out la creó allí.
+    const std::vector<std::byte> batch = encode_batch(2);
+    nexus::ProduceRequest preq;
+    preq.topic = "t";
+    preq.partition = 1;
+    preq.batch = nexus::ByteSpan{batch.data(), batch.size()};
+    nexus::Buffer pbody = encode_request(preq);
+    nexus::Decoder pdec{pbody.as_span()};
+    nexus::Buffer pout;
+    bool pdone = false;
+    r0.spawn(drive_dispatch(router, nexus::ApiKey::Produce, pdec, pout, pdone));
+    pump(pdone);
+    ASSERT_TRUE(pdone);
+    nexus::Decoder presp_dec{pout.as_span()};
+    const nexus::expected<nexus::ProduceResponse> presp = nexus::ProduceResponse::decode(presp_dec);
+    ASSERT_TRUE(presp.has_value());
+    EXPECT_EQ(presp->error_code, nexus::WireError::None);
+
+    // DeleteTopic atendido en el núcleo 0 → fan-out: se borra de ambos managers.
+    nexus::Buffer dbody = encode_request(nexus::DeleteTopicRequest{.name = "t"});
+    nexus::Decoder ddec{dbody.as_span()};
+    nexus::Buffer dout;
+    bool ddone = false;
+    r0.spawn(drive_dispatch(router, nexus::ApiKey::DeleteTopic, ddec, dout, ddone));
+    pump(ddone);
+    ASSERT_TRUE(ddone);
+    nexus::Decoder dresp_dec{dout.as_span()};
+    const nexus::expected<nexus::DeleteTopicResponse> dresp =
+        nexus::DeleteTopicResponse::decode(dresp_dec);
+    ASSERT_TRUE(dresp.has_value());
+    EXPECT_EQ(dresp->error_code, nexus::WireError::None);
+    EXPECT_EQ(t0.topic_count(), 0U);
+    EXPECT_EQ(t1.topic_count(), 0U);
+}
+
 }  // namespace

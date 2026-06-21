@@ -41,6 +41,15 @@ public:
         return *reactors_[static_cast<std::size_t>(owner_core(partition))];
     }
 
+    /// @brief Reactor del núcleo @p core (indexado por `core_id`).
+    /// @details Para el **fan-out de control** a todos los núcleos (p. ej. CreateTopic/DeleteTopic,
+    ///   ADR-0026): el llamante recorre `[0, core_count)` y ejecuta la operación en cada reactor
+    ///   con `call_on`. A diferencia de `owner`, no deriva el núcleo de una partición.
+    /// @pre `0 <= core < core_count()`.
+    [[nodiscard]] Reactor& reactor(int core) const {
+        return *reactors_[static_cast<std::size_t>(core)];
+    }
+
     /// @brief Ejecuta @p fn en el reactor dueño de @p partition y reanuda al llamante (en @p self)
     ///   con el resultado. @p fn corre en el hilo del dueño: debe tocar solo su estado.
     template <class Fn>
