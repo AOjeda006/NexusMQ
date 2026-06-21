@@ -915,7 +915,16 @@ Harness de benchmark vacío y CI:
     inyectado como puntero opcional (DIP). 2 tests (estado en disco antes de transportar; `recover`
     sobrevive a un "reinicio"). *(Reordenado: el transporte TCP real pasa a D3.5; la lógica va primero.)*
   - [ ] **D3.4** `Server` sobre `ReactorPool` (uno por núcleo) y `RequestRouter` **asíncrono** que enruta
-    por reactor dueño (`call_on`); `ReplicatedPartition` cuando `replication_factor > 1`.
+    por reactor dueño (`call_on`); `ReplicatedPartition` cuando `replication_factor > 1`. Por sub-pasos:
+    - [x] **D3.4a** `RequestRouter::dispatch` ahora es una **corrutina** `task<expected<void>>` (firma
+      asíncrona, base del enrutado cross-core). Hoy completa sin suspenderse (un reactor); `serve_connection`
+      la `co_await`ea y los tests la conducen con `sync_wait`. Sin cambio de comportamiento. Verde GCC/Clang/ASan.
+    - [ ] **D3.4b** `Server` crea un `ReactorPool` (N = núcleos) con factoría de `Proactor` (DIP); el bucle de
+      aceptación reparte conexiones entre reactores. Partición → núcleo dueño = `partition % N`.
+    - [ ] **D3.4c** Estado del broker **fragmentado por reactor** (shared-nothing): el `TopicManager`/`Partition`
+      de cada partición vive en su reactor dueño; `dispatch` enruta la operación al dueño con `call_on`.
+    - [ ] **D3.4d** `ReplicatedPartition` (en vez de `Partition`) cuando `replication_factor > 1`, conducida por
+      su `RaftCarrier` en el reactor dueño (tick desde el bucle del reactor).
   - [ ] **D3.5** Transporte inter-nodo **real** detrás del `RaftMessageSink`: conexiones TCP persistentes
     a peers (direccionadas por config), envío con longitud-prefijo del `RaftEnvelope` y recepción/
     desencuadre por el `FrameReader`; recepción → `RaftCarrier::on_message`.
