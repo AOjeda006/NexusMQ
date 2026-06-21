@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "broker/group_catalog.hpp"
 #include "broker/request_router.hpp"
 #include "broker/topic_catalog.hpp"
 #include "broker/topic_manager.hpp"
@@ -36,10 +37,10 @@ namespace nexus {
 /// `Listener`.
 ///   `bind` enlaza el puerto (plano de control), `run` arranca el pool (`start_main_inline`:
 ///   workers 1..N-1 en hilos, núcleo 0 inline), lanza el bucle de aceptación en el núcleo 0 y lo
-///   corre (bloquea), `stop` lo despierta para salir y une el pool. El plano de datos vive de
-///   momento en el núcleo 0 (correcto, sin *data races*); el **sharding** de particiones por núcleo
-///   y el enrutado cross-core llegan en los siguientes incrementos de D3.4. `num_reactors` fija N
-///   (por defecto 1 → equivalente al mono-reactor previo hasta que el sharding lo aproveche).
+///   corre (bloquea), `stop` lo despierta para salir y une el pool. Las conexiones se aceptan en el
+///   núcleo 0; cada partición se enruta a su reactor dueño (`partition % N`) y cada grupo a su núcleo
+///   coordinador (`hash(group_id) % N`) por paso de mensajes (sharding *shared-nothing*, ADR-0026).
+///   `num_reactors` fija N (por defecto 1; N>1 es opt-in y reparte el plano de datos entre núcleos).
 class Server {
 public:
     struct Config {
@@ -97,13 +98,17 @@ public:
     void stop() noexcept;
 
 private:
-    /// Enumera los grupos del reactor traducidos a DTOs y paginados (para el `AdminApi`).
-    [[nodiscard]] std::vector<GroupSummary> list_groups(Page page) const;
+    /// Enumera los grupos coordinados en el núcleo 0, traducidos a DTOs y paginados (para el
+    /// `AdminApi`). No es `const`: accede al `GroupCatalog` (mutable) del propio hilo del admin.
+    [[nodiscard]] std::vector<GroupSummary> list_groups(Page page);
 
     Config config_;
     /// Catálogo de topics fragmentado por núcleo (ADR-0026): un `TopicManager` por reactor. El del
     /// núcleo 0 atiende las conexiones; el plano de datos enruta cada partición a su dueño.
     TopicCatalog catalog_;
+    /// Coordinación de grupos fragmentada por núcleo (ADR-0026): cada grupo se coordina en el
+    /// núcleo `hash(group_id) % N`, donde viven su membresía y sus offsets.
+    GroupCatalog group_catalog_;
     MetricsRegistry metrics_;
     HealthMonitor health_;
     ReactorPool pool_;

@@ -55,6 +55,7 @@ add_executable(nexus-tests
   unit/broker/topic_manager_test.cpp
   unit/broker/topic_catalog_test.cpp
   unit/broker/offset_manager_test.cpp
+  unit/broker/group_catalog_test.cpp
   unit/broker/credit_window_test.cpp
   unit/broker/request_router_test.cpp
   unit/server/admin_api_test.cpp

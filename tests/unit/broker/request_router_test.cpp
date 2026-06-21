@@ -10,9 +10,12 @@
 #include <string>
 #include <vector>
 
+#include "broker/group_coordinator.hpp"
+#include "broker/offset_manager.hpp"
 #include "broker/topic_manager.hpp"
 #include "common/bytes.hpp"
 #include "common/error.hpp"
+#include "common/fnv1a.hpp"
 #include "common/record.hpp"
 #include "common/task.hpp"
 #include "common/types.hpp"
@@ -363,8 +366,12 @@ TEST(RequestRouter, ProduceLuegoFetch_EnrutadoAlNucleoDueno) {
 
     // El router atiende en el núcleo 0; opera p1 en el núcleo 1 vía PartitionRouter.
     nexus::PartitionRouter partitions{{&r0, &r1}};
+    nexus::GroupCoordinator g0;
+    nexus::GroupCoordinator g1;
+    nexus::OffsetManager o0;
+    nexus::OffsetManager o1;
     nexus::RequestRouter router{t0, 0, "127.0.0.1", 9092};
-    router.bind_cluster(r0, partitions, {&t0, &t1});
+    router.bind_cluster(r0, partitions, {&t0, &t1}, {&g0, &g1}, {&o0, &o1});
 
     auto pump = [&](bool& done) {
         for (int i = 0; i < 64 && !done; ++i) {
@@ -427,8 +434,12 @@ TEST(RequestRouter, CreateLuegoDeleteTopic_FanOutATodosLosNucleos) {
     nexus::TopicManager t0{dir.path(), /*num_cores=*/2, /*owner_core=*/0};
     nexus::TopicManager t1{dir.path(), /*num_cores=*/2, /*owner_core=*/1};
     nexus::PartitionRouter partitions{{&r0, &r1}};
+    nexus::GroupCoordinator g0;
+    nexus::GroupCoordinator g1;
+    nexus::OffsetManager o0;
+    nexus::OffsetManager o1;
     nexus::RequestRouter router{t0, 0, "127.0.0.1", 9092};
-    router.bind_cluster(r0, partitions, {&t0, &t1});
+    router.bind_cluster(r0, partitions, {&t0, &t1}, {&g0, &g1}, {&o0, &o1});
 
     auto pump = [&](bool& done) {
         for (int i = 0; i < 64 && !done; ++i) {
@@ -494,6 +505,67 @@ TEST(RequestRouter, CreateLuegoDeleteTopic_FanOutATodosLosNucleos) {
     EXPECT_EQ(dresp->error_code, nexus::WireError::None);
     EXPECT_EQ(t0.topic_count(), 0U);
     EXPECT_EQ(t1.topic_count(), 0U);
+}
+
+TEST(RequestRouter, GrupoYOffset_EnrutadosAlNucleoCoordinador) {
+    TempDir dir{"groupshard"};
+    // Dos reactores; coordinadores y offsets por núcleo (los grupos/offsets no tocan particiones).
+    nexus::Reactor r0{0, 2, std::make_unique<nexus::FakeProactor>()};
+    nexus::Reactor r1{1, 2, std::make_unique<nexus::FakeProactor>()};
+    r0.connect_peers({&r0, &r1});
+    r1.connect_peers({&r0, &r1});
+    nexus::TopicManager t0{dir.path(), /*num_cores=*/2, /*owner_core=*/0};
+    nexus::TopicManager t1{dir.path(), /*num_cores=*/2, /*owner_core=*/1};
+    nexus::PartitionRouter partitions{{&r0, &r1}};
+    nexus::GroupCoordinator g0;
+    nexus::GroupCoordinator g1;
+    nexus::OffsetManager o0;
+    nexus::OffsetManager o1;
+    nexus::RequestRouter router{t0, 0, "127.0.0.1", 9092};
+    router.bind_cluster(r0, partitions, {&t0, &t1}, {&g0, &g1}, {&o0, &o1});
+
+    auto pump = [&](bool& done) {
+        for (int i = 0; i < 64 && !done; ++i) {
+            r0.poll_once();
+            r1.poll_once();
+        }
+    };
+
+    // Elige un grupo cuyo núcleo coordinador es el 1 (`hash % 2 == 1`): así el OffsetCommit/Join
+    // atendidos en el núcleo 0 cruzan de verdad al núcleo 1 (no es el fast-path local, ADR-0026).
+    std::string group;
+    for (int i = 0; group.empty(); ++i) {
+        std::string candidate = "grp-" + std::to_string(i);
+        if (nexus::fnv1a_64(candidate) % 2 == 1) {
+            group = std::move(candidate);
+        }
+    }
+
+    // OffsetCommit atendido en el núcleo 0 → aterriza en el OffsetManager del núcleo 1.
+    nexus::Buffer cbody = encode_request(nexus::OffsetCommitRequest{
+        .group = group, .topic = "t", .partition = 0, .offset = 99, .metadata = ""});
+    nexus::Decoder cdec{cbody.as_span()};
+    nexus::Buffer cout;
+    bool cdone = false;
+    r0.spawn(drive_dispatch(router, nexus::ApiKey::OffsetCommit, cdec, cout, cdone));
+    pump(cdone);
+    ASSERT_TRUE(cdone);
+    const nexus::expected<nexus::Offset> on1 = o1.fetch(group, "t", 0);
+    ASSERT_TRUE(on1.has_value());
+    EXPECT_EQ(*on1, 99);
+    EXPECT_FALSE(o0.fetch(group, "t", 0).has_value());  // no aterrizó en el núcleo 0.
+
+    // JoinGroup atendido en el núcleo 0 → la membresía aterriza en el coordinador del núcleo 1.
+    nexus::Buffer jbody = encode_request(nexus::JoinGroupRequest{
+        .group = group, .member_id = "", .session_timeout_ms = 30000, .subscription = {}});
+    nexus::Decoder jdec{jbody.as_span()};
+    nexus::Buffer jout;
+    bool jdone = false;
+    r0.spawn(drive_dispatch(router, nexus::ApiKey::JoinGroup, jdec, jout, jdone));
+    pump(jdone);
+    ASSERT_TRUE(jdone);
+    EXPECT_EQ(g1.group_count(), 1U);
+    EXPECT_EQ(g0.group_count(), 0U);
 }
 
 }  // namespace

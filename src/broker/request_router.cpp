@@ -6,19 +6,28 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
+#include <span>
+#include <string>
+#include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "broker/consumer_group.hpp"
 #include "broker/group_coordinator.hpp"
+#include "broker/offset_manager.hpp"
 #include "broker/partition.hpp"
 #include "broker/topic.hpp"
 #include "broker/topic_cluster.hpp"
+#include "common/fnv1a.hpp"
 #include "common/record.hpp"
 #include "common/types.hpp"
 #include "protocol/codec.hpp"
 #include "protocol/error_code.hpp"
 #include "protocol/messages.hpp"
+#include "reactor/cross_core_call.hpp"
+#include "reactor/partition_router.hpp"
 
 namespace nexus {
 
@@ -26,6 +35,27 @@ namespace {
 
 /// Tope de lectura por defecto cuando el cliente no acota `max_bytes` (anti-respuesta-gigante).
 constexpr std::size_t kDefaultFetchBytes = 1UL * 1024 * 1024;
+
+/// @brief Ejecuta @p fn sobre el shard (`GroupCoordinator`/`OffsetManager`) del **núcleo
+///   coordinador** de @p group (= `fnv1a_64(group) % N`, ADR-0026) por paso de mensajes y reanuda
+///   al llamante con la respuesta que devuelve. Sin cablear (@p partitions `nullptr`, tests)
+///   ejecuta sobre @p local en el propio hilo.
+/// @details @p fn corre **en el hilo del núcleo coordinador**: solo debe tocar su shard (o estado
+///   inmutable). El shard se resuelve aquí y se captura por referencia (vive en el `GroupCatalog`,
+///   estable); @p fn (que captura la petición decodificada por valor) se mueve al *frame*.
+template <class Shard, class Fn>
+task<std::invoke_result_t<Fn, Shard&>> on_group_owner(Reactor* self, PartitionRouter* partitions,
+                                                      std::span<Shard* const> by_core, Shard& local,
+                                                      std::string_view group, Fn fn) {
+    if (partitions == nullptr) {
+        co_return fn(local);  // sin cablear (tests): operación local en el propio hilo.
+    }
+    const auto cores = static_cast<std::uint64_t>(partitions->core_count());
+    const auto owner = static_cast<std::size_t>(fnv1a_64(group) % cores);
+    Shard& shard = *by_core[owner];
+    co_return co_await call_on(*self, partitions->reactor(static_cast<int>(owner)),
+                               [&shard, fn = std::move(fn)]() mutable { return fn(shard); });
+}
 
 /// Localiza la partición destino; `nullptr` si el topic o la partición no existen.
 Partition* find_partition(TopicManager& topics, const std::string& topic, PartitionId partition) {
@@ -83,25 +113,15 @@ FetchOutcome handle_fetch(TopicManager& topics, const FetchRequest& req) {
     return out;
 }
 
-OffsetCommitResponse handle_offset_commit(OffsetManager& offsets, Decoder& body) {
-    const expected<OffsetCommitRequest> req = OffsetCommitRequest::decode(body);
-    OffsetCommitResponse resp;
-    if (!req) {
-        resp.error_code = WireError::InvalidRequest;
-        return resp;
-    }
-    offsets.commit(req->group, req->topic, req->partition, req->offset, req->metadata);
-    return resp;
+OffsetCommitResponse handle_offset_commit(OffsetManager& offsets, const OffsetCommitRequest& req) {
+    offsets.commit(req.group, req.topic, req.partition, req.offset, req.metadata);
+    return OffsetCommitResponse{};
 }
 
-OffsetFetchResponse handle_offset_fetch(const OffsetManager& offsets, Decoder& body) {
-    const expected<OffsetFetchRequest> req = OffsetFetchRequest::decode(body);
+OffsetFetchResponse handle_offset_fetch(const OffsetManager& offsets,
+                                        const OffsetFetchRequest& req) {
     OffsetFetchResponse resp;
-    if (!req) {
-        resp.error_code = WireError::InvalidRequest;
-        return resp;
-    }
-    if (const expected<Offset> offset = offsets.fetch(req->group, req->topic, req->partition);
+    if (const expected<Offset> offset = offsets.fetch(req.group, req.topic, req.partition);
         offset) {
         resp.offset = *offset;
     } else {
@@ -110,16 +130,11 @@ OffsetFetchResponse handle_offset_fetch(const OffsetManager& offsets, Decoder& b
     return resp;
 }
 
-JoinGroupResponse handle_join_group(GroupCoordinator& groups, MonoTime now, Decoder& body) {
-    expected<JoinGroupRequest> req = JoinGroupRequest::decode(body);
+JoinGroupResponse handle_join_group(GroupCoordinator& groups, MonoTime now, JoinGroupRequest req) {
     JoinGroupResponse resp;
-    if (!req) {
-        resp.error_code = WireError::InvalidRequest;
-        return resp;
-    }
     const expected<JoinResult> result =
-        groups.join(now, req->group, std::move(req->member_id), std::move(req->subscription),
-                    std::chrono::milliseconds{req->session_timeout_ms});
+        groups.join(now, req.group, std::move(req.member_id), std::move(req.subscription),
+                    std::chrono::milliseconds{req.session_timeout_ms});
     if (!result) {
         resp.error_code = from_error(result.error());
         return resp;
@@ -136,21 +151,17 @@ JoinGroupResponse handle_join_group(GroupCoordinator& groups, MonoTime now, Deco
     return resp;
 }
 
-SyncGroupResponse handle_sync_group(GroupCoordinator& groups, MonoTime now, Decoder& body) {
-    const expected<SyncGroupRequest> req = SyncGroupRequest::decode(body);
+SyncGroupResponse handle_sync_group(GroupCoordinator& groups, MonoTime now,
+                                    const SyncGroupRequest& req) {
     SyncGroupResponse resp;
-    if (!req) {
-        resp.error_code = WireError::InvalidRequest;
-        return resp;
-    }
     std::vector<MemberAssignment> assignments;
-    assignments.reserve(req->assignments.size());
-    for (const GroupAssignment& entry : req->assignments) {
+    assignments.reserve(req.assignments.size());
+    for (const GroupAssignment& entry : req.assignments) {
         assignments.push_back(
             MemberAssignment{.member_id = entry.member_id, .assignment = entry.assignment});
     }
     const expected<SyncResult> result =
-        groups.sync(now, req->group, req->member_id, req->generation, assignments);
+        groups.sync(now, req.group, req.member_id, req.generation, assignments);
     if (!result) {
         resp.error_code = from_error(result.error());
         return resp;
@@ -163,15 +174,11 @@ SyncGroupResponse handle_sync_group(GroupCoordinator& groups, MonoTime now, Deco
     return resp;
 }
 
-HeartbeatResponse handle_heartbeat(GroupCoordinator& groups, MonoTime now, Decoder& body) {
-    const expected<HeartbeatRequest> req = HeartbeatRequest::decode(body);
+HeartbeatResponse handle_heartbeat(GroupCoordinator& groups, MonoTime now,
+                                   const HeartbeatRequest& req) {
     HeartbeatResponse resp;
-    if (!req) {
-        resp.error_code = WireError::InvalidRequest;
-        return resp;
-    }
     const expected<HeartbeatStatus> status =
-        groups.heartbeat(now, req->group, req->member_id, req->generation);
+        groups.heartbeat(now, req.group, req.member_id, req.generation);
     if (!status) {
         resp.error_code = from_error(status.error());
         return resp;
@@ -182,14 +189,9 @@ HeartbeatResponse handle_heartbeat(GroupCoordinator& groups, MonoTime now, Decod
     return resp;
 }
 
-LeaveGroupResponse handle_leave_group(GroupCoordinator& groups, Decoder& body) {
-    const expected<LeaveGroupRequest> req = LeaveGroupRequest::decode(body);
+LeaveGroupResponse handle_leave_group(GroupCoordinator& groups, const LeaveGroupRequest& req) {
     LeaveGroupResponse resp;
-    if (!req) {
-        resp.error_code = WireError::InvalidRequest;
-        return resp;
-    }
-    if (const expected<void> left = groups.leave(req->group, req->member_id); !left) {
+    if (const expected<void> left = groups.leave(req.group, req.member_id); !left) {
         resp.error_code = from_error(left.error());
     }
     return resp;
@@ -354,32 +356,120 @@ task<expected<void>> RequestRouter::dispatch(ApiKey key, std::uint16_t /*api_ver
             resp.encode(enc);
             co_return expected<void>{};
         }
-        case ApiKey::OffsetCommit: {
-            handle_offset_commit(offsets_, body).encode(enc);
-            co_return expected<void>{};
-        }
-        case ApiKey::OffsetFetch: {
-            handle_offset_fetch(offsets_, body).encode(enc);
-            co_return expected<void>{};
-        }
-        case ApiKey::JoinGroup: {
-            handle_join_group(groups_, std::chrono::steady_clock::now(), body).encode(enc);
-            co_return expected<void>{};
-        }
-        case ApiKey::SyncGroup: {
-            handle_sync_group(groups_, std::chrono::steady_clock::now(), body).encode(enc);
-            co_return expected<void>{};
-        }
-        case ApiKey::Heartbeat: {
-            handle_heartbeat(groups_, std::chrono::steady_clock::now(), body).encode(enc);
-            co_return expected<void>{};
-        }
-        case ApiKey::LeaveGroup: {
-            handle_leave_group(groups_, body).encode(enc);
-            co_return expected<void>{};
-        }
+        case ApiKey::OffsetCommit:
+            co_return co_await dispatch_offset_commit(body, enc);
+        case ApiKey::OffsetFetch:
+            co_return co_await dispatch_offset_fetch(body, enc);
+        case ApiKey::JoinGroup:
+            co_return co_await dispatch_join_group(body, enc);
+        case ApiKey::SyncGroup:
+            co_return co_await dispatch_sync_group(body, enc);
+        case ApiKey::Heartbeat:
+            co_return co_await dispatch_heartbeat(body, enc);
+        case ApiKey::LeaveGroup:
+            co_return co_await dispatch_leave_group(body, enc);
     }
     co_return make_error(ErrorCode::InvalidArgument, "ApiKey desconocida");
+}
+
+task<expected<void>> RequestRouter::dispatch_offset_commit(Decoder& body, Encoder& enc) {
+    const expected<OffsetCommitRequest> req = OffsetCommitRequest::decode(body);
+    OffsetCommitResponse resp;
+    if (!req) {
+        resp.error_code = WireError::InvalidRequest;
+    } else {
+        const std::string group =
+            req->group;  // copia para el hash (la petición se mueve al lambda).
+        resp = co_await on_group_owner<OffsetManager>(
+            self_, partitions_, offsets_by_core_, offsets_, group,
+            [req = *req](OffsetManager& offsets) { return handle_offset_commit(offsets, req); });
+    }
+    resp.encode(enc);
+    co_return expected<void>{};
+}
+
+task<expected<void>> RequestRouter::dispatch_offset_fetch(Decoder& body, Encoder& enc) {
+    const expected<OffsetFetchRequest> req = OffsetFetchRequest::decode(body);
+    OffsetFetchResponse resp;
+    if (!req) {
+        resp.error_code = WireError::InvalidRequest;
+    } else {
+        const std::string group = req->group;
+        resp = co_await on_group_owner<OffsetManager>(
+            self_, partitions_, offsets_by_core_, offsets_, group,
+            [req = *req](OffsetManager& offsets) { return handle_offset_fetch(offsets, req); });
+    }
+    resp.encode(enc);
+    co_return expected<void>{};
+}
+
+task<expected<void>> RequestRouter::dispatch_join_group(Decoder& body, Encoder& enc) {
+    expected<JoinGroupRequest> req = JoinGroupRequest::decode(body);
+    JoinGroupResponse resp;
+    if (!req) {
+        resp.error_code = WireError::InvalidRequest;
+    } else {
+        const MonoTime now = std::chrono::steady_clock::now();
+        const std::string group = req->group;
+        resp = co_await on_group_owner<GroupCoordinator>(
+            self_, partitions_, groups_by_core_, groups_, group,
+            [now, req = std::move(*req)](GroupCoordinator& groups) mutable {
+                return handle_join_group(groups, now, std::move(req));
+            });
+    }
+    resp.encode(enc);
+    co_return expected<void>{};
+}
+
+task<expected<void>> RequestRouter::dispatch_sync_group(Decoder& body, Encoder& enc) {
+    const expected<SyncGroupRequest> req = SyncGroupRequest::decode(body);
+    SyncGroupResponse resp;
+    if (!req) {
+        resp.error_code = WireError::InvalidRequest;
+    } else {
+        const MonoTime now = std::chrono::steady_clock::now();
+        const std::string group = req->group;
+        resp = co_await on_group_owner<GroupCoordinator>(
+            self_, partitions_, groups_by_core_, groups_, group,
+            [now, req = *req](GroupCoordinator& groups) {
+                return handle_sync_group(groups, now, req);
+            });
+    }
+    resp.encode(enc);
+    co_return expected<void>{};
+}
+
+task<expected<void>> RequestRouter::dispatch_heartbeat(Decoder& body, Encoder& enc) {
+    const expected<HeartbeatRequest> req = HeartbeatRequest::decode(body);
+    HeartbeatResponse resp;
+    if (!req) {
+        resp.error_code = WireError::InvalidRequest;
+    } else {
+        const MonoTime now = std::chrono::steady_clock::now();
+        const std::string group = req->group;
+        resp = co_await on_group_owner<GroupCoordinator>(
+            self_, partitions_, groups_by_core_, groups_, group,
+            [now, req = *req](GroupCoordinator& groups) {
+                return handle_heartbeat(groups, now, req);
+            });
+    }
+    resp.encode(enc);
+    co_return expected<void>{};
+}
+
+task<expected<void>> RequestRouter::dispatch_leave_group(Decoder& body, Encoder& enc) {
+    const expected<LeaveGroupRequest> req = LeaveGroupRequest::decode(body);
+    LeaveGroupResponse resp;
+    if (!req) {
+        resp.error_code = WireError::InvalidRequest;
+    } else {
+        const std::string group = req->group;
+        resp = co_await on_group_owner<GroupCoordinator>(
+            self_, partitions_, groups_by_core_, groups_, group,
+            [req = *req](GroupCoordinator& groups) { return handle_leave_group(groups, req); });
+    }
+    resp.encode(enc);
+    co_return expected<void>{};
 }
 
 }  // namespace nexus

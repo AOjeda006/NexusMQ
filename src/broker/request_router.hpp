@@ -22,6 +22,7 @@
 namespace nexus {
 
 class Decoder;
+class Encoder;
 
 /// @brief Traduce una petición (cuerpo ya enmarcado) en su respuesta, sobre la lógica del broker.
 ///   Afinidad: REACTOR-LOCAL.
@@ -47,12 +48,22 @@ public:
     /// @param topics_by_core `TopicManager` de cada núcleo, **indexado por `core_id`**; la
     /// operación
     ///   enrutada toca el del dueño. Para `N == 1` es `{ &topics }`.
-    /// @pre `self`, `partitions` y los punteros de `topics_by_core` viven más que este router.
+    /// @param groups_by_core `GroupCoordinator` de cada núcleo (indexado por `core_id`); la
+    /// operación
+    ///   de grupo toca el del núcleo coordinador (`hash(group_id) % N`, ADR-0026).
+    /// @param offsets_by_core `OffsetManager` de cada núcleo (indexado por `core_id`); el offset de
+    ///   un grupo vive en su núcleo coordinador, junto a su membresía.
+    /// @pre `self`, `partitions` y los punteros de los tres vectores viven más que este router; los
+    ///   tres vectores tienen `partitions.core_count()` elementos.
     void bind_cluster(Reactor& self, PartitionRouter& partitions,
-                      std::vector<TopicManager*> topics_by_core) noexcept {
+                      std::vector<TopicManager*> topics_by_core,
+                      std::vector<GroupCoordinator*> groups_by_core,
+                      std::vector<OffsetManager*> offsets_by_core) noexcept {
         self_ = &self;
         partitions_ = &partitions;
         topics_by_core_ = std::move(topics_by_core);
+        groups_by_core_ = std::move(groups_by_core);
+        offsets_by_core_ = std::move(offsets_by_core);
     }
 
     /// @brief Despacha @p key (cuerpo en @p body) y escribe la respuesta codificada en @p out.
@@ -65,10 +76,6 @@ public:
 
     /// Rangos de versión que soporta este servidor (para `ApiVersions` y la negociación).
     [[nodiscard]] static std::vector<ApiVersionRange> supported_versions();
-
-    /// @brief Coordinador de grupos de este reactor (plano de control: lo lee el puerto de admin).
-    /// @details REACTOR-LOCAL: el llamante debe estar en el hilo del reactor del router.
-    [[nodiscard]] const GroupCoordinator& group_coordinator() const noexcept { return groups_; }
 
 private:
     /// @brief Crea @p name (con @p partition_count particiones) en **todos** los núcleos vía
@@ -87,6 +94,20 @@ private:
     /// @note Sin cablear al clúster (`partitions_ == nullptr`, tests unitarios) borra localmente.
     [[nodiscard]] task<expected<void>> delete_topic_cluster(const std::string& name);
 
+    /// @brief Despacha una operación de grupo/offset enrutándola al **núcleo coordinador** del
+    /// grupo
+    ///   (`hash(group_id) % N`, ADR-0026): decodifica el cuerpo, ejecuta la mutación en el shard de
+    ///   ese núcleo por paso de mensajes (`call_on`) y codifica la respuesta en @p enc.
+    /// @details Sin cablear al clúster (`partitions_ == nullptr`, tests unitarios) opera sobre el
+    ///   coordinador/almacén local. El cuerpo decodificado se mueve al *frame* de la corrutina, así
+    ///   que sobrevive al salto cross-core.
+    [[nodiscard]] task<expected<void>> dispatch_offset_commit(Decoder& body, Encoder& enc);
+    [[nodiscard]] task<expected<void>> dispatch_offset_fetch(Decoder& body, Encoder& enc);
+    [[nodiscard]] task<expected<void>> dispatch_join_group(Decoder& body, Encoder& enc);
+    [[nodiscard]] task<expected<void>> dispatch_sync_group(Decoder& body, Encoder& enc);
+    [[nodiscard]] task<expected<void>> dispatch_heartbeat(Decoder& body, Encoder& enc);
+    [[nodiscard]] task<expected<void>> dispatch_leave_group(Decoder& body, Encoder& enc);
+
     TopicManager& topics_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     NodeId node_id_;
     std::string host_;
@@ -96,9 +117,15 @@ private:
     PartitionRouter* partitions_ = nullptr;
     /// `TopicManager` por núcleo (indexado por `core_id`); la operación enrutada toca el del dueño.
     std::vector<TopicManager*> topics_by_core_;
-    /// Offsets confirmados por grupo (REACTOR-LOCAL: uno por router/reactor; ver `OffsetManager`).
+    /// `GroupCoordinator` por núcleo (indexado por `core_id`); destino del enrutado de grupo.
+    std::vector<GroupCoordinator*> groups_by_core_;
+    /// `OffsetManager` por núcleo (indexado por `core_id`); destino del enrutado de offsets.
+    std::vector<OffsetManager*> offsets_by_core_;
+    /// Offsets confirmados (REACTOR-LOCAL); solo se usa **sin cablear** (tests): ver
+    /// `OffsetManager`.
     OffsetManager offsets_;
-    /// Membresía de los grupos de consumidores (REACTOR-LOCAL; ver `GroupCoordinator`).
+    /// Membresía de grupos (REACTOR-LOCAL); solo se usa **sin cablear** (tests): ver
+    /// `GroupCoordinator`.
     GroupCoordinator groups_;
 };
 

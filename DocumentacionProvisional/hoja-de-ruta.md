@@ -974,10 +974,17 @@ Harness de benchmark vacío y CI:
       ambos núcleos (producir a su partición del núcleo 1 solo funciona si el fan-out la creó allí). Valida el
       camino *thread-per-core* de punta a punta y, **bajo TSan**, que no tiene carreras. 663/663 en
       GCC/Clang/ASan/**TSan**.
-    - [ ] **D3.4c** *(resto)* grupos/offsets por `hash(group_id)` (coordinador por grupo; hoy correcto porque
-      las conexiones se sirven solo en el núcleo 0); decidir **encender N>1 por defecto** (hoy `num_reactors=1`;
-      N>1 es opt-in por config y ya está validado e2e). (`describe_topic` del admin a N>1 solo ve los watermarks
-      de las particiones del núcleo 0: pendiente de agregación cross-core.)
+    - [x] **D3.4c-7** **Grupos/offsets enrutados al núcleo coordinador** (`hash(group_id) % N`, ADR-0026):
+      `common/fnv1a.hpp` (FNV-1a 64 estable, reutilizado por el balanceador); `GroupCatalog` posee un
+      `GroupShard` (`GroupCoordinator` + `OffsetManager`) **por núcleo**; `RequestRouter::bind_cluster` recibe
+      `groups_by_core`/`offsets_by_core` y enruta Join/Sync/Heartbeat/Leave/OffsetCommit/OffsetFetch al shard del
+      núcleo coordinador por paso de mensajes (`call_on`), decodificando en el borde y moviendo la petición al
+      *frame*. Cada grupo tiene **dueño único** (linealizable sin locks). 672/672 en GCC/Clang/ASan/**TSan**.
+    - [ ] **D3.4c** *(resto)* **agregación cross-core del admin** a N>1: `list_groups` hoy solo ve los grupos
+      coordinados en el núcleo 0 y `describe_topic` solo los watermarks de las particiones del núcleo 0 — falta
+      agregar con `call_on` sobre todos los núcleos (requiere `list_groups`/`describe_topic` asíncronos en el
+      puerto admin). Con N=1 ambos son completos. Luego, **decidir encender N>1 por defecto** (hoy
+      `num_reactors=1`; N>1 es opt-in por config y ya está validado e2e).
     - [ ] **D3.4d** `ReplicatedPartition` (en vez de `Partition`) cuando `replication_factor > 1`, conducida por
       su `RaftCarrier` en el reactor dueño (tick desde el bucle del reactor).
   - [ ] **D3.5** Transporte inter-nodo **real** detrás del `RaftMessageSink`: conexiones TCP persistentes

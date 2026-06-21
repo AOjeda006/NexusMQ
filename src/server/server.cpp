@@ -56,6 +56,7 @@ task<void> admin_accept_loop(Reactor& reactor, Listener& listener, const AdminRo
 Server::Server(Config config, ReactorPool::ProactorFactory proactor_factory)
     : config_(std::move(config)),
       catalog_(config_.data_dir, config_.num_reactors),
+      group_catalog_(config_.num_reactors),
       proactor_factory_(proactor_factory ? std::move(proactor_factory) : make_io_uring_proactor) {
     if (config_.num_reactors <= 0) {
         config_.num_reactors = 1;
@@ -70,9 +71,9 @@ Server::Server(Config config, ReactorPool::ProactorFactory proactor_factory)
     }
     // `emplace` devuelve la referencia al objeto construido: la usamos directamente para no
     // desreferenciar el `optional` recién poblado (bugprone-unchecked-optional-access en tidy-18).
-    // El admin (REST) opera sobre el manager del núcleo 0, que tiene los metadatos completos. En
-    // N=1 es el único; con N>1, crear/borrar topic desde el admin REST aún no propaga a los demás
-    // núcleos (necesita ruta async; pendiente en D3.4c) — por eso N>1 no está activado por defecto.
+    // El admin (REST) opera sobre el manager del núcleo 0 para las lecturas locales (describe/list
+    // de topics, con metadatos completos en cada núcleo); crear/borrar topic se propaga a todos los
+    // núcleos por paso de mensajes una vez cableado (`bind_cluster`, ADR-0026).
     AdminApi& api = admin_api_.emplace(catalog_.manager(0), config_.node_id,
                                        [this](Page page) { return list_groups(page); });
     RestGateway& rest = rest_.emplace(api, verifier);
@@ -83,11 +84,11 @@ Server::Server(Config config, ReactorPool::ProactorFactory proactor_factory)
     }
 }
 
-std::vector<GroupSummary> Server::list_groups(Page page) const {
-    if (!router_) {
-        return {};
-    }
-    const std::vector<GroupDigest> digests = router_->group_coordinator().list_groups();
+std::vector<GroupSummary> Server::list_groups(Page page) {
+    // Lee el coordinador del núcleo 0 (mismo hilo que el admin, sin carrera). Con N=1 todo grupo se
+    // coordina ahí (todo `hash % 1 == 0`), así que la lista es completa; con N>1 solo ve los grupos
+    // coordinados en el núcleo 0 — la agregación cross-core del listado queda pendiente (D3.4c).
+    const std::vector<GroupDigest> digests = group_catalog_.groups(0).list_groups();
     std::vector<GroupSummary> summaries;
     summaries.reserve(digests.size());
     for (const GroupDigest& digest : digests) {
@@ -167,7 +168,8 @@ void Server::run() {
         reactors.push_back(&pool_.reactor(core));
     }
     partition_router_.emplace(std::move(reactors));
-    router_->bind_cluster(main, *partition_router_, catalog_.managers());
+    router_->bind_cluster(main, *partition_router_, catalog_.managers(),
+                          group_catalog_.all_groups(), group_catalog_.all_offsets());
     if (admin_api_) {
         // El admin REST también propaga crear/borrar topic a todos los núcleos (ADR-0026).
         admin_api_->bind_cluster(main, *partition_router_, catalog_.managers());
