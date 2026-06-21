@@ -68,6 +68,27 @@ TEST(ReactorPool, SubmitTo_EntregaTrabajoEnCadaReactor) {
     pool.shutdown();
 }
 
+TEST(ReactorPool, StartMainInline_NoLanzaHiloDelNucleo0_ElLlamanteLoConduce) {
+    nexus::ReactorPool pool;
+    pool.start_main_inline(2, make_fake);
+    EXPECT_EQ(pool.size(), 2);
+
+    std::atomic<int> counter{0};
+    // El worker (núcleo 1) corre en su hilo: el trabajo se ejecuta sin que nadie lo conduzca.
+    pool.reactor(1).submit_to(1, [&counter] { counter.fetch_add(1, std::memory_order_relaxed); });
+    EXPECT_TRUE(wait_until_eq(counter, 1));
+
+    // El núcleo 0 NO tiene hilo: su trabajo solo avanza cuando el llamante lo conduce (poll_once).
+    pool.reactor(0).submit_to(0, [&counter] { counter.fetch_add(1, std::memory_order_relaxed); });
+    for (int i = 0; i < 100 && counter.load(std::memory_order_acquire) < 2; ++i) {
+        pool.reactor(0).poll_once();
+    }
+    EXPECT_EQ(counter.load(std::memory_order_acquire), 2);
+
+    pool.reactor(0).stop();
+    pool.shutdown();
+}
+
 #ifdef NEXUS_HAVE_IOURING
 TEST(ReactorPool, IoUring_SubmitTo_DespiertaAlReactorBloqueado) {
     // Comprueba disponibilidad real de io_uring; si no, se omite.

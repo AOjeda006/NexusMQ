@@ -33,7 +33,7 @@ ReactorPool::~ReactorPool() {
     shutdown();
 }
 
-void ReactorPool::start(int num_reactors, const ProactorFactory& make_proactor) {
+void ReactorPool::create_and_wire(int num_reactors, const ProactorFactory& make_proactor) {
     reactors_.reserve(static_cast<std::size_t>(num_reactors));
     for (int core = 0; core < num_reactors; ++core) {
         reactors_.push_back(std::make_unique<Reactor>(core, num_reactors, make_proactor(core)));
@@ -48,13 +48,27 @@ void ReactorPool::start(int num_reactors, const ProactorFactory& make_proactor) 
     for (const std::unique_ptr<Reactor>& reactor : reactors_) {
         reactor->connect_peers(peers);
     }
-
-    // Lanza un hilo por reactor, fijado a su núcleo.
     threads_.reserve(reactors_.size());
+}
+
+void ReactorPool::launch(int core) {
+    Reactor* reactor = reactors_[static_cast<std::size_t>(core)].get();
+    threads_.emplace_back([reactor] { reactor->run(); });
+    pin_thread_to_core(threads_.back(), core);
+}
+
+void ReactorPool::start(int num_reactors, const ProactorFactory& make_proactor) {
+    create_and_wire(num_reactors, make_proactor);
     for (int core = 0; core < num_reactors; ++core) {
-        Reactor* reactor = reactors_[static_cast<std::size_t>(core)].get();
-        threads_.emplace_back([reactor] { reactor->run(); });
-        pin_thread_to_core(threads_.back(), core);
+        launch(core);
+    }
+}
+
+void ReactorPool::start_main_inline(int num_reactors, const ProactorFactory& make_proactor) {
+    create_and_wire(num_reactors, make_proactor);
+    // El núcleo 0 lo corre el llamante (Server::run); aquí solo los workers 1..N-1.
+    for (int core = 1; core < num_reactors; ++core) {
+        launch(core);
     }
 }
 

@@ -43,6 +43,14 @@ public:
     ///   un hilo por reactor fijado a su núcleo. Llamar una sola vez.
     void start(int num_reactors, const ProactorFactory& make_proactor);
 
+    /// @brief Como `start`, pero **no** lanza hilo para el núcleo 0: lo corre el llamante (inline).
+    /// @details Para un daemon cuyo hilo principal debe **correr** un reactor y atender señales:
+    ///   tras esta llamada, los núcleos 1..N-1 corren en sus hilos y el llamante debe invocar
+    ///   `reactor(0).run()` (bloquea). Así el apagado del núcleo 0 sigue siendo `reactor(0).stop()`
+    ///   —escribe un `eventfd`, **async-signal-safe**— y no hace falta un mecanismo de espera extra
+    ///   en el hilo principal. `shutdown()` para y une el resto. Llamar una sola vez.
+    void start_main_inline(int num_reactors, const ProactorFactory& make_proactor);
+
     /// @brief Apagado ordenado: `stop()` a todos los reactores y `join` de sus hilos. Idempotente.
     void shutdown();
 
@@ -56,6 +64,11 @@ public:
     [[nodiscard]] int size() const noexcept { return static_cast<int>(reactors_.size()); }
 
 private:
+    /// Crea los @p num_reactors reactores (proactor de @p make_proactor) y cablea sus peers.
+    void create_and_wire(int num_reactors, const ProactorFactory& make_proactor);
+    /// Lanza un hilo para el reactor @p core (que corre su bucle), fijado a su núcleo.
+    void launch(int core);
+
     std::vector<std::unique_ptr<Reactor>> reactors_;
     std::vector<std::thread> threads_;  // un hilo por reactor (jthread no está en libc++ 18)
 };
