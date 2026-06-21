@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "broker/request_router.hpp"
+#include "broker/topic_catalog.hpp"
 #include "broker/topic_manager.hpp"
 #include "common/error.hpp"
 #include "common/types.hpp"
@@ -76,7 +77,8 @@ public:
     Server& operator=(Server&&) = delete;
 
     /// Crea un topic con @p partition_count particiones (plano de control; antes de servir).
-    [[nodiscard]] expected<void> create_topic(std::string name, std::int32_t partition_count);
+    [[nodiscard]] expected<void> create_topic(const std::string& name,
+                                              std::int32_t partition_count);
 
     /// Enlaza el listener y prepara el router con el puerto efectivo. Idempotente-no: llamar una
     /// vez.
@@ -99,7 +101,9 @@ private:
     [[nodiscard]] std::vector<GroupSummary> list_groups(Page page) const;
 
     Config config_;
-    TopicManager topics_;
+    /// Catálogo de topics fragmentado por núcleo (ADR-0026): un `TopicManager` por reactor. El del
+    /// núcleo 0 atiende las conexiones; el plano de datos enruta cada partición a su dueño.
+    TopicCatalog catalog_;
     MetricsRegistry metrics_;
     HealthMonitor health_;
     ReactorPool pool_;

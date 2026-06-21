@@ -7,6 +7,7 @@ add_library(nexus-broker
   consumer_group.cpp
   group_coordinator.cpp
   topic_manager.cpp
+  topic_catalog.cpp
   offset_manager.cpp
   request_router.cpp)
 add_library(nexus::broker ALIAS nexus-broker)

@@ -951,11 +951,15 @@ Harness de benchmark vacío y CI:
       fuerte). `PartitionRouter::reactor(core)` para el fan-out. Sin cablear (`partitions_==nullptr`, tests) cae
       al manager local → los 15 tests `sync_wait` intactos. Test cross-core N=2 (Create→ambos managers, Produce
       a partición de otro núcleo, Delete→ambos). 656/656 en GCC/Clang/ASan/**TSan**; format + tidy limpios.
-    - [ ] **D3.4c** *(resto)* `TopicManager` por núcleo real en el `Server` (hoy comparten uno) + cablear el
-      fan-out de admin REST (necesita ruta async en `AdminApi`/`RestGateway`); grupos/offsets por
-      `hash(group_id)`; encender N>1 por defecto + TSan/estrés. Estado del broker **fragmentado por reactor**
-      (shared-nothing): el `TopicManager`/`Partition` de cada partición vive en su reactor dueño; `dispatch`
-      enruta la operación al dueño con `call_on`.
+    - [x] **D3.4c-5** `TopicCatalog`: posee un `TopicManager` **por núcleo** (sharding ADR-0026) y crea topics
+      replicándolos a todos en el **arranque** (monohilo, con rollback/garantía fuerte). El `Server` deja de
+      tener un manager único: usa el catálogo (`manager(0)` para el router/admin que atienden en el núcleo 0;
+      `managers()` para `bind_cluster`; `create_topic` pre-run replica a todos). En N=1 (por defecto) es
+      idéntico al manager único previo; con N>1 cada partición opera ya sobre el manager de su reactor dueño.
+      Test del catálogo (réplica por núcleo, duplicado, conteo inválido). 661/661 en GCC/Clang/ASan/**TSan**.
+    - [ ] **D3.4c** *(resto)* Fan-out de **admin REST** CreateTopic/DeleteTopic a todos los núcleos (necesita
+      ruta **async** en `AdminApi`/`RestGateway`/`AdminRouter`; hoy el admin solo toca el manager del núcleo 0
+      → N>1 no activado por defecto); grupos/offsets por `hash(group_id)`; encender N>1 por defecto + TSan/estrés.
     - [ ] **D3.4d** `ReplicatedPartition` (en vez de `Partition`) cuando `replication_factor > 1`, conducida por
       su `RaftCarrier` en el reactor dueño (tick desde el bucle del reactor).
   - [ ] **D3.5** Transporte inter-nodo **real** detrás del `RaftMessageSink`: conexiones TCP persistentes

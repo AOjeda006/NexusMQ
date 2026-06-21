@@ -55,7 +55,7 @@ task<void> admin_accept_loop(Reactor& reactor, Listener& listener, const AdminRo
 
 Server::Server(Config config, ReactorPool::ProactorFactory proactor_factory)
     : config_(std::move(config)),
-      topics_(config_.data_dir),
+      catalog_(config_.data_dir, config_.num_reactors),
       proactor_factory_(proactor_factory ? std::move(proactor_factory) : make_io_uring_proactor) {
     if (config_.num_reactors <= 0) {
         config_.num_reactors = 1;
@@ -70,7 +70,10 @@ Server::Server(Config config, ReactorPool::ProactorFactory proactor_factory)
     }
     // `emplace` devuelve la referencia al objeto construido: la usamos directamente para no
     // desreferenciar el `optional` recién poblado (bugprone-unchecked-optional-access en tidy-18).
-    AdminApi& api = admin_api_.emplace(topics_, config_.node_id,
+    // El admin (REST) opera sobre el manager del núcleo 0, que tiene los metadatos completos. En
+    // N=1 es el único; con N>1, crear/borrar topic desde el admin REST aún no propaga a los demás
+    // núcleos (necesita ruta async; pendiente en D3.4c) — por eso N>1 no está activado por defecto.
+    AdminApi& api = admin_api_.emplace(catalog_.manager(0), config_.node_id,
                                        [this](Page page) { return list_groups(page); });
     RestGateway& rest = rest_.emplace(api, verifier);
     admin_router_.emplace(rest, health_, metrics_);
@@ -103,8 +106,9 @@ std::vector<GroupSummary> Server::list_groups(Page page) const {
             std::make_move_iterator(summaries.begin() + static_cast<std::ptrdiff_t>(end))};
 }
 
-expected<void> Server::create_topic(std::string name, std::int32_t partition_count) {
-    expected<TopicMetadata> meta = topics_.create_topic(std::move(name), partition_count);
+expected<void> Server::create_topic(const std::string& name, std::int32_t partition_count) {
+    // Plano de control pre-run (monohilo): el catálogo replica el topic a todos los núcleos.
+    expected<TopicMetadata> meta = catalog_.create_topic(name, partition_count);
     if (!meta) {
         return std::unexpected(meta.error());
     }
@@ -117,7 +121,8 @@ expected<void> Server::bind() {
         return std::unexpected(listener.error());
     }
     listener_ = std::move(*listener);
-    router_.emplace(topics_, config_.node_id, config_.advertised_host, listener_->local_port());
+    router_.emplace(catalog_.manager(0), config_.node_id, config_.advertised_host,
+                    listener_->local_port());
 
     if (config_.admin_port) {
         expected<Listener> admin = Listener::bind(config_.host, *config_.admin_port);
@@ -141,9 +146,10 @@ void Server::run() {
     if (!listener_ || !router_) {
         return;  // Precondición: `bind()` antes de `run()`; sin listener no hay nada que servir.
     }
-    // Arranca el pool: workers 1..N-1 en sus hilos, núcleo 0 inline (lo corremos aquí). El plano de
-    // datos vive en el núcleo 0 mientras no haya sharding (D3.4c): sin estado compartido entre
-    // hilos.
+    // Arranca el pool: workers 1..N-1 en sus hilos, núcleo 0 inline (lo corremos aquí). Las
+    // conexiones se aceptan en el núcleo 0; cada operación de partición se enruta a su reactor
+    // dueño (sharding ADR-0026), que opera sobre el `TopicManager` de ese núcleo sin compartir
+    // estado.
     pool_.start_main_inline(config_.num_reactors, proactor_factory_);
     Reactor& main = pool_.reactor(0);
     main_reactor_.store(&main, std::memory_order_release);
@@ -153,17 +159,15 @@ void Server::run() {
     }
 
     // Cablea el enrutado por partición (ADR-0026). En N=1 el dueño es el propio núcleo 0 y el
-    // fast-path de `call_on` ejecuta inline; con N>1 (sharding completo) cada partición va a su
-    // reactor dueño. De momento hay un único `TopicManager`, indexado por todos los núcleos.
+    // fast-path de `call_on` ejecuta inline; con N>1 cada partición va a su reactor dueño, que
+    // opera sobre el `TopicManager` de ese núcleo (uno por núcleo, vía el catálogo fragmentado).
     std::vector<Reactor*> reactors;
     reactors.reserve(static_cast<std::size_t>(config_.num_reactors));
     for (int core = 0; core < config_.num_reactors; ++core) {
         reactors.push_back(&pool_.reactor(core));
     }
     partition_router_.emplace(std::move(reactors));
-    router_->bind_cluster(
-        main, *partition_router_,
-        std::vector<TopicManager*>(static_cast<std::size_t>(config_.num_reactors), &topics_));
+    router_->bind_cluster(main, *partition_router_, catalog_.managers());
 
     main.spawn(accept_loop(main, *listener_, *router_));
     if (admin_listener_ && admin_router_) {
