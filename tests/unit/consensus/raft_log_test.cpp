@@ -308,6 +308,99 @@ TEST(RaftLog, Reopen_TrasCompactar_RecuperaBaseDeSnapshot) {
     EXPECT_FALSE(rlog->term_at(1).has_value());  // sigue compactado tras reabrir
 }
 
+TEST(RaftLog, InstallSnapshot_EnLogVacio_FijaBaseYReabreOffsets) {
+    const TempDir dir("inst_vacio");
+    auto plog = nexus::PartitionLog::open(dir.log_dir(), nexus::LogConfig{});
+    ASSERT_TRUE(plog.has_value());
+    auto rlog = nexus::RaftLog::open(*plog, dir.meta_path());
+    ASSERT_TRUE(rlog.has_value());
+
+    ASSERT_TRUE(rlog->install_snapshot(5, 3, 99).has_value());  // base index 5, term 3, offset 99
+    EXPECT_EQ(rlog->snapshot_index(), 5);
+    EXPECT_EQ(rlog->snapshot_term(), 3);
+    EXPECT_EQ(rlog->last_index(), 5);
+    EXPECT_EQ(rlog->last_term(), 3);
+    EXPECT_EQ(rlog->term_at(5).value(), 3);
+    EXPECT_FALSE(rlog->term_at(4).has_value());  // compactado
+    EXPECT_EQ(plog->log_end_offset(), 100);      // PartitionLog reabierto en offset+1
+
+    const auto next = append_one(*rlog, 3, 6, 1);  // la cola continúa en el índice 6
+    ASSERT_TRUE(next.has_value());
+    EXPECT_EQ(*next, 6);
+    const auto off = rlog->offsets_at(6);
+    ASSERT_TRUE(off.has_value());
+    EXPECT_EQ(off->first, 100);  // primer offset tras la base del snapshot
+}
+
+TEST(RaftLog, InstallSnapshot_DescartaLogDivergente) {
+    const TempDir dir("inst_diverg");
+    auto plog = nexus::PartitionLog::open(dir.log_dir(), nexus::LogConfig{});
+    ASSERT_TRUE(plog.has_value());
+    auto rlog = nexus::RaftLog::open(*plog, dir.meta_path());
+    ASSERT_TRUE(rlog.has_value());
+    ASSERT_TRUE(append_one(*rlog, 1, 1, 1).has_value());
+    ASSERT_TRUE(append_one(*rlog, 1, 2, 1).has_value());
+    ASSERT_TRUE(append_one(*rlog, 1, 3, 1).has_value());
+
+    // Snapshot más allá del log y con término incompatible: descarta todo y reabre en la base.
+    ASSERT_TRUE(rlog->install_snapshot(5, 2, 99).has_value());
+    EXPECT_EQ(rlog->snapshot_index(), 5);
+    EXPECT_EQ(rlog->last_index(), 5);
+    EXPECT_FALSE(rlog->term_at(1).has_value());
+    EXPECT_EQ(plog->log_end_offset(), 100);
+}
+
+TEST(RaftLog, InstallSnapshot_ConColaConsistente_CompactaYConserva) {
+    const TempDir dir("inst_consist");
+    auto plog = nexus::PartitionLog::open(dir.log_dir(), nexus::LogConfig{});
+    ASSERT_TRUE(plog.has_value());
+    auto rlog = nexus::RaftLog::open(*plog, dir.meta_path());
+    ASSERT_TRUE(rlog.has_value());
+    ASSERT_TRUE(append_one(*rlog, 1, 1, 1).has_value());  // offset 0
+    ASSERT_TRUE(append_one(*rlog, 1, 2, 1).has_value());  // offset 1
+    ASSERT_TRUE(append_one(*rlog, 2, 3, 1).has_value());  // offset 2
+    ASSERT_TRUE(append_one(*rlog, 2, 4, 1).has_value());  // offset 3
+
+    // El log ya contiene (index 2, term 1): compacta hasta ahí y conserva la cola 3,4.
+    ASSERT_TRUE(rlog->install_snapshot(2, 1, 1).has_value());
+    EXPECT_EQ(rlog->snapshot_index(), 2);
+    EXPECT_EQ(rlog->last_index(), 4);  // la cola consistente se conserva
+    EXPECT_EQ(rlog->term_at(3).value(), 2);
+}
+
+TEST(RaftLog, InstallSnapshot_Obsoleto_EsNoOp) {
+    const TempDir dir("inst_obsoleto");
+    auto plog = nexus::PartitionLog::open(dir.log_dir(), nexus::LogConfig{});
+    ASSERT_TRUE(plog.has_value());
+    auto rlog = nexus::RaftLog::open(*plog, dir.meta_path());
+    ASSERT_TRUE(rlog.has_value());
+    ASSERT_TRUE(rlog->install_snapshot(5, 3, 99).has_value());
+    ASSERT_TRUE(rlog->install_snapshot(3, 2, 50).has_value());  // obsoleto: no-op
+    EXPECT_EQ(rlog->snapshot_index(), 5);
+    EXPECT_EQ(rlog->snapshot_term(), 3);
+}
+
+TEST(RaftLog, Reopen_TrasInstallSnapshot_RecuperaBase) {
+    const TempDir dir("inst_reopen");
+    {
+        auto plog = nexus::PartitionLog::open(dir.log_dir(), nexus::LogConfig{});
+        ASSERT_TRUE(plog.has_value());
+        auto rlog = nexus::RaftLog::open(*plog, dir.meta_path());
+        ASSERT_TRUE(rlog.has_value());
+        ASSERT_TRUE(rlog->install_snapshot(5, 3, 99).has_value());
+        ASSERT_TRUE(append_one(*rlog, 3, 6, 1).has_value());  // offset 100
+        ASSERT_TRUE(plog->sync().has_value());
+    }
+    auto plog = nexus::PartitionLog::open(dir.log_dir(), nexus::LogConfig{});
+    ASSERT_TRUE(plog.has_value());
+    auto rlog = nexus::RaftLog::open(*plog, dir.meta_path());
+    ASSERT_TRUE(rlog.has_value());
+    EXPECT_EQ(rlog->snapshot_index(), 5);
+    EXPECT_EQ(rlog->snapshot_term(), 3);
+    EXPECT_EQ(rlog->last_index(), 6);
+    EXPECT_EQ(rlog->term_at(6).value(), 3);
+}
+
 TEST(RaftLog, Reopen_RecuperaIndicesYTerminos) {
     const TempDir dir("reopen");
     {

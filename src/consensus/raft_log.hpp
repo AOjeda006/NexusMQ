@@ -61,6 +61,16 @@ public:
     ///   `last_index()`; error de E/S si falla el recorte o la persistencia.
     [[nodiscard]] expected<void> compact_to(Index up_to_index);
 
+    /// @brief Adopta un snapshot recibido del líder (seguidor, ADR-0024): fija la base
+    ///   `(index, term, last_offset)` del log.
+    /// @details Lo invoca el portador al aplicar un `InstallSnapshot`. No-op si @p index ≤
+    ///   `snapshot_index()` (snapshot obsoleto). Si el log ya contiene la entrada `(index, term)`,
+    ///   compacta hasta ella conservando la cola consistente (optimización del §7 del paper); si
+    ///   no,
+    ///   **descarta todo el log** y reabre el `PartitionLog` vacío en `last_offset + 1` (la cola
+    ///   posterior llegará por `AppendEntries`). Persiste la base con `fsync`.
+    [[nodiscard]] expected<void> install_snapshot(Index index, Term term, Offset last_offset);
+
     /// @brief Término de la entrada @p index. `index == 0` → `0` (centinela); fuera de rango alto →
     ///   `OutOfRange`.
     [[nodiscard]] expected<Term> term_at(Index index) const;

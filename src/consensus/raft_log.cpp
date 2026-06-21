@@ -325,4 +325,31 @@ expected<void> RaftLog::compact_to(Index up_to_index) {
     return rewrite_meta();
 }
 
+expected<void> RaftLog::install_snapshot(Index index, Term term, Offset last_offset) {
+    if (index <= snapshot_index_) {
+        return {};  // snapshot obsoleto respecto al que ya tenemos.
+    }
+    // Si ya tenemos la entrada (index, term), basta con compactar hasta ella y conservar la cola
+    // consistente (optimización del §7 del paper de Raft).
+    if (index <= last_index()) {
+        const auto existing = term_at(index);
+        if (existing && *existing == term) {
+            return compact_to(index);
+        }
+    }
+    // Si no, descarta todo el log y reabre el PartitionLog vacío en la base del snapshot; la cola
+    // posterior llegará por `AppendEntries`.
+    if (const auto reset = log_.reset_to(last_offset + 1); !reset) {
+        return std::unexpected(reset.error());
+    }
+    entries_.clear();
+    snapshot_index_ = index;
+    snapshot_term_ = term;
+    snapshot_last_offset_ = last_offset;
+    if (const auto persisted = persist_snapshot(); !persisted) {
+        return std::unexpected(persisted.error());
+    }
+    return rewrite_meta();
+}
+
 }  // namespace nexus
