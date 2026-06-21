@@ -32,6 +32,7 @@ tags: [nexusmq, message-broker, sistemas-distribuidos, cpp20, anteproyecto, raft
 | 0.11.0  | 2026-06-20  | borrador | **Nuevo ADR-0022** (reemplaza ADR-0021): **backend IOCP (Windows) implementado** y **compile-verificado con MinGW-w64** (headers Win32 reales). `NativeHandle`/`IoResult` portables en el puerto `Proactor`; `File`/`Socket`/`Listener` con rama Win32/Winsock; `IocpBackend` sobre `GetQueuedCompletionStatusEx`/`AcceptEx`. Runtime en Windows pendiente (deuda acotada). **GitHub Actions desactivadas temporalmente** (cuota; se reactivan al publicar). |
 | 0.12.0  | 2026-06-20  | borrador | **Nuevo ADR-0023** (reemplaza ADR-0022): **backend IOCP verificado en RUNTIME sobre Windows real con MSVC** (VS 2026, MSVC 19.51, `/W4 /WX`). Arnés `tools/wincheck` (Windows-only): File (bloqueante + directa), eco IOCP por loopback end-to-end + cierre limpio y `submit_timer` — **los 4 casos PASAN**. Único arreglo necesario: portabilidad de `crc32c.cpp` a MSVC (`__cpuid` + intrínsecos SSE4.2; builtins GCC tras `#if`); el código IOCP/`File`/`Socket` no necesitó cambios. Cierra la deuda de runtime de ADR-0022. |
 | 0.13.0  | 2026-06-20  | borrador | **Nuevo ADR-0024** (Fase 4b/D2): **compactación del log de Raft por snapshot**. `RaftLog` gana una **base de snapshot** `(last_included_index, last_included_term, last_included_offset)` persistida en un **sidecar dedicado** (`raft-snapshot`, registro fijo con CRC32C); `compact_to(index)` descarta el prefijo aplicado del log (exacto en el índice) y recorta el prefijo **físico** del `PartitionLog` por **segmentos sellados enteros** (`truncate_prefix_to`, *best-effort*). La puesta al día de un seguidor muy rezagado vía **`InstallSnapshot`** (su RPC ya existía) adopta la base de snapshot del líder. |
+| 0.14.0  | 2026-06-21  | borrador | **Nuevo ADR-0025** (Fase 4b/D3): **activación en producción del stack Raft + multi-reactor con transporte inter-nodo real**. Los RPC de Raft viajan por un **plano inter-nodo separado** del plano de cliente, con un **sobre de wire** (`topic \| partition \| from \| to \| type \| payload`, longitud-prefijo) que rutea cada `RaftMessage` a la réplica `(topic, partition)` destino, reutilizando el `encode`/`decode` por RPC. Un **portador por partición** (`RaftCarrier`), afinado al reactor dueño (`PartitionRouter`), conduce la FSM (`tick`/`take_messages`/`on_*`), persiste el estado (D1) **antes** de enviar y dispara la compactación (D2) por política. El `Server` pasa a `ReactorPool` y el `RequestRouter` enruta async por reactor dueño. |
 
 > **Naturaleza del documento.** Es un documento **vivo** en estado `borrador`. Las secciones de diseño detallado por subsistema (§7) y la estrategia de calidad (§8) se profundizarán por fases. Una vez `aceptado`, un ADR no se edita: se reemplaza por otro nuevo. La decisión de arquitectura central (ADR-0005) se fija como **provisional revisable**: se reconsiderará a la luz de los *benchmarks* de la Fase 1.
 
@@ -652,7 +653,7 @@ Resumen de las estructuras nucleares con sus campos; alimenta directamente el de
 
 ### 6.7 Catálogo de ADRs
 
-Ver §9. Índice rápido: ADR-0001 (plataforma), ADR-0002 (I/O), ADR-0003 (replicación: **Raft por partición**, *aceptado*), ADR-0004 (protocolo: **binario propio + REST**, *aceptado*), ADR-0005 (concurrencia: ***shared-nothing thread-per-core***, *aceptado*), ADR-0006 (*ingress* dos modos, *aceptado*), ADR-0007 (consistencia CP/PACELC, *aceptado*), ADR-0008 (coste cero, *aceptado*), ADR-0009 (manejo de errores por capa, *aceptado*), ADR-0010 (IDE: migración a **VS Code** sobre WSL, *aceptado*), ADR-0011 (estándar **C++23** + libc++ en Clang, *aceptado*), ADR-0012 (backend io_uring directo sobre el uapi, sin liburing, *aceptado*), ADR-0013 (capa **`nexus-wire`** para el framing sobre conexión; `nexus-protocol` queda puro, *aceptado*), ADR-0014 (modelo del **log de Raft**: índice = ordinal de entrada, término en sidecar; `RecordBatch` intacto, *aceptado*), ADR-0015 (`RaftNode` como **máquina de estados síncrona sin E/S** —entradas→cola de salidas—, para simulación determinista, *aceptado*), ADR-0016 (`ReplicatedPartition` como **tipo paralelo** a `Partition`, *aceptado*), ADR-0017 (target **`nexus-telemetry`** para observabilidad bajo el broker, *aceptado*), ADR-0018 (REST admin por **puerto/adaptador**: `AdminService` en ingress, `AdminApi` en server, *aceptado*), ADR-0019 (**TLS opcional** vía OpenSSL con puente de **BIOs de memoria** sobre el `Proactor`; `find_package(OpenSSL)`/`NEXUS_HAVE_OPENSSL`, arranque en claro si falta, *aceptado*), ADR-0020 (***binding* de Python** vía **ABI C estable** `nexus-ffi` + `ctypes` en vez de pybind11 —no construible sin `python3-dev`—, *aceptado*), ADR-0021 (**backend IOCP (Windows)**: diseño fijado en `iocp_backend.hpp` + preset `windows-msvc`, **implementación diferida** —no verificable sin MSVC/SDK y exige portar `File`/`Socket` a Win32—, *reemplazado por ADR-0022*), ADR-0022 (**backend IOCP (Windows) implementado** y **compile-verificado con MinGW-w64** —`NativeHandle`/`IoResult` portables, `File`/`Socket`/`Listener` Win32+Winsock, `IocpBackend` sobre `GetQueuedCompletionStatusEx`/`AcceptEx`; runtime pendiente de Windows—, *reemplaza ADR-0021, reemplazado por ADR-0023*), ADR-0023 (**backend IOCP verificado en RUNTIME sobre Windows real con MSVC** —VS 2026, `/W4 /WX`; arnés `tools/wincheck`: File bloqueante+directa, eco IOCP por loopback y `submit_timer`, 4/4 PASAN; único arreglo: `crc32c.cpp` portable a MSVC—, *reemplaza ADR-0022, aceptado*), ADR-0024 (**compactación del log de Raft por snapshot**: `RaftLog` con **base de snapshot** persistida en sidecar `raft-snapshot`, `compact_to` exacto + recorte físico del `PartitionLog` por segmentos enteros, puesta al día por `InstallSnapshot`, *aceptado*).
+Ver §9. Índice rápido: ADR-0001 (plataforma), ADR-0002 (I/O), ADR-0003 (replicación: **Raft por partición**, *aceptado*), ADR-0004 (protocolo: **binario propio + REST**, *aceptado*), ADR-0005 (concurrencia: ***shared-nothing thread-per-core***, *aceptado*), ADR-0006 (*ingress* dos modos, *aceptado*), ADR-0007 (consistencia CP/PACELC, *aceptado*), ADR-0008 (coste cero, *aceptado*), ADR-0009 (manejo de errores por capa, *aceptado*), ADR-0010 (IDE: migración a **VS Code** sobre WSL, *aceptado*), ADR-0011 (estándar **C++23** + libc++ en Clang, *aceptado*), ADR-0012 (backend io_uring directo sobre el uapi, sin liburing, *aceptado*), ADR-0013 (capa **`nexus-wire`** para el framing sobre conexión; `nexus-protocol` queda puro, *aceptado*), ADR-0014 (modelo del **log de Raft**: índice = ordinal de entrada, término en sidecar; `RecordBatch` intacto, *aceptado*), ADR-0015 (`RaftNode` como **máquina de estados síncrona sin E/S** —entradas→cola de salidas—, para simulación determinista, *aceptado*), ADR-0016 (`ReplicatedPartition` como **tipo paralelo** a `Partition`, *aceptado*), ADR-0017 (target **`nexus-telemetry`** para observabilidad bajo el broker, *aceptado*), ADR-0018 (REST admin por **puerto/adaptador**: `AdminService` en ingress, `AdminApi` en server, *aceptado*), ADR-0019 (**TLS opcional** vía OpenSSL con puente de **BIOs de memoria** sobre el `Proactor`; `find_package(OpenSSL)`/`NEXUS_HAVE_OPENSSL`, arranque en claro si falta, *aceptado*), ADR-0020 (***binding* de Python** vía **ABI C estable** `nexus-ffi` + `ctypes` en vez de pybind11 —no construible sin `python3-dev`—, *aceptado*), ADR-0021 (**backend IOCP (Windows)**: diseño fijado en `iocp_backend.hpp` + preset `windows-msvc`, **implementación diferida** —no verificable sin MSVC/SDK y exige portar `File`/`Socket` a Win32—, *reemplazado por ADR-0022*), ADR-0022 (**backend IOCP (Windows) implementado** y **compile-verificado con MinGW-w64** —`NativeHandle`/`IoResult` portables, `File`/`Socket`/`Listener` Win32+Winsock, `IocpBackend` sobre `GetQueuedCompletionStatusEx`/`AcceptEx`; runtime pendiente de Windows—, *reemplaza ADR-0021, reemplazado por ADR-0023*), ADR-0023 (**backend IOCP verificado en RUNTIME sobre Windows real con MSVC** —VS 2026, `/W4 /WX`; arnés `tools/wincheck`: File bloqueante+directa, eco IOCP por loopback y `submit_timer`, 4/4 PASAN; único arreglo: `crc32c.cpp` portable a MSVC—, *reemplaza ADR-0022, aceptado*), ADR-0024 (**compactación del log de Raft por snapshot**: `RaftLog` con **base de snapshot** persistida en sidecar `raft-snapshot`, `compact_to` exacto + recorte físico del `PartitionLog` por segmentos enteros, puesta al día por `InstallSnapshot`, *aceptado*), ADR-0025 (**activación en producción del stack Raft + multi-reactor con transporte inter-nodo real**: plano inter-nodo separado con **sobre de wire** de Raft que rutea por `(topic, partition)`, **portador por partición** afinado al reactor dueño que persiste antes de enviar y compacta por política, `Server` sobre `ReactorPool` con `RequestRouter` async, *aceptado*).
 
 ---
 
@@ -1420,6 +1421,74 @@ seguridad en el servidor vivo (D3), de modo que el hueco queda latente, no activ
   costoso. Se adopta la base `(index, term, offset)` + datos en el `PartitionLog`. Descartada.
 - **Recorte físico exacto al byte (partir segmentos):** complicaría el `PartitionLog` (segmentos
   inmutables una vez sellados) por una ganancia marginal. Se recorta por segmentos enteros. Descartada.
+
+---
+
+### ADR-0025: Activación en producción del stack Raft + multi-reactor con transporte inter-nodo real
+
+- **Estado:** aceptado
+- **Fecha:** 2026-06-21
+
+**Contexto.** Las fases previas dejaron listas, pero **sin enchufar al servidor vivo**, varias piezas:
+el log y la FSM de Raft (ADR-0014/0015), la `ReplicatedPartition` (ADR-0016), el *routing* cross-core
+(`PartitionRouter`/`call_on`), el `ReactorPool` *thread-per-core* (ADR-0005) y la persistencia (D1) y
+compactación (D2) del estado de Raft. El binario `nexusd` corre hoy con **un único `Reactor`** y
+`Partition` simples (*ack* local); los RPC de Raft solo circulan por la **red virtual** de los tests
+(simulación determinista); nadie persiste el estado de Raft ni dispara la compactación en producción. D3
+cierra esa deuda diferida por *fasing*: **activar** el stack en `nexusd` con **transporte real** entre
+nodos. No reescribe nada; es integración + inyección de un transporte de red.
+
+**Decisión.** Cuatro piezas coherentes, implementadas de forma incremental (D3.1..D3.7), siempre verde:
+
+1. **Plano inter-nodo separado del plano de cliente.** Los RPC de Raft viajan por su **propio plano**
+   (su listener, sus conexiones persistentes entre nodos), distinto del plano de datos del cliente
+   (ADR-0004/0013). Un **sobre de wire de Raft** rutea cada `RaftMessage`:
+   `topic | partition | from | to | type:u8 | payload`, con prefijo de longitud para *streaming* sobre
+   TCP; `type` es el discriminante del `variant` del RPC y el `payload` reutiliza el `encode`/`decode`
+   por RPC ya existente (ADR-0014). El sobre identifica la **réplica de partición destino**
+   `(topic, partition)` para entregar el RPC al `RaftNode` correcto del nodo receptor.
+2. **Portador por partición, afinado al reactor dueño.** Cada réplica la conduce un **portador**
+   (`RaftCarrier`) que vive en el reactor dueño de la partición (`PartitionRouter`:
+   `core = partition % cores`): un `tick` periódico **local** avanza la FSM, drena `take_messages()` y
+   entrega cada mensaje al transporte; los RPC entrantes se enrutan al reactor dueño (`call_on`) y se
+   aplican con `on_*`. El camino del `tick` es local al reactor de la partición (sin cross-core),
+   respetando shared-nothing: no hay estado de Raft compartido entre núcleos.
+3. **Persistencia y compactación en el lazo del portador.** Al abrir la réplica se carga
+   `RaftStateStore::load()` → `restore_persistent_state` (D1); **antes** de transportar
+   `take_messages()`, si `persistent_state_dirty()`, se hace `save()` con `fsync` (regla §5 de Raft:
+   persistir término/voto antes de responder al RPC). La compactación (`compact_to`, D2) se dispara por
+   **política** (umbral de entradas aplicadas) desde el portador, ya con seguridad.
+4. **Multi-reactor en el `Server`.** El `Server` pasa de un `Reactor` único a un `ReactorPool` (uno por
+   núcleo, *pinned*); el listener acepta en el reactor 0 y el `RequestRouter` enruta cada petición a la
+   partición por su reactor dueño (`call_on`), volviéndose **asíncrono** (`task<expected<...>>`).
+   `ReplicatedPartition` (ADR-0016) sustituye a `Partition` cuando `replication_factor > 1`; con factor
+   1 (mono-nodo, desarrollo) sigue `Partition`.
+
+**Consecuencias.** (+) D1/D2 dejan de ser mecanismo latente: el consenso se replica de verdad por la red
+y sobrevive a reinicios; la compactación acota el log en el servidor vivo. (+) El plano inter-nodo
+separado evita mezclar el contrato de cliente con el de réplica: evolucionan por separado (ADR-0013) y
+tienen SLAs distintos. (+) El portador por reactor respeta shared-nothing (ADR-0005). (+) La red virtual
+determinista se **conserva** para probar la lógica de la FSM; el transporte real se prueba aparte (sockets
+de loopback + inyección de caos). (−) Aparece un segundo listener/puerto (inter-nodo) y direccionamiento
+de peers por configuración. (−) El `RequestRouter` cambia de firma a asíncrono y el camino de despacho se
+refactoriza; se hace incremental para no romper el árbol. (−) El transporte real introduce
+timeouts/reintentos/reordenamiento que la red virtual no tenía: se asumen como parte del plano de red
+(`fundamentos/redes/`).
+
+**Alternativas consideradas.**
+- **Reutilizar el plano de cliente para los RPC de Raft (un puerto, `ApiKey`s nuevas):** acopla el
+  contrato de cliente al de réplica, mezcla flujos con SLAs distintos y complica el versionado. Se
+  separa el plano. Descartada.
+- **Portador global único (un hilo conduce todas las particiones):** concentra el trabajo, rompe
+  shared-nothing y serializa el consenso de particiones independientes. Se hace por partición/reactor.
+  Descartada.
+- **Persistir el estado de Raft en cada `tick` (no solo si *dirty*):** `fsync` innecesarios en el camino
+  caliente. Se persiste solo ante cambio (`dirty`), antes de enviar. Descartada.
+- **`co_await` cross-core para el *reply* del RPC (estilo `call_on`):** un RPC a un nodo remoto **no
+  vuelve** al completarse; su respuesta entra después como **otro** RPC (notificación asíncrona). El
+  transporte inter-nodo es *fire-and-forget* con *reply* diferido, no petición/respuesta acoplada (a
+  diferencia del `call_on` cross-core, que sí es local y síncrono entre reactores). Descartada para el
+  plano de red.
 
 ---
 
