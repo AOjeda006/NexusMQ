@@ -868,8 +868,24 @@ Harness de benchmark vacío y CI:
     "reinicio" → el nodo **no revota** a otro candidato en el mismo término). Verde en GCC/Clang/ASan;
     format/tidy limpios. **Pendiente (D3):** que el portador real (server/arnés) invoque el `save` en el
     bucle; aquí queda el mecanismo y su prueba de extremo a extremo.
-- [ ] **D2** **Snapshots / compactación** del log de Raft (`InstallSnapshot` ya tiene RPC en C2): truncar
+- [~] **D2** **Snapshots / compactación** del log de Raft (`InstallSnapshot` ya tenía RPC en C2): truncar
   el prefijo aplicado para acotar el crecimiento del log y poner al día a un seguidor muy rezagado.
+  Decisión de arquitectura en **ADR-0024**. Entregado por partes:
+  - [x] **ADR-0024** Compactación por snapshot: base `(last_included_index/term/offset)` en `RaftLog`,
+    sidecar dedicado con CRC32C, recorte físico por segmentos enteros, puesta al día por `InstallSnapshot`.
+  - [x] **D2a-1** `PartitionLog::truncate_prefix_to(offset)` — recorte **físico** del prefijo: borra los
+    segmentos sellados enteros por debajo de un offset preciso, avanza `log_start_offset`, preserva el
+    activo (best-effort por segmentos; simétrico de `enforce_retention`). 6 tests.
+  - [x] **D2a-2** **Base de snapshot en `RaftLog`** + `compact_to(index)`: descarta el prefijo aplicado
+    (exacto en el índice), recorta el `PartitionLog` y persiste la base en un sidecar `raft-meta.snap`
+    (registro fijo + CRC32C + `fsync`). `term_at(snapshot_index)` sobrevive; los índices compactados →
+    `OutOfRange`; `entries_from` por debajo del snapshot pide `InstallSnapshot`. `open()` recupera la
+    base y generaliza la coherencia con el `PartitionLog`. 6 tests; verde GCC/Clang/ASan.
+  - [ ] **D2b** **`InstallSnapshot` en `RaftNode`**: el líder detecta a un seguidor cuyo `next_index`
+    cae en/bajo su `snapshot_index` y le envía el snapshot; el seguidor lo adopta reposicionando su
+    `RaftLog` a la base. Requiere soporte de storage para **reinicializar el `PartitionLog` vacío en
+    una base de offset** (lado seguidor) y extender el `variant` de `RaftMessage`. **No** se dispara la
+    compactación automáticamente hasta cablearla con seguridad en el servidor vivo (D3).
 - [ ] **D3** **Swap-in en caliente** del stack Raft + multi-reactor en el `Server` vivo con **transporte
   real** (hoy `ReplicatedPartition`/`call_on`/`PartitionRouter` se prueban con red virtual; falta
   enchufarlos al servidor de producción y mover los RPC de Raft por la red).
