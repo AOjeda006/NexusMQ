@@ -5,15 +5,21 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "broker/partition.hpp"
+#include "broker/topic.hpp"
 #include "broker/topic_manager.hpp"
 #include "common/error.hpp"
 #include "common/task.hpp"
 #include "ingress/admin_service.hpp"
 #include "ingress/pagination.hpp"
+#include "reactor/partition_router.hpp"
+#include "reactor/reactor.hpp"
+#include "support/fake_proactor.hpp"
 
 namespace {
 
@@ -25,6 +31,14 @@ nexus::expected<nexus::TopicSummary> run_create(nexus::AdminApi& admin,
 }
 nexus::expected<void> run_delete(nexus::AdminApi& admin, std::string_view name) {
     return nexus::sync_wait(admin.delete_topic(name));
+}
+
+// Conduce `create_topic` cuando puede suspenderse (fan-out cross-core): dos reactores con
+// `poll_once` (no hay E/S real, solo el buzón). Marca `done` y guarda el resultado al completar.
+nexus::task<void> drive_create(nexus::AdminApi& admin, nexus::CreateTopicSpec spec,
+                               nexus::expected<nexus::TopicSummary>& out, bool& done) {
+    out = co_await admin.create_topic(spec);
+    done = true;
 }
 
 class TempDir {
@@ -157,6 +171,40 @@ TEST(AdminApi, ListGroups_SinLister_DevuelveVacio) {
     nexus::TopicManager topics{dir.path()};
     nexus::AdminApi admin{topics, kNodeId};
     EXPECT_TRUE(admin.list_groups(nexus::Page{}).empty());
+}
+
+TEST(AdminApi, CreateTopic_Cableado_FanOutATodosLosNucleos) {
+    TempDir dir{"fanout"};
+    // Dos reactores cableados; dos TopicManager sharded (núcleo 0 dueño de p0; núcleo 1 de p1).
+    nexus::Reactor r0{0, 2, std::make_unique<nexus::FakeProactor>()};
+    nexus::Reactor r1{1, 2, std::make_unique<nexus::FakeProactor>()};
+    r0.connect_peers({&r0, &r1});
+    r1.connect_peers({&r0, &r1});
+    nexus::TopicManager t0{dir.path(), /*num_cores=*/2, /*owner_core=*/0};
+    nexus::TopicManager t1{dir.path(), /*num_cores=*/2, /*owner_core=*/1};
+    nexus::PartitionRouter partitions{{&r0, &r1}};
+    nexus::AdminApi admin{t0, kNodeId};  // el manager del núcleo 0 es el "local" del adaptador.
+    admin.bind_cluster(r0, partitions, {&t0, &t1});
+
+    // El admin se sirve en el núcleo 0; el fan-out alcanza al núcleo 1 por el buzón.
+    nexus::expected<nexus::TopicSummary> result;
+    bool done = false;
+    r0.spawn(drive_create(admin, nexus::CreateTopicSpec{.name = "t", .partition_count = 2}, result,
+                          done));
+    for (int i = 0; i < 64 && !done; ++i) {
+        r0.poll_once();
+        r1.poll_once();
+    }
+    ASSERT_TRUE(done);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->name, "t");
+    // Cada núcleo registró el topic y abrió solo la partición que le toca.
+    ASSERT_NE(t0.get("t"), nullptr);
+    ASSERT_NE(t1.get("t"), nullptr);
+    EXPECT_NE(t0.get("t")->partition(0), nullptr);
+    EXPECT_EQ(t0.get("t")->partition(1), nullptr);
+    EXPECT_NE(t1.get("t")->partition(1), nullptr);
+    EXPECT_EQ(t1.get("t")->partition(0), nullptr);
 }
 
 }  // namespace

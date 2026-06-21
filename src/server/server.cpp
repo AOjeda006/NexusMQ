@@ -168,6 +168,10 @@ void Server::run() {
     }
     partition_router_.emplace(std::move(reactors));
     router_->bind_cluster(main, *partition_router_, catalog_.managers());
+    if (admin_api_) {
+        // El admin REST también propaga crear/borrar topic a todos los núcleos (ADR-0026).
+        admin_api_->bind_cluster(main, *partition_router_, catalog_.managers());
+    }
 
     main.spawn(accept_loop(main, *listener_, *router_));
     if (admin_listener_ && admin_router_) {

@@ -11,6 +11,7 @@
 
 #include "broker/partition.hpp"
 #include "broker/topic.hpp"
+#include "broker/topic_cluster.hpp"
 
 namespace nexus {
 
@@ -53,8 +54,17 @@ task<expected<TopicSummary>> AdminApi::create_topic(const CreateTopicSpec& spec)
     config.retention_ms = spec.retention_ms;
     config.retention_bytes = spec.retention_bytes;
 
+    if (partitions_ != nullptr) {
+        // Cableado: propaga la creación a todos los núcleos por paso de mensajes (ADR-0026).
+        const expected<TopicMetadata> meta = co_await create_topic_on_cluster(
+            *self_, *partitions_, topics_by_core_, spec.name, spec.partition_count, config);
+        if (!meta) {
+            co_return std::unexpected{meta.error()};
+        }
+        co_return to_summary(*meta);
+    }
     const expected<TopicMetadata> meta =
-        topics_.create_topic(spec.name, spec.partition_count, config);
+        topics_.create_topic(spec.name, spec.partition_count, config);  // local (N=1 / tests).
     if (!meta) {
         co_return std::unexpected{meta.error()};
     }
@@ -62,7 +72,11 @@ task<expected<TopicSummary>> AdminApi::create_topic(const CreateTopicSpec& spec)
 }
 
 task<expected<void>> AdminApi::delete_topic(std::string_view name) {
-    co_return topics_.delete_topic(name);
+    if (partitions_ != nullptr) {
+        co_return co_await delete_topic_on_cluster(*self_, *partitions_, topics_by_core_,
+                                                   std::string{name});
+    }
+    co_return topics_.delete_topic(name);  // local (N=1 / tests).
 }
 
 expected<TopicDescription> AdminApi::describe_topic(std::string_view name) const {

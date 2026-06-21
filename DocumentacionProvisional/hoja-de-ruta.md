@@ -963,9 +963,16 @@ Harness de benchmark vacío y CI:
       `task<HttpResponse>` (las rutas de solo lectura completan sin suspenderse); `serve_admin_connection`
       `co_await`ea. Cambio **sin alterar comportamiento** (el admin sigue tocando solo el núcleo 0); dobles de
       test y casos `handle` conducidos con `sync_wait`. 661/661 en GCC/Clang/ASan/**TSan**; format + tidy limpios.
-    - [ ] **D3.4c** *(resto)* Fan-out de **admin REST** CreateTopic/DeleteTopic a todos los núcleos (necesita
-      ruta **async** en `AdminApi`/`RestGateway`/`AdminRouter`; hoy el admin solo toca el manager del núcleo 0
-      → N>1 no activado por defecto); grupos/offsets por `hash(group_id)`; encender N>1 por defecto + TSan/estrés.
+    - [x] **D3.4c-6b** **Admin REST fan-out cross-core** (ADR-0026): helper compartido `create_topic_on_cluster`/
+      `delete_topic_on_cluster` (`broker/topic_cluster`) que propaga crear/borrar a todos los núcleos por
+      `call_on` con rollback fuerte; lo usan **tanto** `RequestRouter` (protocolo, deduplicado: sus
+      `*_cluster` delegan en el helper) **como** `AdminApi`. `AdminApi::bind_cluster(self, PartitionRouter,
+      topics_by_core)` (lo cablea el `Server` en `run`); sin cablear (N=1/tests) opera local en el núcleo 0.
+      Test N=2 del fan-out del admin (Create alcanza ambos managers). 662/662 en GCC/Clang/ASan/**TSan**.
+    - [ ] **D3.4c** *(resto)* grupos/offsets por `hash(group_id)` (coordinador por grupo; hoy correcto porque
+      las conexiones se sirven solo en el núcleo 0); **encender N>1 por defecto** + test de estrés multinúcleo
+      bajo TSan. (`describe_topic` del admin a N>1 solo ve los watermarks de las particiones del núcleo 0:
+      pendiente de agregación cross-core.)
     - [ ] **D3.4d** `ReplicatedPartition` (en vez de `Partition`) cuando `replication_factor > 1`, conducida por
       su `RaftCarrier` en el reactor dueño (tick desde el bucle del reactor).
   - [ ] **D3.5** Transporte inter-nodo **real** detrás del `RaftMessageSink`: conexiones TCP persistentes

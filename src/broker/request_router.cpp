@@ -13,13 +13,12 @@
 #include "broker/group_coordinator.hpp"
 #include "broker/partition.hpp"
 #include "broker/topic.hpp"
+#include "broker/topic_cluster.hpp"
 #include "common/record.hpp"
 #include "common/types.hpp"
 #include "protocol/codec.hpp"
 #include "protocol/error_code.hpp"
 #include "protocol/messages.hpp"
-#include "reactor/cross_core_call.hpp"
-#include "reactor/reactor.hpp"
 
 namespace nexus {
 
@@ -252,27 +251,11 @@ task<expected<void>> RequestRouter::create_topic_cluster(const std::string& name
         }
         co_return expected<void>{};
     }
-    const int cores = partitions_->core_count();
-    for (int core = 0; core < cores; ++core) {
-        // `call_on` corre la creación en el hilo del reactor del núcleo: toca solo su
-        // `TopicManager` (sin estado compartido entre hilos). El llamante (núcleo 0) sigue
-        // suspendido, así que las capturas por referencia (`name`) viven durante el viaje.
-        const expected<TopicMetadata> meta = co_await call_on(
-            *self_, partitions_->reactor(core), [this, core, &name, partition_count] {
-                return topics_by_core_[static_cast<std::size_t>(core)]->create_topic(
-                    name, partition_count);
-            });
-        if (!meta) {
-            // Garantía fuerte: deshace los núcleos ya creados (orden inverso); el borrado es
-            // inocuo.
-            for (int done = core - 1; done >= 0; --done) {
-                static_cast<void>(
-                    co_await call_on(*self_, partitions_->reactor(done), [this, done, &name] {
-                        return topics_by_core_[static_cast<std::size_t>(done)]->delete_topic(name);
-                    }));
-            }
-            co_return std::unexpected(meta.error());
-        }
+    // Cableado: propaga a todos los núcleos por paso de mensajes (helper compartido, ADR-0026).
+    const expected<TopicMetadata> meta = co_await create_topic_on_cluster(
+        *self_, *partitions_, topics_by_core_, name, partition_count);
+    if (!meta) {
+        co_return std::unexpected(meta.error());
     }
     co_return expected<void>{};
 }
@@ -281,20 +264,7 @@ task<expected<void>> RequestRouter::delete_topic_cluster(const std::string& name
     if (partitions_ == nullptr) {
         co_return topics_.delete_topic(name);  // sin cablear (tests): borrado local.
     }
-    const int cores = partitions_->core_count();
-    expected<void> result;
-    for (int core = 0; core < cores; ++core) {
-        const expected<void> deleted =
-            co_await call_on(*self_, partitions_->reactor(core), [this, core, &name] {
-                return topics_by_core_[static_cast<std::size_t>(core)]->delete_topic(name);
-            });
-        // El núcleo 0 es autoritativo (todos registran el topic al crearlo, así que normalmente
-        // todos lo encuentran); los demás se intentan igual para dejar el clúster coherente.
-        if (core == 0) {
-            result = deleted;
-        }
-    }
-    co_return result;
+    co_return co_await delete_topic_on_cluster(*self_, *partitions_, topics_by_core_, name);
 }
 
 task<expected<void>> RequestRouter::dispatch(ApiKey key, std::uint16_t /*api_version*/,

@@ -8,6 +8,7 @@ add_library(nexus-broker
   group_coordinator.cpp
   topic_manager.cpp
   topic_catalog.cpp
+  topic_cluster.cpp
   offset_manager.cpp
   request_router.cpp)
 add_library(nexus::broker ALIAS nexus-broker)
