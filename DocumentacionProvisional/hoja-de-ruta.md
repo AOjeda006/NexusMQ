@@ -892,7 +892,28 @@ Harness de benchmark vacío y CI:
     se dispara la compactación automáticamente hasta cablearla con seguridad en el servidor vivo (D3).
 - [ ] **D3** **Swap-in en caliente** del stack Raft + multi-reactor en el `Server` vivo con **transporte
   real** (hoy `ReplicatedPartition`/`call_on`/`PartitionRouter` se prueban con red virtual; falta
-  enchufarlos al servidor de producción y mover los RPC de Raft por la red).
+  enchufarlos al servidor de producción y mover los RPC de Raft por la red). Decisión de arquitectura en
+  **ADR-0025**. Se aborda por incrementos pequeños y siempre verdes:
+  - [x] **ADR-0025** Plano inter-nodo separado con **sobre de wire** que rutea por `(topic, partition)`,
+    **portador por partición** afinado al reactor dueño que persiste (D1) antes de enviar y compacta (D2)
+    por política, y `Server` sobre `ReactorPool` con `RequestRouter` asíncrono. Incluye refactor previo:
+    `RaftMessage` se mueve a `raft_rpc.hpp` (es un DTO de mensaje, no parte de la FSM) + `operator==`.
+  - [x] **D3.1** `consensus/raft_wire.{hpp,cpp}` — **`RaftEnvelope`**: sobre de transporte inter-nodo que
+    envuelve un `RaftMessage` con la réplica destino `(topic, partition)`. Serializa
+    `topic | partition | from | to | type:u8 | payload`; el discriminante del `variant` viaja como `type`
+    y el payload reutiliza el `encode`/`decode` por RPC (ADR-0014). Pieza pura, decodificador defensivo
+    (rechaza truncado y `type` desconocido). 10 tests de round-trip + límites. Verde GCC/Clang/ASan.
+  - [ ] **D3.2** Transporte inter-nodo real: conexiones TCP persistentes a peers (direccionadas por
+    config), envío con longitud-prefijo del `RaftEnvelope` y recepción/desencuadre por el `FrameReader`.
+  - [ ] **D3.3** `RaftCarrier` (portador por partición): `tick` periódico local al reactor dueño, drena
+    `take_messages()` → transporte; aplica RPC entrantes (`on_*`); persiste el estado de Raft (D1) **antes**
+    de enviar (regla §5) y carga `RaftStateStore` al abrir.
+  - [ ] **D3.4** `Server` sobre `ReactorPool` (uno por núcleo) y `RequestRouter` **asíncrono** que enruta
+    por reactor dueño (`call_on`); `ReplicatedPartition` cuando `replication_factor > 1`.
+  - [ ] **D3.5** Disparo de la **compactación** (`compact_to`, D2) por política desde el portador, ya con
+    seguridad en el servidor vivo.
+  - [ ] **D3.6** Tests e2e: cluster de 3 nodos reales (sockets), elección, replicación a quórum y failover
+    de líder bajo caos.
 - [ ] **D4** **Cableado de TLS + proxy** en el plano de datos del server (la criptografía/`TlsContext` y el
   `Proxy` existen, ADR-0019; falta enchufarlos al flujo de conexiones real).
 - [ ] **D5** **Poblar las métricas del broker** en el hot-path (la telemetría existe, ADR-0017; faltan los
