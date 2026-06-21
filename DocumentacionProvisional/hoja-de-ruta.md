@@ -919,8 +919,13 @@ Harness de benchmark vacío y CI:
     - [x] **D3.4a** `RequestRouter::dispatch` ahora es una **corrutina** `task<expected<void>>` (firma
       asíncrona, base del enrutado cross-core). Hoy completa sin suspenderse (un reactor); `serve_connection`
       la `co_await`ea y los tests la conducen con `sync_wait`. Sin cambio de comportamiento. Verde GCC/Clang/ASan.
-    - [ ] **D3.4b** `Server` crea un `ReactorPool` (N = núcleos) con factoría de `Proactor` (DIP); el bucle de
-      aceptación reparte conexiones entre reactores. Partición → núcleo dueño = `partition % N`.
+    - [x] **D3.4b** `Server` sobre `ReactorPool` con factoría de `Proactor` inyectada (DIP, default io_uring).
+      - [x] **D3.4b-1** `ReactorPool::start_main_inline`: lanza los workers 1..N-1 en hilos y deja el núcleo 0
+        para que el llamante lo corra inline (así `stop()` sigue siendo `reactor(0).stop()`, async-signal-safe).
+        Refactor `start` → `create_and_wire` + `launch`. Test determinista. Verde GCC/Clang/ASan.
+      - [x] **D3.4b-2** `Server` usa el pool: `run` arranca con `start_main_inline` y corre el núcleo 0 inline;
+        `stop` publica un `atomic<Reactor*>` (+ `stop_requested_` para la carrera) y lo despierta. Plano de datos
+        confinado al núcleo 0 (sin data races) hasta el sharding. `num_reactors` en config (default 1). 649/649.
     - [ ] **D3.4c** Estado del broker **fragmentado por reactor** (shared-nothing): el `TopicManager`/`Partition`
       de cada partición vive en su reactor dueño; `dispatch` enruta la operación al dueño con `call_on`.
     - [ ] **D3.4d** `ReplicatedPartition` (en vez de `Partition`) cuando `replication_factor > 1`, conducida por
