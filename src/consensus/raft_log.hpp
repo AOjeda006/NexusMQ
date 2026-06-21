@@ -92,6 +92,9 @@ public:
     [[nodiscard]] Index snapshot_index() const noexcept { return snapshot_index_; }
     /// Término del último índice cubierto por el snapshot.
     [[nodiscard]] Term snapshot_term() const noexcept { return snapshot_term_; }
+    /// Offset de partición del último record cubierto por el snapshot (base para
+    /// `InstallSnapshot`).
+    [[nodiscard]] Offset snapshot_last_offset() const noexcept { return snapshot_last_offset_; }
 
     /// @brief Hasta @p max entradas a partir de @p index (para `AppendEntries`).
     [[nodiscard]] expected<std::vector<RaftLogEntry>> entries_from(Index index,

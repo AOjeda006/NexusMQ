@@ -64,6 +64,7 @@ void encode_entry(Encoder& enc, const RaftLogEntry& entry) {
 void encode_snapshot(Encoder& enc, const Snapshot& snapshot) {
     enc.put_i64(snapshot.last_included_index);
     enc.put_i64(snapshot.last_included_term);
+    enc.put_i64(snapshot.last_included_offset);
     enc.put_bytes(ByteSpan{snapshot.state});
 }
 
@@ -76,6 +77,10 @@ void encode_snapshot(Encoder& enc, const Snapshot& snapshot) {
     if (!last_included_term) {
         return std::unexpected(last_included_term.error());
     }
+    auto last_included_offset = dec.get_i64();
+    if (!last_included_offset) {
+        return std::unexpected(last_included_offset.error());
+    }
     auto state = dec.get_bytes();
     if (!state) {
         return std::unexpected(state.error());
@@ -83,6 +88,7 @@ void encode_snapshot(Encoder& enc, const Snapshot& snapshot) {
     Snapshot snapshot;
     snapshot.last_included_index = *last_included_index;
     snapshot.last_included_term = *last_included_term;
+    snapshot.last_included_offset = *last_included_offset;
     snapshot.state.assign(state->begin(), state->end());
     return snapshot;
 }

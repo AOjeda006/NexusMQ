@@ -111,7 +111,22 @@ void RaftNode::broadcast_request_vote(bool pre_vote) {
     }
 }
 
+void RaftNode::send_snapshot_to(NodeId peer) {
+    // El seguidor necesita entradas que el líder ya compactó: se le envía la base del snapshot.
+    const Snapshot snapshot{.last_included_index = log_.snapshot_index(),
+                            .last_included_term = log_.snapshot_term(),
+                            .last_included_offset = log_.snapshot_last_offset(),
+                            .state = {}};
+    last_sent_[peer] = log_.snapshot_index();
+    send(peer, InstallSnapshotArgs{
+                   .term = persistent_.current_term(), .leader_id = self_, .snapshot = snapshot});
+}
+
 void RaftNode::replicate_to(NodeId peer) {
+    if (volatile_.next_index(peer) <= log_.snapshot_index()) {
+        send_snapshot_to(peer);  // las entradas que necesita ya están compactadas.
+        return;
+    }
     const Index next = volatile_.next_index(peer);
     const Index prev_index = next - 1;
     const auto prev_term = log_.term_at(prev_index);
@@ -396,6 +411,48 @@ void RaftNode::on_timeout_now(MonoTime now, const TimeoutNowArgs& args) {
         become_follower(now, args.term);  // adopta el término antes de postularse.
     }
     become_candidate(now);  // elección real inmediata: sin pre-vote ni espera de *lease* (§3.10).
+}
+
+InstallSnapshotReply RaftNode::on_install_snapshot(MonoTime now, const InstallSnapshotArgs& args) {
+    InstallSnapshotReply reply{.term = persistent_.current_term()};
+    if (args.term < persistent_.current_term()) {
+        return reply;  // líder obsoleto.
+    }
+    if (args.term > persistent_.current_term() || role_ != RaftRole::Follower) {
+        become_follower(now, args.term);
+    }
+    leader_id_ = args.leader_id;
+    reset_election_timer(now);
+    last_leader_contact_ = now;  // contacto válido del líder (base del *lease* del pre-vote).
+    reply.term = persistent_.current_term();
+
+    // Adopta el snapshot en el log (reposiciona la base y la persiste). La FSM no hace E/S: la
+    // durabilidad vive en el RaftLog (ADR-0014/0024).
+    if (!log_.install_snapshot(args.snapshot.last_included_index, args.snapshot.last_included_term,
+                               args.snapshot.last_included_offset)) {
+        return reply;  // fallo de E/S al instalar: no confirma progreso.
+    }
+    if (args.snapshot.last_included_index > volatile_.commit_index()) {
+        volatile_.set_commit_index(args.snapshot.last_included_index);
+    }
+    return reply;
+}
+
+void RaftNode::on_install_snapshot_reply(MonoTime now, NodeId from,
+                                         const InstallSnapshotReply& reply) {
+    if (reply.term > persistent_.current_term()) {
+        become_follower(now, reply.term);
+        return;
+    }
+    if (role_ != RaftRole::Leader || reply.term != persistent_.current_term()) {
+        return;  // respuesta obsoleta o ya no somos líder.
+    }
+    // El seguidor adoptó el snapshot que le enviamos: su log llega hasta ese índice.
+    const Index matched = last_sent_[from];
+    volatile_.set_match_index(from, std::max(volatile_.match_index(from), matched));
+    volatile_.set_next_index(from, volatile_.match_index(from) + 1);
+    advance_commit_index();
+    replicate_to(from);  // reanuda con AppendEntries desde el nuevo next_index.
 }
 
 std::vector<RaftMessage> RaftNode::take_messages() {

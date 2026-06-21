@@ -59,6 +59,9 @@ struct Snapshot {
     Index last_included_index = 0;
     /// Término de `last_included_index`.
     Term last_included_term = 0;
+    /// Offset de partición del último record cubierto por el snapshot (base para reposicionar el
+    /// `PartitionLog` del seguidor; ADR-0024).
+    Offset last_included_offset = 0;
     /// Estado serializado de la máquina de estados.
     std::vector<std::byte> state;
 

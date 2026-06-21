@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <variant>
 #include <vector>
 
@@ -118,6 +119,9 @@ void route_messages(nexus::RaftNode& sender, std::vector<NodeBox*>& cluster, nex
             sender.on_append_entries_reply(now, msg.to, reply);
         } else if (const auto* timeout = std::get_if<nexus::TimeoutNowArgs>(&msg.payload)) {
             target->on_timeout_now(now, *timeout);  // no lleva respuesta.
+        } else if (const auto* snap = std::get_if<nexus::InstallSnapshotArgs>(&msg.payload)) {
+            const auto reply = target->on_install_snapshot(now, *snap);
+            sender.on_install_snapshot_reply(now, msg.to, reply);
         }
     }
 }
@@ -566,6 +570,110 @@ TEST(RaftNode, Persistencia_VotoSobreviveReinicio_NoRevotaEnElMismoTermino) {
     const nexus::RequestVoteArgs second{
         .term = 5, .candidate_id = 3, .last_log_index = 0, .last_log_term = 0, .pre_vote = false};
     EXPECT_FALSE(restarted->node->on_request_vote(at(200), second).vote_granted);
+}
+
+TEST(RaftNode, OnInstallSnapshot_EnSeguidorVacio_AdoptaBaseYAvanzaCommit) {
+    auto box = make_node(1, {2, 3}, "inst_follower");
+    box->node->tick(at(0));  // seguidor.
+
+    const nexus::Snapshot snap{
+        .last_included_index = 5, .last_included_term = 2, .last_included_offset = 99, .state = {}};
+    const auto reply = box->node->on_install_snapshot(
+        at(100), nexus::InstallSnapshotArgs{.term = 2, .leader_id = 2, .snapshot = snap});
+
+    EXPECT_EQ(reply.term, 2);
+    EXPECT_EQ(box->node->current_term(), 2);
+    EXPECT_EQ(box->rlog->snapshot_index(), 5);
+    EXPECT_EQ(box->rlog->snapshot_term(), 2);
+    EXPECT_EQ(box->rlog->last_index(), 5);
+    EXPECT_EQ(box->node->commit_index(), 5);  // el snapshot solo cubre entradas confirmadas.
+}
+
+TEST(RaftNode, OnInstallSnapshot_LiderObsoleto_Rechaza) {
+    auto box = make_node(1, {2}, "inst_stale");
+    box->node->tick(at(0));
+    // Adopta el término 5 al recibir un heartbeat de un líder de ese término.
+    (void)box->node->on_append_entries(at(100), nexus::AppendEntriesArgs{.term = 5,
+                                                                         .leader_id = 2,
+                                                                         .prev_log_index = 0,
+                                                                         .prev_log_term = 0,
+                                                                         .entries = {},
+                                                                         .leader_commit = 0,
+                                                                         .leader_epoch = 0});
+    ASSERT_EQ(box->node->current_term(), 5);
+
+    const nexus::Snapshot snap{
+        .last_included_index = 3, .last_included_term = 2, .last_included_offset = 50, .state = {}};
+    const auto reply = box->node->on_install_snapshot(
+        at(200), nexus::InstallSnapshotArgs{.term = 3, .leader_id = 2, .snapshot = snap});
+    EXPECT_EQ(reply.term, 5);
+    EXPECT_EQ(box->rlog->snapshot_index(), 0);  // líder obsoleto: no instaló nada.
+}
+
+// Clúster de 3 con el nodo 1 ya líder (término 1), 4 entradas confirmadas y el log compactado
+// hasta el índice 3.
+std::tuple<std::unique_ptr<NodeBox>, std::unique_ptr<NodeBox>, std::unique_ptr<NodeBox>>
+make_leader_with_snapshot(const std::string& tag, std::vector<NodeBox*>& cluster) {
+    auto a = make_node(1, {2, 3}, tag);
+    auto b = make_node(2, {1, 3}, tag);
+    auto c = make_node(3, {1, 2}, tag);
+    cluster = {a.get(), b.get(), c.get()};
+    for (NodeBox* box : cluster) {
+        box->node->tick(at(0));
+    }
+    a->node->tick(at(2000));
+    run_rounds(*a->node, cluster, at(2000), 2);
+    EXPECT_TRUE(a->node->is_leader());
+    route_messages(*a->node, cluster, at(2000));
+    for (int i = 0; i < 4; ++i) {
+        EXPECT_TRUE(a->node->propose(make_batch(1)).has_value());
+        route_messages(*a->node, cluster, at(2010));
+    }
+    EXPECT_EQ(a->node->commit_index(), 4);
+    EXPECT_TRUE(a->rlog->compact_to(3).has_value());
+    EXPECT_EQ(a->rlog->snapshot_index(), 3);
+    return {std::move(a), std::move(b), std::move(c)};
+}
+
+TEST(RaftNode, Lider_SeguidorBajoSnapshot_EmiteInstallSnapshot) {
+    std::vector<NodeBox*> cluster;
+    auto [a, b, c] = make_leader_with_snapshot("inst_emit", cluster);
+
+    // El seguidor 2 está muy por detrás: su next_index retrocede a 1 (bajo el snapshot del líder).
+    (void)a->node->take_messages();  // descarta lo pendiente.
+    a->node->on_append_entries_reply(
+        at(2020), 2,
+        nexus::AppendEntriesReply{
+            .term = a->node->current_term(), .success = false, .conflict_index = 1});
+
+    // El líder no puede mandar esas entradas (compactadas): emite InstallSnapshot a 2.
+    const auto msgs = a->node->take_messages();  // mantener vivo el vector mientras se lee `snap`.
+    const nexus::InstallSnapshotArgs* snap = nullptr;
+    for (const auto& msg : msgs) {
+        if (msg.to == 2) {
+            snap = std::get_if<nexus::InstallSnapshotArgs>(&msg.payload);
+        }
+    }
+    ASSERT_NE(snap, nullptr);
+    EXPECT_EQ(snap->leader_id, 1);
+    EXPECT_EQ(snap->snapshot.last_included_index, 3);
+    EXPECT_EQ(snap->snapshot.last_included_term, 1);
+}
+
+TEST(RaftNode, InstallSnapshot_RoundTrip_SeguidorAdoptaLaBase) {
+    std::vector<NodeBox*> cluster;
+    auto [a, b, c] = make_leader_with_snapshot("inst_rt", cluster);
+
+    // Fuerza el retroceso de 2 y enruta: el líder le envía InstallSnapshot y 2 lo adopta.
+    (void)a->node->take_messages();
+    a->node->on_append_entries_reply(
+        at(2020), 2,
+        nexus::AppendEntriesReply{
+            .term = a->node->current_term(), .success = false, .conflict_index = 1});
+    route_messages(*a->node, cluster, at(2020));  // entrega el snapshot y recoge la respuesta.
+
+    EXPECT_EQ(b->rlog->snapshot_index(), 3);  // el seguidor adoptó la base del snapshot.
+    EXPECT_EQ(b->rlog->last_index(), 4);      // conserva la cola consistente que ya tenía.
 }
 
 }  // namespace

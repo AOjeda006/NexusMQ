@@ -44,7 +44,7 @@ struct RaftMessage {
     NodeId from = 0;
     NodeId to = 0;
     std::variant<RequestVoteArgs, RequestVoteReply, AppendEntriesArgs, AppendEntriesReply,
-                 TimeoutNowArgs>
+                 TimeoutNowArgs, InstallSnapshotArgs, InstallSnapshotReply>
         payload;
 };
 
@@ -96,6 +96,17 @@ public:
 
     /// @brief Procesa un `TimeoutNow` recibido: arranca una elección real inmediata (§3.10).
     void on_timeout_now(MonoTime now, const TimeoutNowArgs& args);
+
+    /// @brief Procesa un `InstallSnapshot` recibido (seguidor, §7) y devuelve la respuesta.
+    /// @details Rechaza líderes obsoletos; ante un término ≥ propio reconoce al líder y rearma.
+    ///   Adopta el snapshot en el `RaftLog` (reposiciona la base) y avanza `commit_index` hasta el
+    ///   índice incluido. La E/S durable la hace el `RaftLog` (instala y persiste la base).
+    [[nodiscard]] InstallSnapshotReply on_install_snapshot(MonoTime now,
+                                                           const InstallSnapshotArgs& args);
+
+    /// @brief Procesa la respuesta a un `InstallSnapshot` (líder): pone `match_index`/`next_index`
+    ///   del seguidor en el índice del snapshot y reanuda la replicación normal.
+    void on_install_snapshot_reply(MonoTime now, NodeId from, const InstallSnapshotReply& reply);
 
     /// @brief Procesa la respuesta a un `RequestVote` (cuenta votos → líder).
     void on_request_vote_reply(MonoTime now, NodeId from, const RequestVoteReply& reply);
@@ -158,6 +169,8 @@ private:
                                                        const RequestVoteArgs& args) const;
     /// Envía `AppendEntries` a @p peer desde su `next_index` (vacío = *heartbeat*).
     void replicate_to(NodeId peer);
+    /// Envía `InstallSnapshot` a @p peer cuando su `next_index` cae en/bajo el snapshot del líder.
+    void send_snapshot_to(NodeId peer);
     /// Replica a todos los peers (también sirve de ronda de *heartbeats*).
     void replicate_all();
     /// (Líder) Avanza `commit_index` al mayor índice replicado en mayoría del término actual
