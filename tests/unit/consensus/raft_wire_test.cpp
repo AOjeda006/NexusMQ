@@ -116,7 +116,9 @@ TEST(RaftEnvelope, RoundTrip_TopicVacio_EsValido) {
         .topic = "",
         .partition = 0,
         .message = nexus::RaftMessage{
-            .from = 4, .to = 5, .payload = nexus::RequestVoteReply{.term = 1, .vote_granted = false}}};
+            .from = 4,
+            .to = 5,
+            .payload = nexus::RequestVoteReply{.term = 1, .vote_granted = false}}};
     const auto decoded = round_trip(original);
     ASSERT_TRUE(decoded.has_value());
     EXPECT_EQ(*decoded, original);
@@ -125,8 +127,11 @@ TEST(RaftEnvelope, RoundTrip_TopicVacio_EsValido) {
 TEST(RaftEnvelope, Decode_EntradaTruncada_DevuelveError) {
     nexus::Buffer buffer;
     nexus::Encoder enc{buffer};
-    envelope_with(nexus::RequestVoteArgs{
-        .term = 1, .candidate_id = 1, .last_log_index = 0, .last_log_term = 0, .pre_vote = false})
+    envelope_with(nexus::RequestVoteArgs{.term = 1,
+                                         .candidate_id = 1,
+                                         .last_log_index = 0,
+                                         .last_log_term = 0,
+                                         .pre_vote = false})
         .encode(enc);
     // Recorta el último byte: el decodificador defensivo debe rechazar, no leer fuera de rango.
     const nexus::ByteSpan full = buffer.as_span();
