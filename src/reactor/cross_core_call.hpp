@@ -36,7 +36,16 @@ public:
     CrossCoreCall(Reactor& self, Reactor& target, Fn fn)
         : self_(self), target_(target), fn_(std::move(fn)) {}
 
-    [[nodiscard]] bool await_ready() const noexcept { return false; }
+    /// @brief Fast-path local: si el destino es el propio reactor, ejecuta `fn` **inline** (ya
+    ///   estamos en su hilo) y no se suspende — evita el viaje por el buzón (latencia) y permite
+    ///   conducir la corrutina sin un bucle de reactor cuando todo es mismo-núcleo.
+    [[nodiscard]] bool await_ready() {
+        if (&self_ == &target_) {
+            result_.emplace(fn_());
+            return true;
+        }
+        return false;
+    }
 
     void await_suspend(std::coroutine_handle<> awaiting) {
         // Origen → destino: ejecuta `fn_` en el hilo del destino y postea de vuelta la reanudación.

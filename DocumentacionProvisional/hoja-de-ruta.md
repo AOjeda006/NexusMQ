@@ -932,6 +932,9 @@ Harness de benchmark vacío y CI:
     - [x] **D3.4c-2** `TopicManager` fragmentado: constructor `(num_cores, owner_core)`; `create_topic` abre solo
       las particiones propias (`partition % num_cores == owner_core`); metadatos completos en cada instancia
       (`describe`/`Metadata` locales); predicado `owns_partition`. Default `(1,0)` = abre todas. Tests + verde.
+    - [x] **D3.4c-3a** `call_on` con *fast-path* local: si el destino es el propio reactor, ejecuta `fn` inline
+      sin viaje por el buzón (latencia) y permite conducir la corrutina sin bucle de reactor en mismo-núcleo
+      (mantiene válido el arnés `sync_wait` del `RequestRouter` cuando dueño == self). Test + verde 654/654.
     - [ ] **D3.4c** Estado del broker **fragmentado por reactor** (shared-nothing): el `TopicManager`/`Partition`
       de cada partición vive en su reactor dueño; `dispatch` enruta la operación al dueño con `call_on`.
     - [ ] **D3.4d** `ReplicatedPartition` (en vez de `Partition`) cuando `replication_factor > 1`, conducida por

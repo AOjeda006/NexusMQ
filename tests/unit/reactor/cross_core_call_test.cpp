@@ -69,4 +69,14 @@ TEST(CrossCoreCall, CallOn_NoSeResuelveSinDrenarElDestino) {
     EXPECT_EQ(out, 42);
 }
 
+TEST(CrossCoreCall, CallOn_MismoReactor_EjecutaInlineSinViajeCrossCore) {
+    ReactorPair pair;
+    int out = -1;
+    // self == target: el fast-path corre `fn` inline; una sola vuelta del propio reactor basta,
+    // sin drenar el otro (no hay viaje por el buzón cross-core).
+    pair.r0.spawn(call_constant(pair.r0, pair.r0, out));
+    pair.r0.poll_once();
+    EXPECT_EQ(out, 42);
+}
+
 }  // namespace
