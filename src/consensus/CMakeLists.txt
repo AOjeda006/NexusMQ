@@ -4,6 +4,7 @@ add_library(nexus-consensus
   raft_state.cpp
   raft_state_store.cpp
   raft_rpc.cpp
+  raft_wire.cpp
   raft_log.cpp
   raft_node.cpp)
 add_library(nexus::consensus ALIAS nexus-consensus)

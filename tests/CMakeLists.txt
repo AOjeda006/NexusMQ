@@ -80,6 +80,7 @@ add_executable(nexus-tests
   unit/cli/cli_options_test.cpp
   unit/cli/group_commands_test.cpp
   unit/consensus/raft_rpc_test.cpp
+  unit/consensus/raft_wire_test.cpp
   unit/consensus/raft_log_test.cpp
   unit/consensus/raft_state_store_test.cpp
   unit/consensus/raft_node_test.cpp

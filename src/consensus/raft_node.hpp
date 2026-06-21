@@ -35,7 +35,6 @@ struct RaftConfig {
     std::uint64_t random_seed = 0;
 };
 
-
 /// @brief Réplica de Raft de una partición como **máquina de estados síncrona sin E/S** (ADR-0015).
 /// @details Afinidad: REACTOR-LOCAL. Consume *entradas* (`tick`, `on_*`) con el instante `now`
 ///   inyectado y produce *salidas* (mensajes proactivos en una cola + avance de `commit_index`). No
