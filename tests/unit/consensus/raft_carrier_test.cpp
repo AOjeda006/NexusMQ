@@ -23,6 +23,8 @@
 #include "common/record.hpp"
 #include "common/types.hpp"
 #include "consensus/raft_node.hpp"
+#include "consensus/raft_state.hpp"
+#include "consensus/raft_state_store.hpp"
 #include "consensus/raft_wire.hpp"
 #include "protocol/codec.hpp"
 #include "storage/log_config.hpp"
@@ -80,7 +82,8 @@ public:
             auto part =
                 nexus::ReplicatedPartition::create(id, std::move(peers), std::move(*plog), cfg);
             EXPECT_TRUE(part.has_value());
-            nodes_.emplace(id, Holder{.dir = std::move(dir), .part = std::move(*part), .carrier = {}});
+            nodes_.emplace(id,
+                           Holder{.dir = std::move(dir), .part = std::move(*part), .carrier = {}});
         }
         // Los portadores se crean tras fijar las particiones (la referencia a raft() es estable).
         for (auto& [id, holder] : nodes_) {
@@ -176,8 +179,8 @@ TEST(RaftCarrier, TresNodos_ProduceEnLider_ReplicaYConfirmaAQuorum) {
     const auto last = cluster.part(leader).produce(make_batch(3));
     ASSERT_TRUE(last.has_value());
     // Tras proponer, deja replicar: la escritura se hace visible cuando el quórum la confirma.
-    ASSERT_TRUE(cluster.run_until(
-        [&] { return cluster.part(leader).high_watermark() == 3; }, 3000ms));
+    ASSERT_TRUE(
+        cluster.run_until([&] { return cluster.part(leader).high_watermark() == 3; }, 3000ms));
     EXPECT_EQ(cluster.part(leader).high_watermark(), 3);
 }
 
@@ -189,6 +192,63 @@ TEST(RaftCarrier, NoLider_RechazaProduce) {
 
     const auto rejected = cluster.part(follower).produce(make_batch(1));
     EXPECT_FALSE(rejected.has_value());
+}
+
+// Sumidero que descarta los mensajes (un nodo único no tiene peers a quien enviar).
+class DiscardSink : public nexus::RaftMessageSink {
+public:
+    void send(const nexus::RaftEnvelope& /*envelope*/) override {}
+};
+
+TEST(RaftCarrier, PersisteEstadoAntesDeTransportar_TerminoYVotoEnDisco) {
+    TempDir dir{"persist_1"};
+    auto plog = nexus::PartitionLog::open(dir.path(), nexus::LogConfig{});
+    ASSERT_TRUE(plog.has_value());
+    nexus::RaftConfig cfg;
+    cfg.random_seed = 7;
+    auto part = nexus::ReplicatedPartition::create(1, {}, std::move(*plog), cfg);
+    ASSERT_TRUE(part.has_value());
+    auto store = nexus::RaftStateStore::open((dir.path() / "raft-state").string());
+    ASSERT_TRUE(store.has_value());
+
+    DiscardSink sink;
+    nexus::RaftCarrier carrier{"orders", 0, part->raft(), sink, &*store};
+    ASSERT_TRUE(carrier.recover().has_value());  // log vacío -> estado inicial.
+
+    nexus::MonoTime now{};
+    for (int i = 0; i < 300 && !part->is_leader(); ++i) {
+        now += 10ms;
+        carrier.on_tick(now);
+    }
+    ASSERT_TRUE(part->is_leader());
+
+    // El portador guardó término/voto (regla §5) antes de transportar: debe estar en disco.
+    const auto reloaded = store->load();
+    ASSERT_TRUE(reloaded.has_value());
+    EXPECT_EQ(reloaded->current_term(), part->raft().current_term());
+    ASSERT_TRUE(reloaded->voted_for().has_value());
+    EXPECT_EQ(*reloaded->voted_for(), 1);  // se votó a sí mismo.
+}
+
+TEST(RaftCarrier, Recover_SiembraElEstadoLeidoDeDisco) {
+    TempDir dir{"recover_1"};
+    auto plog = nexus::PartitionLog::open(dir.path(), nexus::LogConfig{});
+    ASSERT_TRUE(plog.has_value());
+    auto store = nexus::RaftStateStore::open((dir.path() / "raft-state").string());
+    ASSERT_TRUE(store.has_value());
+    // Estado previo en disco: término 5, voto a 1 (simula un reinicio).
+    ASSERT_TRUE(store->save(nexus::RaftPersistentState::restore(5, 1)).has_value());
+
+    nexus::RaftConfig cfg;
+    cfg.random_seed = 7;
+    auto part = nexus::ReplicatedPartition::create(1, {}, std::move(*plog), cfg);
+    ASSERT_TRUE(part.has_value());
+
+    DiscardSink sink;
+    nexus::RaftCarrier carrier{"orders", 0, part->raft(), sink, &*store};
+    EXPECT_EQ(part->raft().current_term(), 0);  // aún sin restaurar.
+    ASSERT_TRUE(carrier.recover().has_value());
+    EXPECT_EQ(part->raft().current_term(), 5);  // restaurado de disco.
 }
 
 }  // namespace

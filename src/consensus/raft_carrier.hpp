@@ -13,6 +13,7 @@
 namespace nexus {
 
 class RaftNode;
+class RaftStateStore;
 
 /// @brief Sumidero de mensajes de Raft hacia la red (transporte inter-nodo). Afinidad:
 ///   REACTOR-LOCAL.
@@ -42,18 +43,30 @@ public:
 ///   al manejador `on_*` de su `RaftNode` y, si era una *request*, devuelve la *reply* por el mismo
 ///   sumidero. No serializa ni toca sockets (eso es el transporte): así es testeable sin red.
 /// @invariant `topic`/`partition` identifican la réplica que conduce; no cambian en su vida.
-/// @note No posee el `RaftNode` ni el sumidero (referencias): los posee la `ReplicatedPartition` y
-///   el transporte del reactor. No copiable ni movible.
+/// @note No posee el `RaftNode`, el sumidero ni el almacén (referencias/puntero no propietarios):
+///   los posee la `ReplicatedPartition`, el transporte del reactor y la composición. No copiable ni
+///   movible.
 class RaftCarrier {
 public:
     /// @brief Construye el portador de la réplica `(topic, partition)` sobre @p node y @p sink.
-    RaftCarrier(std::string topic, PartitionId partition, RaftNode& node, RaftMessageSink& sink);
+    /// @param store Almacén durable del estado persistente (D1); `nullptr` desactiva la
+    /// persistencia
+    ///   (útil en pruebas de la lógica del portador). Si no es nulo, llama a `recover()` tras
+    ///   construir y el portador persistirá el estado **antes** de transportar (regla §5).
+    RaftCarrier(std::string topic, PartitionId partition, RaftNode& node, RaftMessageSink& sink,
+                RaftStateStore* store = nullptr);
 
     RaftCarrier(const RaftCarrier&) = delete;
     RaftCarrier& operator=(const RaftCarrier&) = delete;
     RaftCarrier(RaftCarrier&&) = delete;
     RaftCarrier& operator=(RaftCarrier&&) = delete;
     ~RaftCarrier() = default;
+
+    /// @brief Siembra el estado persistente leído de disco al arrancar (D1).
+    /// @details Carga el `RaftStateStore` y lo restaura en el `RaftNode` antes de cualquier `tick`.
+    ///   No-op (éxito) si no hay almacén. Llamar **una vez**, tras construir.
+    /// @return El error de E/S del almacén si la carga falla.
+    [[nodiscard]] expected<void> recover();
 
     /// @brief Avanza la FSM a @p now (vence *election*/*heartbeat*) y transporta lo que encole.
     void on_tick(MonoTime now);
@@ -66,15 +79,19 @@ public:
     [[nodiscard]] PartitionId partition() const noexcept { return partition_; }
 
 private:
-    /// Drena la cola de salida del `RaftNode` (`take_messages`) hacia el sumidero.
+    /// @brief Persiste el estado (si cambió) y drena la cola de salida hacia el sumidero.
+    /// @details Regla §5 de Raft: si `persistent_state_dirty()`, guarda con `fsync` **antes** de
+    ///   transportar. Si el `save` falla, **no** transporta (los mensajes quedan en la cola para el
+    ///   próximo intento): nunca se responde a un RPC sin haber persistido el término/voto.
     void flush_outbox();
     /// Envuelve @p message en un `RaftEnvelope` de esta réplica y lo manda por el sumidero.
     void emit(const RaftMessage& message);
 
     std::string topic_;
     PartitionId partition_;
-    RaftNode& node_;          // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
-    RaftMessageSink& sink_;   // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+    RaftNode& node_;         // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+    RaftMessageSink& sink_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+    RaftStateStore* store_;  ///< Almacén durable del estado persistente (no propietario; opcional).
 };
 
 }  // namespace nexus
