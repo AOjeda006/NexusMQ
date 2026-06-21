@@ -55,7 +55,12 @@ public:
         });
     }
 
-    [[nodiscard]] Result await_resume() { return std::move(*result_); }
+    // `result_` siempre está poblado al reanudar (fast-path en `await_ready`, o el callback del
+    // destino antes de `resume`): acceso seguro por invariante. tidy-18 da un falso positivo de
+    // optional-access (no modela el flujo a través de la suspensión); de ahí el NOLINT.
+    [[nodiscard]] Result await_resume() {
+        return std::move(*result_);  // NOLINT(bugprone-unchecked-optional-access)
+    }
 
 private:
     Reactor& self_;    // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)

@@ -17,4 +17,5 @@ target_link_libraries(nexus-broker PUBLIC
   nexus::storage
   nexus::protocol
   nexus::consensus
+  nexus::reactor
   nexus_options)

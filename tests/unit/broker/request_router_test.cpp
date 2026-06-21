@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,9 @@
 #include "protocol/error_code.hpp"
 #include "protocol/frame.hpp"
 #include "protocol/messages.hpp"
+#include "reactor/partition_router.hpp"
+#include "reactor/reactor.hpp"
+#include "support/fake_proactor.hpp"
 
 namespace {
 
@@ -67,6 +71,14 @@ nexus::expected<void> run_dispatch(nexus::RequestRouter& router, nexus::ApiKey k
                                    std::uint16_t version, nexus::Decoder& body,
                                    nexus::Buffer& out) {
     return nexus::sync_wait(router.dispatch(key, version, body, out));
+}
+
+// Conduce `dispatch` cuando puede suspenderse (enrutado cross-core): marca `done` al completar.
+// Para usar con dos reactores movidos con `poll_once` (no hay E/S real, solo el buzón).
+nexus::task<void> drive_dispatch(nexus::RequestRouter& router, nexus::ApiKey key,
+                                 nexus::Decoder& body, nexus::Buffer& out, bool& done) {
+    (void)co_await router.dispatch(key, /*version=*/0, body, out);
+    done = true;
 }
 
 TEST(RequestRouter, ApiVersions_DevuelveRangosSoportados) {
@@ -331,6 +343,78 @@ TEST(RequestRouter, ApiKeyDesconocida_DevuelveError) {
     nexus::Buffer out;
     const auto unknown = static_cast<nexus::ApiKey>(0xFFFF);
     EXPECT_FALSE(run_dispatch(router, unknown, 0, dec, out).has_value());
+}
+
+// --- Enrutado cross-core (ADR-0026): router en el núcleo 0, partición dueña en el núcleo 1 ---
+
+TEST(RequestRouter, ProduceLuegoFetch_EnrutadoAlNucleoDueno) {
+    TempDir dir{"crosscore"};
+    // Dos reactores cableados; dos TopicManager sharded (núcleo 0 dueño de p0; núcleo 1 de p1).
+    nexus::Reactor r0{0, 2, std::make_unique<nexus::FakeProactor>()};
+    nexus::Reactor r1{1, 2, std::make_unique<nexus::FakeProactor>()};
+    r0.connect_peers({&r0, &r1});
+    r1.connect_peers({&r0, &r1});
+    nexus::TopicManager t0{dir.path(), /*num_cores=*/2, /*owner_core=*/0};
+    nexus::TopicManager t1{dir.path(), /*num_cores=*/2, /*owner_core=*/1};
+    ASSERT_TRUE(t0.create_topic("t", 2).has_value());
+    ASSERT_TRUE(t1.create_topic("t", 2).has_value());
+    ASSERT_EQ(t0.get("t")->partition(1), nullptr);  // p1 no vive en el núcleo 0
+    ASSERT_NE(t1.get("t")->partition(1), nullptr);  // p1 vive en el núcleo 1
+
+    // El router atiende en el núcleo 0; opera p1 en el núcleo 1 vía PartitionRouter.
+    nexus::PartitionRouter partitions{{&r0, &r1}};
+    nexus::RequestRouter router{t0, 0, "127.0.0.1", 9092};
+    router.bind_cluster(r0, partitions, {&t0, &t1});
+
+    auto pump = [&](bool& done) {
+        for (int i = 0; i < 64 && !done; ++i) {
+            r0.poll_once();
+            r1.poll_once();
+        }
+    };
+
+    // Produce 3 records a la partición 1 (dueña: núcleo 1).
+    const std::vector<std::byte> batch = encode_batch(3);
+    nexus::ProduceRequest preq;
+    preq.topic = "t";
+    preq.partition = 1;
+    preq.batch = nexus::ByteSpan{batch.data(), batch.size()};
+    nexus::Buffer pbody = encode_request(preq);
+    nexus::Decoder pdec{pbody.as_span()};
+    nexus::Buffer pout;
+    bool pdone = false;
+    r0.spawn(drive_dispatch(router, nexus::ApiKey::Produce, pdec, pout, pdone));
+    pump(pdone);
+    ASSERT_TRUE(pdone);
+
+    nexus::Decoder presp_dec{pout.as_span()};
+    const nexus::expected<nexus::ProduceResponse> presp = nexus::ProduceResponse::decode(presp_dec);
+    ASSERT_TRUE(presp.has_value());
+    EXPECT_EQ(presp->error_code, nexus::WireError::None);
+    EXPECT_EQ(presp->base_offset, 0);
+    // Aterrizó en la partición del núcleo 1, no en el 0.
+    EXPECT_EQ(t1.get("t")->partition(1)->high_watermark(), 3);
+
+    // Fetch desde la misma partición: vuelve por el cruce con los bytes y el high_watermark.
+    nexus::FetchRequest freq;
+    freq.topic = "t";
+    freq.partition = 1;
+    freq.fetch_offset = 0;
+    freq.max_bytes = 64 * 1024;
+    nexus::Buffer fbody = encode_request(freq);
+    nexus::Decoder fdec{fbody.as_span()};
+    nexus::Buffer fout;
+    bool fdone = false;
+    r0.spawn(drive_dispatch(router, nexus::ApiKey::Fetch, fdec, fout, fdone));
+    pump(fdone);
+    ASSERT_TRUE(fdone);
+
+    nexus::Decoder fresp_dec{fout.as_span()};
+    const nexus::expected<nexus::FetchResponse> fresp = nexus::FetchResponse::decode(fresp_dec);
+    ASSERT_TRUE(fresp.has_value());
+    EXPECT_EQ(fresp->error_code, nexus::WireError::None);
+    EXPECT_EQ(fresp->high_watermark, 3);
+    EXPECT_FALSE(fresp->batches.empty());
 }
 
 }  // namespace

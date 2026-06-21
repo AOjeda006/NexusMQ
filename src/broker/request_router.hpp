@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "broker/group_coordinator.hpp"
@@ -16,6 +17,7 @@
 #include "common/task.hpp"
 #include "protocol/frame.hpp"
 #include "protocol/versioning.hpp"
+#include "reactor/partition_router.hpp"
 
 namespace nexus {
 
@@ -27,15 +29,31 @@ class Decoder;
 ///   `TopicManager`/`Partition` y **codifica la respuesta** en un búfer. No toca framing ni sockets
 ///   (eso es la `Connection` del servidor): así es testeable sin red. Los errores del núcleo se
 ///   traducen a `WireError` con `from_error` en el borde (ADR-0009).
-/// @note `dispatch` es una **corrutina** (`task<expected<void>>`): hoy completa sin suspenderse
-///   (un solo reactor), pero la firma asíncrona habilita el enrutado **cross-core** —en el
-///   multi-reactor, una operación de partición se `co_await`eará en el reactor dueño (`call_on`,
-///   ADR-0025)— sin volver a tocar el borde de la conexión.
+/// @note `dispatch` es una **corrutina** (`task<expected<void>>`). Las operaciones de partición
+///   (Produce/Fetch) se **enrutan al reactor dueño** (`PartitionRouter`/`call_on`, ADR-0025/0026)
+///   cuando el router está cableado al clúster (`bind_cluster`); sin cablear (tests unitarios)
+///   corren localmente sobre `topics_` y la corrutina se conduce con `sync_wait`. Con un solo
+///   núcleo el dueño es el propio reactor y el fast-path de `call_on` evita el viaje por el buzón.
 class RequestRouter {
 public:
     RequestRouter(TopicManager& topics, NodeId node_id, std::string host,
                   std::uint16_t port) noexcept
         : topics_(topics), node_id_(node_id), host_(std::move(host)), port_(port) {}
+
+    /// @brief Cablea el enrutado cross-core: a partir de aquí, Produce/Fetch se ejecutan en el
+    ///   reactor dueño de la partición (`partition % N`).
+    /// @param self Reactor donde corre este router (atiende las conexiones).
+    /// @param partitions Router de particiones del nodo (no propietario; debe vivir más que este).
+    /// @param topics_by_core `TopicManager` de cada núcleo, **indexado por `core_id`**; la
+    /// operación
+    ///   enrutada toca el del dueño. Para `N == 1` es `{ &topics }`.
+    /// @pre `self`, `partitions` y los punteros de `topics_by_core` viven más que este router.
+    void bind_cluster(Reactor& self, PartitionRouter& partitions,
+                      std::vector<TopicManager*> topics_by_core) noexcept {
+        self_ = &self;
+        partitions_ = &partitions;
+        topics_by_core_ = std::move(topics_by_core);
+    }
 
     /// @brief Despacha @p key (cuerpo en @p body) y escribe la respuesta codificada en @p out.
     /// @return Éxito (con @p out relleno) o un error si la `ApiKey` no se soporta o el cuerpo es
@@ -57,6 +75,11 @@ private:
     NodeId node_id_;
     std::string host_;
     std::uint16_t port_;
+    /// Enrutado cross-core (cableado por `bind_cluster`; `nullptr` = operación local, tests).
+    Reactor* self_ = nullptr;
+    PartitionRouter* partitions_ = nullptr;
+    /// `TopicManager` por núcleo (indexado por `core_id`); la operación enrutada toca el del dueño.
+    std::vector<TopicManager*> topics_by_core_;
     /// Offsets confirmados por grupo (REACTOR-LOCAL: uno por router/reactor; ver `OffsetManager`).
     OffsetManager offsets_;
     /// Membresía de los grupos de consumidores (REACTOR-LOCAL; ver `GroupCoordinator`).

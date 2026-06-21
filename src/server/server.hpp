@@ -19,6 +19,7 @@
 #include "ingress/jwt.hpp"
 #include "ingress/rest_gateway.hpp"
 #include "io/socket.hpp"
+#include "reactor/partition_router.hpp"
 #include "reactor/reactor.hpp"
 #include "reactor/reactor_pool.hpp"
 #include "server/admin_api.hpp"
@@ -116,6 +117,8 @@ private:
     std::optional<Listener> listener_;
     std::optional<Listener> admin_listener_;
     std::optional<RequestRouter> router_;
+    /// Enruta las operaciones de partición a su reactor dueño (se puebla en `run`, tras el pool).
+    std::optional<PartitionRouter> partition_router_;
 };
 
 }  // namespace nexus

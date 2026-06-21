@@ -152,6 +152,19 @@ void Server::run() {
         return;
     }
 
+    // Cablea el enrutado por partición (ADR-0026). En N=1 el dueño es el propio núcleo 0 y el
+    // fast-path de `call_on` ejecuta inline; con N>1 (sharding completo) cada partición va a su
+    // reactor dueño. De momento hay un único `TopicManager`, indexado por todos los núcleos.
+    std::vector<Reactor*> reactors;
+    reactors.reserve(static_cast<std::size_t>(config_.num_reactors));
+    for (int core = 0; core < config_.num_reactors; ++core) {
+        reactors.push_back(&pool_.reactor(core));
+    }
+    partition_router_.emplace(std::move(reactors));
+    router_->bind_cluster(
+        main, *partition_router_,
+        std::vector<TopicManager*>(static_cast<std::size_t>(config_.num_reactors), &topics_));
+
     main.spawn(accept_loop(main, *listener_, *router_));
     if (admin_listener_ && admin_router_) {
         main.spawn(admin_accept_loop(main, *admin_listener_, *admin_router_));

@@ -935,7 +935,13 @@ Harness de benchmark vacío y CI:
     - [x] **D3.4c-3a** `call_on` con *fast-path* local: si el destino es el propio reactor, ejecuta `fn` inline
       sin viaje por el buzón (latencia) y permite conducir la corrutina sin bucle de reactor en mismo-núcleo
       (mantiene válido el arnés `sync_wait` del `RequestRouter` cuando dueño == self). Test + verde 654/654.
-    - [ ] **D3.4c** Estado del broker **fragmentado por reactor** (shared-nothing): el `TopicManager`/`Partition`
+    - [x] **D3.4c-3b** `RequestRouter` enruta Produce/Fetch al reactor dueño: `bind_cluster(self, PartitionRouter,
+      topics_by_core)` (opcional; sin cablear corre local → tests `sync_wait` intactos). `handle_fetch` extraído
+      a `FetchOutcome` (posee los bytes, se mueve por el cruce). `Server` cablea el router tras arrancar el pool
+      (N=1: dueño=núcleo 0, inline por fast-path). `broker` enlaza `nexus::reactor`. Test cross-core determinista
+      N=2 (Produce/Fetch a partición de otro núcleo). 655/655 GCC/Clang/ASan; tidy fix en `cross_core_call`.
+    - [ ] **D3.4c** *(resto)* CreateTopic/DeleteTopic con fan-out a todos los núcleos; `TopicManager` por núcleo
+      real en el `Server` (hoy comparten uno); grupos/offsets por `hash(group_id)`; encender N>1 + TSan/estrés. Estado del broker **fragmentado por reactor** (shared-nothing): el `TopicManager`/`Partition`
       de cada partición vive en su reactor dueño; `dispatch` enruta la operación al dueño con `call_on`.
     - [ ] **D3.4d** `ReplicatedPartition` (en vez de `Partition`) cuando `replication_factor > 1`, conducida por
       su `RaftCarrier` en el reactor dueño (tick desde el bucle del reactor).

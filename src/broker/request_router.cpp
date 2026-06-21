@@ -53,6 +53,35 @@ ProduceResponse handle_produce(TopicManager& topics, const ProduceRequest& req) 
     return resp;
 }
 
+/// Resultado de una lectura ya resuelta sobre la partición dueña: posee los bytes para que se
+/// codifiquen en el núcleo de la conexión (se mueve a través del cruce de núcleos).
+struct FetchOutcome {
+    WireError error = WireError::None;
+    FetchResult result;  ///< Bytes de los batches (vista zero-copy mientras viva el outcome).
+    Offset high_watermark = 0;
+    Offset log_start_offset = 0;
+};
+
+FetchOutcome handle_fetch(TopicManager& topics, const FetchRequest& req) {
+    FetchOutcome out;
+    const Partition* part = find_partition(topics, req.topic, req.partition);
+    if (part == nullptr) {
+        out.error = WireError::UnknownTopicOrPartition;
+        return out;
+    }
+    const std::size_t max_bytes =
+        req.max_bytes > 0 ? static_cast<std::size_t>(req.max_bytes) : kDefaultFetchBytes;
+    expected<FetchResult> result = part->fetch(req.fetch_offset, max_bytes);
+    if (!result) {
+        out.error = from_error(result.error());
+        return out;
+    }
+    out.result = std::move(*result);
+    out.high_watermark = part->high_watermark();
+    out.log_start_offset = part->log().log_start_offset();
+    return out;
+}
+
 OffsetCommitResponse handle_offset_commit(OffsetManager& offsets, Decoder& body) {
     const expected<OffsetCommitRequest> req = OffsetCommitRequest::decode(body);
     OffsetCommitResponse resp;
@@ -229,9 +258,18 @@ task<expected<void>> RequestRouter::dispatch(ApiKey key, std::uint16_t /*api_ver
         }
         case ApiKey::Produce: {
             const expected<ProduceRequest> req = ProduceRequest::decode(body);
-            const ProduceResponse resp =
-                req ? handle_produce(topics_, *req)
-                    : ProduceResponse{.error_code = WireError::InvalidRequest};
+            ProduceResponse resp;
+            if (!req) {
+                resp.error_code = WireError::InvalidRequest;
+            } else if (partitions_ != nullptr) {
+                // Enruta al reactor dueño de la partición; opera sobre su `TopicManager`.
+                const int owner = partitions_->owner_core(req->partition);
+                resp = co_await partitions_->route(*self_, req->partition, [this, owner, &req] {
+                    return handle_produce(*topics_by_core_[static_cast<std::size_t>(owner)], *req);
+                });
+            } else {
+                resp = handle_produce(topics_, *req);  // sin cablear: local (tests).
+            }
             resp.encode(enc);
             co_return expected<void>{};
         }
@@ -243,24 +281,24 @@ task<expected<void>> RequestRouter::dispatch(ApiKey key, std::uint16_t /*api_ver
                 resp.encode(enc);
                 co_return expected<void>{};
             }
-            const Partition* part = find_partition(topics_, req->topic, req->partition);
-            if (part == nullptr) {
-                resp.error_code = WireError::UnknownTopicOrPartition;
+            FetchOutcome outcome;
+            if (partitions_ != nullptr) {
+                const int owner = partitions_->owner_core(req->partition);
+                outcome = co_await partitions_->route(*self_, req->partition, [this, owner, &req] {
+                    return handle_fetch(*topics_by_core_[static_cast<std::size_t>(owner)], *req);
+                });
+            } else {
+                outcome = handle_fetch(topics_, *req);  // sin cablear: local (tests).
+            }
+            if (outcome.error != WireError::None) {
+                resp.error_code = outcome.error;
                 resp.encode(enc);
                 co_return expected<void>{};
             }
-            const std::size_t max_bytes =
-                req->max_bytes > 0 ? static_cast<std::size_t>(req->max_bytes) : kDefaultFetchBytes;
-            const expected<FetchResult> result = part->fetch(req->fetch_offset, max_bytes);
-            if (!result) {
-                resp.error_code = from_error(result.error());
-                resp.encode(enc);
-                co_return expected<void>{};
-            }
-            // `result` posee los bytes; se codifican mientras sigue vivo (vista zero-copy).
-            resp.batches = result->batches.as_span();
-            resp.high_watermark = part->high_watermark();
-            resp.log_start_offset = part->log().log_start_offset();
+            // `outcome` posee los bytes; se codifican mientras sigue vivo (vista zero-copy).
+            resp.batches = outcome.result.batches.as_span();
+            resp.high_watermark = outcome.high_watermark;
+            resp.log_start_offset = outcome.log_start_offset;
             resp.encode(enc);
             co_return expected<void>{};
         }
