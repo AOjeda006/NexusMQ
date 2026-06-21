@@ -69,6 +69,15 @@ public:
     ///   @p offset > `log_end_offset()`.
     [[nodiscard]] expected<void> truncate_prefix_to(Offset offset);
 
+    /// @brief Reinicia el log a **vacío** en la base @p offset (instalación de snapshot, ADR-0024).
+    /// @details Borra **todos** los segmentos (ficheros incluidos) y crea uno nuevo, vacío, con
+    ///   `base_offset == offset`; deja `log_start_offset() == log_end_offset() == offset`. Lo usa
+    ///   el
+    ///   **seguidor** al adoptar un `InstallSnapshot`: descarta su log divergente/obsoleto y reabre
+    ///   el espacio de offsets en la base del snapshot del líder, listo para recibir la cola por
+    ///   `AppendEntries`. `InvalidArgument` si @p offset es negativo.
+    [[nodiscard]] expected<void> reset_to(Offset offset);
+
     /// @brief Fuerza la durabilidad del segmento activo (`fsync`) y avanza `recovery_point`.
     [[nodiscard]] expected<void> sync();
 

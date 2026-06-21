@@ -189,6 +189,35 @@ expected<void> PartitionLog::truncate_prefix_to(Offset offset) {
     return {};
 }
 
+expected<void> PartitionLog::reset_to(Offset offset) {
+    if (offset < 0) {
+        return make_error(ErrorCode::InvalidArgument, "reset_to: offset negativo");
+    }
+    // Borra todos los segmentos (cierra los fd vía RAII) y luego sus ficheros.
+    std::vector<Offset> bases;
+    bases.reserve(segments_.size());
+    for (const auto& seg : segments_) {
+        bases.push_back(seg->base_offset());
+    }
+    segments_.clear();
+    for (const Offset base : bases) {
+        std::error_code ec;
+        std::filesystem::remove(seg_path(dir_, base, ".log"), ec);
+        std::filesystem::remove(seg_path(dir_, base, ".index"), ec);
+    }
+    // Crea un segmento nuevo y vacío en la base del snapshot.
+    auto seg = Segment::create(dir_, offset, cfg_.index_interval_bytes);
+    if (!seg) {
+        return std::unexpected(seg.error());
+    }
+    segments_.push_back(std::make_unique<Segment>(std::move(*seg)));
+    log_start_offset_ = offset;
+    log_end_offset_ = offset;
+    recovery_point_ = offset;
+    bytes_since_sync_ = 0;
+    return {};
+}
+
 expected<void> PartitionLog::sync() {
     if (const auto synced = active()->sync(); !synced) {
         return synced;

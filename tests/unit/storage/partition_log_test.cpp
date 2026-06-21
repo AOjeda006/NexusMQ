@@ -489,6 +489,50 @@ TEST(PartitionLog, TruncatePrefixTo_ReabreYPreservaElCorte) {
     EXPECT_EQ(reopened->log_end_offset(), 6);
 }
 
+TEST(PartitionLog, ResetTo_VaciaYReabreEnLaBase) {
+    const TempDir dir("reset_base");
+    auto plog = three_segments(dir.path());  // offsets 0..5 en 3 segmentos
+    ASSERT_TRUE(plog.reset_to(10).has_value());
+    EXPECT_EQ(plog.segment_count(), 1U);
+    EXPECT_EQ(plog.log_start_offset(), 10);
+    EXPECT_EQ(plog.log_end_offset(), 10);
+    EXPECT_EQ(plog.recovery_point(), 10);
+    EXPECT_FALSE(std::filesystem::exists(seg_log_path(dir.path(), 0)));  // ficheros viejos borrados
+    EXPECT_FALSE(std::filesystem::exists(seg_log_path(dir.path(), 4)));
+
+    const auto fr = plog.read(10, 100000);
+    ASSERT_TRUE(fr.has_value());
+    EXPECT_TRUE(fr->batches.empty());
+    EXPECT_EQ(fr->next_offset, 10);
+}
+
+TEST(PartitionLog, ResetTo_LuegoAppendAsignaDesdeLaBase) {
+    const TempDir dir("reset_append");
+    auto plog = three_segments(dir.path());
+    ASSERT_TRUE(plog.reset_to(10).has_value());
+    const auto last = plog.append(make_batch(3, 10));  // base 10 -> last 12
+    ASSERT_TRUE(last.has_value());
+    EXPECT_EQ(*last, 12);
+    EXPECT_EQ(plog.log_end_offset(), 13);
+    const auto borrado = plog.read(0, 1000);
+    ASSERT_FALSE(borrado.has_value());
+    EXPECT_EQ(borrado.error().code(), nexus::ErrorCode::OutOfRange);
+}
+
+TEST(PartitionLog, ResetTo_ReabreYConservaLaBase) {
+    const TempDir dir("reset_reopen");
+    {
+        auto plog = three_segments(dir.path());
+        ASSERT_TRUE(plog.reset_to(10).has_value());
+        ASSERT_TRUE(plog.append(make_batch(2, 10)).has_value());  // base 10 -> last 11
+        ASSERT_TRUE(plog.sync().has_value());
+    }
+    auto reopened = nexus::PartitionLog::open(dir.path(), small_segments());
+    ASSERT_TRUE(reopened.has_value());
+    EXPECT_EQ(reopened->log_start_offset(), 10);
+    EXPECT_EQ(reopened->log_end_offset(), 12);
+}
+
 TEST(PartitionLog, TruncateTo_ReabreYPreservaElCorte) {
     const TempDir dir("trunc_reopen");
     {
