@@ -6,6 +6,7 @@
 #pragma once
 
 #include <cstdint>
+#include <variant>
 #include <vector>
 
 #include "common/error.hpp"
@@ -127,6 +128,21 @@ struct InstallSnapshotReply {
     void encode(Encoder& enc) const;
     [[nodiscard]] static expected<InstallSnapshotReply> decode(Decoder& dec);
     bool operator==(const InstallSnapshotReply&) const = default;
+};
+
+/// @brief Mensaje saliente de Raft (un RPC dirigido a un peer). Afinidad: CROSS-CORE (se
+/// transporta).
+/// @details El núcleo (ADR-0015) **no hace E/S**: encola estos mensajes y el emisor los drena con
+///   `take_messages()` y los envía por la red. `payload` es el RPC (request o reply); su
+///   discriminante (`index()` del `variant`) viaja como `type` en el sobre de wire (ADR-0025).
+struct RaftMessage {
+    NodeId from = 0;
+    NodeId to = 0;
+    std::variant<RequestVoteArgs, RequestVoteReply, AppendEntriesArgs, AppendEntriesReply,
+                 TimeoutNowArgs, InstallSnapshotArgs, InstallSnapshotReply>
+        payload;
+
+    bool operator==(const RaftMessage&) const = default;
 };
 
 }  // namespace nexus

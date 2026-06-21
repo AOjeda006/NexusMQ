@@ -12,7 +12,6 @@
 #include <random>
 #include <unordered_map>
 #include <unordered_set>
-#include <variant>
 #include <vector>
 
 #include "common/error.hpp"
@@ -36,17 +35,6 @@ struct RaftConfig {
     std::uint64_t random_seed = 0;
 };
 
-/// @brief Mensaje saliente de Raft (un RPC dirigido a un peer). Afinidad: CROSS-CORE (se
-/// transporta).
-/// @details El núcleo (ADR-0015) **no hace E/S**: encola estos mensajes y el emisor los drena con
-///   `take_messages()` y los envía por la red. `payload` es el RPC (request o reply).
-struct RaftMessage {
-    NodeId from = 0;
-    NodeId to = 0;
-    std::variant<RequestVoteArgs, RequestVoteReply, AppendEntriesArgs, AppendEntriesReply,
-                 TimeoutNowArgs, InstallSnapshotArgs, InstallSnapshotReply>
-        payload;
-};
 
 /// @brief Réplica de Raft de una partición como **máquina de estados síncrona sin E/S** (ADR-0015).
 /// @details Afinidad: REACTOR-LOCAL. Consume *entradas* (`tick`, `on_*`) con el instante `now`
