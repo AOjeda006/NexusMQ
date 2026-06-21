@@ -926,6 +926,9 @@ Harness de benchmark vacío y CI:
       - [x] **D3.4b-2** `Server` usa el pool: `run` arranca con `start_main_inline` y corre el núcleo 0 inline;
         `stop` publica un `atomic<Reactor*>` (+ `stop_requested_` para la carrera) y lo despierta. Plano de datos
         confinado al núcleo 0 (sin data races) hasta el sharding. `num_reactors` en config (default 1). 649/649.
+    - [x] **D3.4c-1** ADR-0026: sharding por núcleo del plano de datos — partición→núcleo (`partition % N`),
+      metadatos de topics inmutables replicados por núcleo, y coordinación de grupos/offsets por
+      `hash(group_id) % N` (estilo Kafka). Detalla el punto 4 de ADR-0025; no lo edita.
     - [ ] **D3.4c** Estado del broker **fragmentado por reactor** (shared-nothing): el `TopicManager`/`Partition`
       de cada partición vive en su reactor dueño; `dispatch` enruta la operación al dueño con `call_on`.
     - [ ] **D3.4d** `ReplicatedPartition` (en vez de `Partition`) cuando `replication_factor > 1`, conducida por
