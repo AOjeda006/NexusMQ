@@ -40,7 +40,12 @@ expected<TopicMetadata> TopicManager::create_topic(std::string name, std::int32_
 
     auto topic = std::make_unique<Topic>(meta);
     const LogConfig log_cfg{.segment_bytes = config.segment_bytes};
+    // Sharding (ADR-0026): este núcleo abre solo las particiones que le tocan; las demás las sirve
+    // otro reactor y aquí no existen. Los metadatos (arriba) sí registran el conteo completo.
     for (PartitionId pid = 0; pid < partition_count; ++pid) {
+        if (!owns_partition(pid)) {
+            continue;
+        }
         const std::filesystem::path dir = data_dir_ / name / std::to_string(pid);
         expected<PartitionLog> log = PartitionLog::open(dir, log_cfg);
         if (!log) {

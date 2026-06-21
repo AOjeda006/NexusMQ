@@ -111,4 +111,53 @@ TEST(TopicManager, ProduceTrasCrear_FuncionaSobreLaParticion) {
     EXPECT_EQ(part->high_watermark(), 3);
 }
 
+TEST(TopicManager, Sharding_AbreSoloLasParticionesDelNucleo) {
+    TempDir dir{"shard"};
+    // Núcleo 1 de 3: posee las particiones p con p % 3 == 1 → de [0,5): {1, 4}.
+    nexus::TopicManager manager{dir.path(), /*num_cores=*/3, /*owner_core=*/1};
+    ASSERT_TRUE(manager.create_topic("t", 5).has_value());
+
+    nexus::Topic* topic = manager.get("t");
+    ASSERT_NE(topic, nullptr);
+    // Metadatos completos (las 5 particiones), pero solo 2 instaladas localmente.
+    EXPECT_EQ(topic->meta().partition_count, 5);
+    EXPECT_EQ(topic->partition_count(), 2U);
+    EXPECT_NE(topic->partition(1), nullptr);
+    EXPECT_NE(topic->partition(4), nullptr);
+    EXPECT_EQ(topic->partition(0), nullptr);  // dueño = núcleo 0
+    EXPECT_EQ(topic->partition(2), nullptr);  // dueño = núcleo 2
+    EXPECT_EQ(topic->partition(3), nullptr);  // dueño = núcleo 0
+}
+
+TEST(TopicManager, OwnsPartition_SigueLaReglaModulo) {
+    TempDir dir{"owns"};
+    nexus::TopicManager manager{dir.path(), /*num_cores=*/4, /*owner_core=*/2};
+    EXPECT_EQ(manager.num_cores(), 4);
+    EXPECT_EQ(manager.owner_core(), 2);
+    EXPECT_TRUE(manager.owns_partition(2));
+    EXPECT_TRUE(manager.owns_partition(6));
+    EXPECT_FALSE(manager.owns_partition(0));
+    EXPECT_FALSE(manager.owns_partition(3));
+}
+
+TEST(TopicManager, Sharding_DescribeListaTodasLasParticionesAunqueNoSeanLocales) {
+    TempDir dir{"shard_desc"};
+    nexus::TopicManager manager{dir.path(), /*num_cores=*/2, /*owner_core=*/0};
+    ASSERT_TRUE(manager.create_topic("t", 4).has_value());
+
+    // Metadata anuncia las 4 particiones al cliente aunque este núcleo solo sirva {0, 2}.
+    const std::vector<nexus::TopicMeta> metas = manager.describe(/*leader_node_id=*/1);
+    ASSERT_EQ(metas.size(), 1U);
+    EXPECT_EQ(metas[0].partitions.size(), 4U);
+}
+
+TEST(TopicManager, ArgumentosDeShardingInvalidos_SeAcotan) {
+    TempDir dir{"clamp"};
+    nexus::TopicManager manager{dir.path(), /*num_cores=*/0, /*owner_core=*/9};
+    EXPECT_EQ(manager.num_cores(), 1);   // < 1 → 1
+    EXPECT_EQ(manager.owner_core(), 0);  // fuera de rango → 0
+    ASSERT_TRUE(manager.create_topic("t", 3).has_value());
+    EXPECT_EQ(manager.get("t")->partition_count(), 3U);  // num_cores=1 → abre todas
+}
+
 }  // namespace
