@@ -969,10 +969,15 @@ Harness de benchmark vacío y CI:
       `*_cluster` delegan en el helper) **como** `AdminApi`. `AdminApi::bind_cluster(self, PartitionRouter,
       topics_by_core)` (lo cablea el `Server` en `run`); sin cablear (N=1/tests) opera local en el núcleo 0.
       Test N=2 del fan-out del admin (Create alcanza ambos managers). 662/662 en GCC/Clang/ASan/**TSan**.
+    - [x] **D3.4c-6c** **E2E multi-reactor (N=2)** sobre socket real (io_uring): produce/fetch a particiones de
+      **distinto** núcleo por la misma conexión (enrutado cross-core) y CreateTopic por protocolo con fan-out a
+      ambos núcleos (producir a su partición del núcleo 1 solo funciona si el fan-out la creó allí). Valida el
+      camino *thread-per-core* de punta a punta y, **bajo TSan**, que no tiene carreras. 663/663 en
+      GCC/Clang/ASan/**TSan**.
     - [ ] **D3.4c** *(resto)* grupos/offsets por `hash(group_id)` (coordinador por grupo; hoy correcto porque
-      las conexiones se sirven solo en el núcleo 0); **encender N>1 por defecto** + test de estrés multinúcleo
-      bajo TSan. (`describe_topic` del admin a N>1 solo ve los watermarks de las particiones del núcleo 0:
-      pendiente de agregación cross-core.)
+      las conexiones se sirven solo en el núcleo 0); decidir **encender N>1 por defecto** (hoy `num_reactors=1`;
+      N>1 es opt-in por config y ya está validado e2e). (`describe_topic` del admin a N>1 solo ve los watermarks
+      de las particiones del núcleo 0: pendiente de agregación cross-core.)
     - [ ] **D3.4d** `ReplicatedPartition` (en vez de `Partition`) cuando `replication_factor > 1`, conducida por
       su `RaftCarrier` en el reactor dueño (tick desde el bucle del reactor).
   - [ ] **D3.5** Transporte inter-nodo **real** detrás del `RaftMessageSink`: conexiones TCP persistentes

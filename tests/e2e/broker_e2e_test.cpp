@@ -202,4 +202,120 @@ TEST(BrokerE2E, ProduceLuegoFetch_RoundTripPorSocket) {
     server_thread.join();
 }
 
+// Multi-reactor (N=2): produce/fetch a particiones de **distinto** núcleo por el mismo socket
+// (enrutado cross-core, ADR-0026) y CreateTopic por protocolo con fan-out a ambos núcleos. Bajo
+// TSan, además, comprueba que el camino thread-per-core no tiene carreras.
+TEST(BrokerE2E, MultiReactor_ProduceFetchYCreateTopicCrossCore) {
+    TempDir dir{"n2"};
+    nexus::Server::Config config;
+    config.host = "127.0.0.1";
+    config.port = 0;
+    config.data_dir = dir.path();
+    config.advertised_host = "127.0.0.1";
+    config.num_reactors = 2;  // p0 → núcleo 0; p1 → núcleo 1.
+
+    std::optional<nexus::Server> server;
+    try {
+        server.emplace(std::move(config));
+    } catch (const std::system_error& ex) {
+        GTEST_SKIP() << "io_uring no disponible en este entorno: " << ex.what();
+    }
+
+    ASSERT_TRUE(server->create_topic("t", 2).has_value());
+    ASSERT_TRUE(server->bind().has_value());
+    const std::uint16_t port = server->port();
+    ASSERT_NE(port, 0);
+
+    std::thread server_thread{[&server] { server->run(); }};
+
+    nexus::expected<nexus::Socket> client = nexus::Socket::connect("127.0.0.1", port);
+    ASSERT_TRUE(client.has_value());
+    const int fd = client->fd();
+
+    // Produce a cada partición: la 0 la sirve el núcleo 0; la 1, el núcleo 1 (salto cross-core).
+    for (std::int32_t partition = 0; partition < 2; ++partition) {
+        const std::vector<std::byte> batch = encode_batch(partition + 1);
+        nexus::ProduceRequest preq;
+        preq.topic = "t";
+        preq.partition = partition;
+        preq.batch = nexus::ByteSpan{batch.data(), batch.size()};
+        nexus::Buffer pbody;
+        nexus::Encoder penc{pbody};
+        preq.encode(penc);
+        ASSERT_TRUE(send_frame(fd, nexus::ApiKey::Produce,
+                               static_cast<std::uint32_t>(10 + partition), pbody.as_span()));
+        const std::vector<std::byte> rframe = recv_frame(fd);
+        ASSERT_FALSE(rframe.empty());
+        nexus::Decoder dec{nexus::ByteSpan{rframe.data(), rframe.size()}};
+        ASSERT_TRUE(nexus::FrameHeader::decode(dec).has_value());
+        const nexus::expected<nexus::ProduceResponse> resp = nexus::ProduceResponse::decode(dec);
+        ASSERT_TRUE(resp.has_value());
+        EXPECT_EQ(resp->error_code, nexus::WireError::None);
+        EXPECT_EQ(resp->base_offset, 0);
+    }
+
+    // Fetch de vuelta de ambas particiones: vuelven por el cruce con su high_watermark.
+    for (std::int32_t partition = 0; partition < 2; ++partition) {
+        nexus::FetchRequest freq;
+        freq.topic = "t";
+        freq.partition = partition;
+        freq.fetch_offset = 0;
+        freq.max_bytes = 64 * 1024;
+        nexus::Buffer fbody;
+        nexus::Encoder fenc{fbody};
+        freq.encode(fenc);
+        ASSERT_TRUE(send_frame(fd, nexus::ApiKey::Fetch, static_cast<std::uint32_t>(20 + partition),
+                               fbody.as_span()));
+        const std::vector<std::byte> rframe = recv_frame(fd);
+        ASSERT_FALSE(rframe.empty());
+        nexus::Decoder dec{nexus::ByteSpan{rframe.data(), rframe.size()}};
+        ASSERT_TRUE(nexus::FrameHeader::decode(dec).has_value());
+        const nexus::expected<nexus::FetchResponse> resp = nexus::FetchResponse::decode(dec);
+        ASSERT_TRUE(resp.has_value());
+        EXPECT_EQ(resp->error_code, nexus::WireError::None);
+        EXPECT_EQ(resp->high_watermark, partition + 1);
+        EXPECT_FALSE(resp->batches.empty());
+    }
+
+    // CreateTopic por protocolo: fan-out a ambos núcleos. Producir a su partición 1 (núcleo 1) solo
+    // funciona si el fan-out la creó allí.
+    nexus::CreateTopicRequest creq{.name = "u", .partition_count = 2, .replication_factor = 1};
+    nexus::Buffer cbody;
+    nexus::Encoder cenc{cbody};
+    creq.encode(cenc);
+    ASSERT_TRUE(send_frame(fd, nexus::ApiKey::CreateTopic, /*correlation_id=*/30, cbody.as_span()));
+    {
+        const std::vector<std::byte> rframe = recv_frame(fd);
+        ASSERT_FALSE(rframe.empty());
+        nexus::Decoder dec{nexus::ByteSpan{rframe.data(), rframe.size()}};
+        ASSERT_TRUE(nexus::FrameHeader::decode(dec).has_value());
+        const nexus::expected<nexus::CreateTopicResponse> resp =
+            nexus::CreateTopicResponse::decode(dec);
+        ASSERT_TRUE(resp.has_value());
+        EXPECT_EQ(resp->error_code, nexus::WireError::None);
+    }
+    {
+        const std::vector<std::byte> batch = encode_batch(5);
+        nexus::ProduceRequest preq;
+        preq.topic = "u";
+        preq.partition = 1;  // dueña: núcleo 1.
+        preq.batch = nexus::ByteSpan{batch.data(), batch.size()};
+        nexus::Buffer pbody;
+        nexus::Encoder penc{pbody};
+        preq.encode(penc);
+        ASSERT_TRUE(send_frame(fd, nexus::ApiKey::Produce, /*correlation_id=*/31, pbody.as_span()));
+        const std::vector<std::byte> rframe = recv_frame(fd);
+        ASSERT_FALSE(rframe.empty());
+        nexus::Decoder dec{nexus::ByteSpan{rframe.data(), rframe.size()}};
+        ASSERT_TRUE(nexus::FrameHeader::decode(dec).has_value());
+        const nexus::expected<nexus::ProduceResponse> resp = nexus::ProduceResponse::decode(dec);
+        ASSERT_TRUE(resp.has_value());
+        EXPECT_EQ(resp->error_code, nexus::WireError::None);
+    }
+
+    client->close();
+    server->stop();
+    server_thread.join();
+}
+
 }  // namespace
