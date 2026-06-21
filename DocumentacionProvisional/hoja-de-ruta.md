@@ -940,6 +940,10 @@ Harness de benchmark vacío y CI:
       a `FetchOutcome` (posee los bytes, se mueve por el cruce). `Server` cablea el router tras arrancar el pool
       (N=1: dueño=núcleo 0, inline por fast-path). `broker` enlaza `nexus::reactor`. Test cross-core determinista
       N=2 (Produce/Fetch a partición de otro núcleo). 655/655 GCC/Clang/ASan; tidy fix en `cross_core_call`.
+    - [x] **D3.4c-3c** Fix de race en el apagado (cazada con TSan): `Server::run` ya no llama `pool_.shutdown()`
+      en el hilo del reactor (cerraba el `eventfd` mientras `stop()→wake()` lo escribía desde otro hilo). La
+      destrucción del pool se difiere a `~ReactorPool` (al destruir el `Server`), tras el `join` del llamante,
+      que ordena el `close` después del `wake`. Suite completa **bajo TSan** verde (655/655), además de GCC/Clang/ASan.
     - [ ] **D3.4c** *(resto)* CreateTopic/DeleteTopic con fan-out a todos los núcleos; `TopicManager` por núcleo
       real en el `Server` (hoy comparten uno); grupos/offsets por `hash(group_id)`; encender N>1 + TSan/estrés. Estado del broker **fragmentado por reactor** (shared-nothing): el `TopicManager`/`Partition`
       de cada partición vive en su reactor dueño; `dispatch` enruta la operación al dueño con `call_on`.

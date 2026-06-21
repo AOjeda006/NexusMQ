@@ -171,8 +171,12 @@ void Server::run() {
     }
     health_.set_started(true);  // ya servimos: `/readyz` puede dar 200.
     main.run();                 // bloquea el hilo llamante hasta `stop()`.
-    pool_.shutdown();           // para y une los workers (el núcleo 0 ya salió de su bucle).
     main_reactor_.store(nullptr, std::memory_order_release);
+    // El apagado del pool (stop + join de workers + cierre de los proactors) NO se hace aquí: lo
+    // hace `~ReactorPool` cuando se destruye el `Server`, en el hilo que lo destruye y DESPUÉS de
+    // que el llamante haya unido el hilo de `run()`. Si se cerrara aquí (en este hilo), el
+    // `close(eventfd)` competiría con el `write(eventfd)` de `stop()→wake()` del otro hilo (race
+    // detectada por TSan). El `join` del llamante establece el happens-before que lo ordena.
 }
 
 void Server::stop() noexcept {
