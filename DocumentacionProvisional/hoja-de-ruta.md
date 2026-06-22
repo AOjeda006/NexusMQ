@@ -1028,9 +1028,11 @@ Harness de benchmark vacío y CI:
         reintenta hasta que el tick elige líder → confirma (quórum=1) → fetch ve el high_watermark.
         686/686 en GCC/Clang/ASan/**TSan** (e2e replicado verde bajo TSan); format + tidy limpios. *(No
         requiere ADR: materializa ADR-0016/0025/0026.)*
-  - [ ] **D3.5** Transporte inter-nodo **real** detrás del `RaftMessageSink`: conexiones TCP persistentes
+  - [x] **D3.5** Transporte inter-nodo **real** detrás del `RaftMessageSink`: conexiones TCP persistentes
     a peers (direccionadas por config), envío con longitud-prefijo del `RaftEnvelope` y recepción/
-    desencuadre por el `FrameReader`; recepción → `RaftCarrier::on_message`.
+    desencuadre → `RaftCarrier::on_message`. Completo (D3.5-1..6b). **Ajuste de plan:** el plano
+    inter-nodo usa un enlace longitud-prefijo **propio** (no el `FrameReader`/`ApiKey` del cliente)
+    para mantener ambos planos ortogonales (ADR-0004/0025). El e2e multi-nodo real es **D3.7**.
       - [x] **D3.5-1** Directorio de peers (`cluster/peer_directory.{hpp,cpp}`, nuevo subsistema
         `nexus::cluster`): `PeerAddress{host, port}` (puerto del **plano inter-nodo**, separado del de
         cliente) y `PeerDirectory` inmutable `NodeId -> PeerAddress` con `find`/`contains`/`node_ids`
