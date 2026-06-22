@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "broker/partition_base.hpp"
 #include "broker/producer_session.hpp"
 #include "common/error.hpp"
 #include "common/record.hpp"
@@ -34,7 +35,7 @@ namespace nexus {
 ///   partición** lista y probada vía enrutado directo/simulado.
 /// @invariant `high_watermark()` ≤ `log().log_end_offset()` (lo confirmado nunca supera lo
 /// escrito).
-class ReplicatedPartition {
+class ReplicatedPartition : public PartitionBase {
 public:
     /// @brief Construye la partición replicada sobre @p log para el nodo @p self.
     /// @param peers Los demás miembros del grupo Raft (votantes + @p learners).
@@ -48,29 +49,28 @@ public:
     ReplicatedPartition& operator=(ReplicatedPartition&&) noexcept = default;
     ReplicatedPartition(const ReplicatedPartition&) = delete;
     ReplicatedPartition& operator=(const ReplicatedPartition&) = delete;
-    ~ReplicatedPartition() = default;
+    ~ReplicatedPartition() override = default;
 
     /// @brief (Solo líder) Propone @p batch tras validar idempotencia. HOT PATH (§7.11 #1).
     /// @details `Unsupported` si el nodo no es líder (`NOT_LEADER_FOR_PARTITION` en el wire).
     /// Aplica
     ///   la idempotencia por productor (§5.9) y propone la entrada; devuelve el **último offset**
     ///   asignado. La escritura es durable cuando `high_watermark()` lo supera (acks=quorum).
-    [[nodiscard]] expected<Offset> produce(const RecordBatch& batch);
+    [[nodiscard]] expected<Offset> produce(const RecordBatch& batch) override;
 
-    /// @brief Lee batches desde @p offset hasta ~@p max_bytes. El llamante respeta
-    /// `high_watermark`.
-    [[nodiscard]] expected<FetchResult> fetch(Offset offset, std::size_t max_bytes) const;
+    /// @copydoc PartitionBase::fetch
+    [[nodiscard]] expected<FetchResult> fetch(Offset offset, std::size_t max_bytes) const override;
 
     /// @brief Frontera visible para los consumidores: offset del `commit_index` (exclusivo).
-    [[nodiscard]] Offset high_watermark() const;
+    [[nodiscard]] Offset high_watermark() const override;
 
     [[nodiscard]] Index commit_index() const noexcept { return raft_->commit_index(); }
-    [[nodiscard]] bool is_leader() const noexcept { return raft_->is_leader(); }
-    [[nodiscard]] Epoch leader_epoch() const noexcept { return raft_->leader_epoch(); }
+    [[nodiscard]] bool is_leader() const noexcept override { return raft_->is_leader(); }
+    [[nodiscard]] Epoch leader_epoch() const noexcept override { return raft_->leader_epoch(); }
 
     /// Acceso a la FSM de Raft para que el portador la conduzca (`tick`/`on_*`/`take_messages`).
     [[nodiscard]] RaftNode& raft() noexcept { return *raft_; }
-    [[nodiscard]] const PartitionLog& log() const noexcept { return *log_; }
+    [[nodiscard]] const PartitionLog& log() const noexcept override { return *log_; }
 
 private:
     ReplicatedPartition(std::unique_ptr<PartitionLog> log, std::unique_ptr<RaftLog> rlog,

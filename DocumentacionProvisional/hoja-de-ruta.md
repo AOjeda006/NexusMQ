@@ -992,7 +992,16 @@ Harness de benchmark vacío y CI:
       (673/673 GCC/Clang/ASan/TSan): el reparto shared-nothing no tiene carreras de punta a punta. *(No requiere
       ADR nuevo: ADR-0026 fija el reparto, no el valor por defecto.)*
     - [ ] **D3.4d** `ReplicatedPartition` (en vez de `Partition`) cuando `replication_factor > 1`, conducida por
-      su `RaftCarrier` en el reactor dueño (tick desde el bucle del reactor).
+      su `RaftCarrier` en el reactor dueño (tick desde el bucle del reactor). Por sub-pasos:
+      - [x] **D3.4d-1** Interfaz `PartitionBase` (`broker/partition_base.hpp`): superficie común de hot-path
+        (`produce`/`fetch`/`high_watermark`/`is_leader`/`leader_epoch`/`log`) de la que derivan **tanto**
+        `Partition` (mono-nodo) como `ReplicatedPartition` (Raft). `Topic` posee
+        `unique_ptr<PartitionBase>`; `RequestRouter::find_partition` y `AdminApi` sirven por la interfaz
+        sin conocer el tipo concreto (OCP: el tipo se elige al crear según `replication_factor`). Base
+        polimórfica con copia/movimiento **protegidos** (sin *slicing*; las derivadas siguen movibles, p. ej.
+        `ReplicatedPartition::create` devuelve por valor) y destructor virtual. Refactor **sin cambio de
+        comportamiento** (sigue creándose `Partition`). Test de despacho polimórfico sobre la réplica.
+        674/674 en GCC/Clang/ASan/**TSan**; format + tidy limpios. *(No requiere ADR: materializa ADR-0016.)*
   - [ ] **D3.5** Transporte inter-nodo **real** detrás del `RaftMessageSink`: conexiones TCP persistentes
     a peers (direccionadas por config), envío con longitud-prefijo del `RaftEnvelope` y recepción/
     desencuadre por el `FrameReader`; recepción → `RaftCarrier::on_message`.

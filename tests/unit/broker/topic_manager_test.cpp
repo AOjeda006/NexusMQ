@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "broker/partition.hpp"
+#include "broker/partition_base.hpp"
 #include "common/error.hpp"
 #include "common/record.hpp"
 #include "common/types.hpp"
@@ -102,7 +103,7 @@ TEST(TopicManager, ProduceTrasCrear_FuncionaSobreLaParticion) {
     nexus::TopicManager manager{dir.path()};
     ASSERT_TRUE(manager.create_topic("t", 1).has_value());
 
-    nexus::Partition* part = manager.get("t")->partition(0);
+    nexus::PartitionBase* part = manager.get("t")->partition(0);
     ASSERT_NE(part, nullptr);
     nexus::RecordBatchHeader header;
     header.record_count = 3;

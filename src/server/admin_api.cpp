@@ -9,7 +9,7 @@
 #include <string>
 #include <utility>
 
-#include "broker/partition.hpp"
+#include "broker/partition_base.hpp"
 #include "broker/topic.hpp"
 #include "broker/topic_cluster.hpp"
 #include "reactor/cross_core_call.hpp"
@@ -87,7 +87,7 @@ PartitionInfo read_partition_info(TopicManager& manager, const std::string& name
                                   NodeId leader) {
     PartitionInfo info{.id = pid, .leader = leader, .high_watermark = 0, .leader_epoch = 0};
     if (Topic* topic = manager.get(name); topic != nullptr) {
-        if (const Partition* partition = topic->partition(pid); partition != nullptr) {
+        if (const PartitionBase* partition = topic->partition(pid); partition != nullptr) {
             info.high_watermark = partition->high_watermark();
             info.leader_epoch = partition->leader_epoch();
         }

@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <utility>
 
-#include "broker/partition.hpp"
+#include "broker/partition_base.hpp"
 #include "common/types.hpp"
 
 namespace nexus {
@@ -42,8 +42,9 @@ struct TopicMetadata {
 };
 
 /// @brief Agrupa las particiones de un topic en un reactor. Afinidad: REACTOR-LOCAL por partición.
-/// @details Posee sus `Partition` (cada una con su `PartitionLog`). El `TopicManager` (plano de
-///   control) crea el topic y le añade las particiones; el hot-path solo consulta `partition()`.
+/// @details Posee sus particiones por `PartitionBase` (cada una con su `PartitionLog`), sean
+///   `Partition` (mono-nodo) o `ReplicatedPartition` (Raft): el tipo concreto lo elige el
+///   `TopicManager` según `replication_factor`. El hot-path solo consulta `partition()`.
 /// @invariant Las claves de `partitions_` están en `[0, meta_.partition_count)`.
 class Topic {
 public:
@@ -55,12 +56,12 @@ public:
     ~Topic() = default;
 
     /// Inserta la @p partition bajo @p id (la toma en posesión). Sobrescribe si @p id ya existía.
-    void add_partition(PartitionId id, std::unique_ptr<Partition> partition) {
+    void add_partition(PartitionId id, std::unique_ptr<PartitionBase> partition) {
         partitions_.insert_or_assign(id, std::move(partition));
     }
 
     /// @return La partición @p id, o `nullptr` si no existe en este topic.
-    [[nodiscard]] Partition* partition(PartitionId id) noexcept {
+    [[nodiscard]] PartitionBase* partition(PartitionId id) noexcept {
         const auto it = partitions_.find(id);
         return it == partitions_.end() ? nullptr : it->second.get();
     }
@@ -71,7 +72,7 @@ public:
 
 private:
     TopicMetadata meta_;
-    std::unordered_map<PartitionId, std::unique_ptr<Partition>> partitions_;
+    std::unordered_map<PartitionId, std::unique_ptr<PartitionBase>> partitions_;
 };
 
 }  // namespace nexus

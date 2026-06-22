@@ -17,7 +17,7 @@
 #include "broker/consumer_group.hpp"
 #include "broker/group_coordinator.hpp"
 #include "broker/offset_manager.hpp"
-#include "broker/partition.hpp"
+#include "broker/partition_base.hpp"
 #include "broker/topic.hpp"
 #include "broker/topic_cluster.hpp"
 #include "common/fnv1a.hpp"
@@ -58,14 +58,15 @@ task<std::invoke_result_t<Fn, Shard&>> on_group_owner(Reactor* self, PartitionRo
 }
 
 /// Localiza la partición destino; `nullptr` si el topic o la partición no existen.
-Partition* find_partition(TopicManager& topics, const std::string& topic, PartitionId partition) {
+PartitionBase* find_partition(TopicManager& topics, const std::string& topic,
+                              PartitionId partition) {
     Topic* found = topics.get(topic);
     return found == nullptr ? nullptr : found->partition(partition);
 }
 
 ProduceResponse handle_produce(TopicManager& topics, const ProduceRequest& req) {
     ProduceResponse resp;
-    Partition* part = find_partition(topics, req.topic, req.partition);
+    PartitionBase* part = find_partition(topics, req.topic, req.partition);
     if (part == nullptr) {
         resp.error_code = WireError::UnknownTopicOrPartition;
         return resp;
@@ -95,7 +96,7 @@ struct FetchOutcome {
 
 FetchOutcome handle_fetch(TopicManager& topics, const FetchRequest& req) {
     FetchOutcome out;
-    const Partition* part = find_partition(topics, req.topic, req.partition);
+    const PartitionBase* part = find_partition(topics, req.topic, req.partition);
     if (part == nullptr) {
         out.error = WireError::UnknownTopicOrPartition;
         return out;

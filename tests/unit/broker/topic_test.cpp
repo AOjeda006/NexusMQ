@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "broker/partition.hpp"
+#include "broker/partition_base.hpp"
 #include "common/error.hpp"
 #include "common/record.hpp"
 #include "common/types.hpp"
@@ -75,7 +76,8 @@ TEST(Topic, Partition_PermiteProduceYFetch) {
     nexus::Topic topic{make_meta("t", 1)};
     topic.add_partition(0, open_partition(dir.path() / "p0"));
 
-    nexus::Partition* part = topic.partition(0);
+    // Se sirve por la interfaz base (PartitionBase), sin conocer el tipo concreto.
+    nexus::PartitionBase* part = topic.partition(0);
     ASSERT_NE(part, nullptr);
     nexus::RecordBatchHeader header;
     header.record_count = 2;

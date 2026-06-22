@@ -18,6 +18,7 @@
 #include <variant>
 #include <vector>
 
+#include "broker/partition_base.hpp"
 #include "common/error.hpp"
 #include "common/record.hpp"
 #include "common/types.hpp"
@@ -198,6 +199,21 @@ TEST(ReplicatedPartition, Produce_NodoUnico_SeEligeLiderYConfirmaDeInmediato) {
     EXPECT_EQ(*last, 2);  // base 0, count 3 -> ultimo offset 2.
     EXPECT_EQ(part.commit_index(), 1);
     EXPECT_EQ(part.high_watermark(), 3);  // un solo votante: confirma al proponer.
+}
+
+TEST(ReplicatedPartition, SeSirvePorLaInterfazBase_DespachoPolimorfico) {
+    // El broker sirve cualquier partición por `PartitionBase` sin conocer el tipo concreto: la
+    // réplica debe responder produce/fetch/high_watermark por el despacho virtual.
+    PartCluster cluster({1}, 42);
+    ASSERT_TRUE(cluster.run_until([&] { return cluster.leader().has_value(); }, 3000ms));
+    nexus::PartitionBase& base = cluster.part(1);
+
+    ASSERT_TRUE(base.is_leader());
+    const nexus::expected<nexus::Offset> last = base.produce(make_batch(-1, -1, 3));
+    ASSERT_TRUE(last.has_value());
+    EXPECT_EQ(base.high_watermark(), 3);
+    const nexus::expected<nexus::FetchResult> result = base.fetch(0, 64U * 1024U);
+    ASSERT_TRUE(result.has_value());
 }
 
 TEST(ReplicatedPartition, Fetch_TrasProduceConfirmado_DevuelveBatches) {
