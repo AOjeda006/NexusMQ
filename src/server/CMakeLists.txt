@@ -18,6 +18,7 @@ target_link_libraries(nexus-server PUBLIC
   nexus::reactor
   nexus::wire
   nexus::broker
+  nexus::cluster
   nexus::ingress
   nexus::telemetry
   nexus_options)

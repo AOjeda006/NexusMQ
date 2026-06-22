@@ -15,6 +15,7 @@
 
 #include "broker/consumer_group.hpp"
 #include "broker/group_coordinator.hpp"
+#include "cluster/raft_receiver.hpp"
 #include "consensus/raft_carrier.hpp"
 #include "io/io_uring_backend.hpp"
 #include "reactor/cross_core_call.hpp"
@@ -27,6 +28,10 @@ namespace {
 
 /// Profundidad de la cola del anillo io_uring de cada reactor del servidor.
 constexpr unsigned int kRingDepth = 256;
+
+/// Tamaño máximo de un sobre de Raft en el wire inter-nodo (anti-DoS): 16 MiB (holgado para
+/// `AppendEntries`/`InstallSnapshot` con lotes grandes).
+constexpr std::size_t kMaxRaftMessage = std::size_t{16} * 1024 * 1024;
 
 /// Factoría por defecto del `Proactor` de cada reactor: io_uring (plano de control).
 std::unique_ptr<Proactor> make_io_uring_proactor(int /*core_id*/) {
@@ -71,7 +76,9 @@ task<void> admin_accept_loop(Reactor& reactor, Listener& listener, const AdminRo
 
 Server::Server(Config config, ReactorPool::ProactorFactory proactor_factory)
     : config_(resolve_config(std::move(config))),
-      catalog_(config_.data_dir, config_.num_reactors, config_.node_id, config_.raft_config),
+      peers_(config_.peers),
+      catalog_(config_.data_dir, config_.num_reactors, config_.node_id, config_.raft_config,
+               peers_.node_ids()),
       group_catalog_(config_.num_reactors),
       proactor_factory_(proactor_factory ? std::move(proactor_factory) : make_io_uring_proactor) {
     // Valida el plano de control en construcción: si io_uring no está disponible, la factoría por
@@ -163,6 +170,13 @@ expected<void> Server::bind() {
         }
         admin_listener_ = std::move(*admin);
     }
+    if (config_.cluster_port) {
+        expected<Listener> cluster = Listener::bind(config_.host, *config_.cluster_port);
+        if (!cluster) {
+            return std::unexpected(cluster.error());
+        }
+        cluster_listener_ = std::move(*cluster);
+    }
     return {};
 }
 
@@ -172,6 +186,10 @@ std::uint16_t Server::port() const noexcept {
 
 std::uint16_t Server::admin_port() const noexcept {
     return admin_listener_ ? admin_listener_->local_port() : 0;
+}
+
+std::uint16_t Server::cluster_port() const noexcept {
+    return cluster_listener_ ? cluster_listener_->local_port() : 0;
 }
 
 void Server::start_raft_ticks(Reactor& main) {
@@ -199,6 +217,62 @@ void Server::start_raft_ticks(Reactor& main) {
                 owner.every(interval, std::move(tick));
             });
         }
+    }
+}
+
+void Server::start_raft_transport(Reactor& main) {
+    if (!config_.cluster_port) {
+        return;  // sin plano inter-nodo: los portadores quedan como votante único (sumidero nulo).
+    }
+    raft_transports_.resize(static_cast<std::size_t>(config_.num_reactors));
+    for (int core = 0; core < config_.num_reactors; ++core) {
+        Reactor& owner = pool_.reactor(core);
+        // Crea el transporte del núcleo y lo instala como sumidero de sus portadores, EN su hilo
+        // (el transporte y el sumidero diferido son reactor-locales). El transporte emite por
+        // corrutinas lanzadas en el propio reactor (spawner).
+        auto setup = [this, core, &owner]() {
+            auto transport = std::make_unique<RaftTransport>(
+                config_.node_id, peers_, owner.proactor(),
+                [&owner](task<void> coro) { owner.spawn(std::move(coro)); });
+            catalog_.manager(core).set_message_sink(transport.get());
+            raft_transports_[static_cast<std::size_t>(core)] = std::move(transport);
+        };
+        if (core == 0) {
+            setup();
+        } else {
+            main.submit_to(core, std::move(setup));
+        }
+    }
+}
+
+void Server::dispatch_raft_envelope(Reactor& source, const RaftEnvelope& envelope) {
+    // El dueño de la partición (ADR-0026) recibe el RPC en SU hilo: lookup del portador +
+    // on_message son reactor-locales. Si el dueño es el propio núcleo receptor, se entrega directo.
+    const int owner = static_cast<int>(static_cast<std::size_t>(envelope.partition) %
+                                       static_cast<std::size_t>(config_.num_reactors));
+    auto deliver = [this, owner, env = envelope]() {
+        RaftCarrier* carrier = catalog_.manager(owner).carrier_for(env.topic, env.partition);
+        if (carrier != nullptr) {
+            carrier->on_message(std::chrono::steady_clock::now(), env.message);
+        }
+    };
+    if (owner == source.core_id()) {
+        deliver();
+    } else {
+        source.submit_to(owner, std::move(deliver));
+    }
+}
+
+task<void> Server::cluster_accept_loop(Reactor& reactor, Listener& listener) {
+    while (true) {
+        expected<Socket> client = co_await listener.async_accept(reactor.proactor());
+        if (!client) {
+            co_return;  // listener cerrado o error: dejamos de aceptar.
+        }
+        reactor.spawn(serve_raft_connection(
+            reactor.proactor(), std::move(*client),
+            [this, &reactor](const RaftEnvelope& env) { dispatch_raft_envelope(reactor, env); },
+            kMaxRaftMessage));
     }
 }
 
@@ -233,11 +307,17 @@ void Server::run() {
         // El admin REST también propaga crear/borrar topic a todos los núcleos (ADR-0026).
         admin_api_->bind_cluster(main, *partition_router_, catalog_.managers());
     }
+    // El transporte se instala ANTES de los ticks para que la primera elección/heartbeat ya salga
+    // por la red a los peers (ADR-0025).
+    start_raft_transport(main);
     start_raft_ticks(main);
 
     main.spawn(accept_loop(main, *listener_, *router_));
     if (admin_listener_ && admin_router_) {
         main.spawn(admin_accept_loop(main, *admin_listener_, *admin_router_));
+    }
+    if (cluster_listener_) {
+        main.spawn(cluster_accept_loop(main, *cluster_listener_));
     }
     health_.set_started(true);  // ya servimos: `/readyz` puede dar 200.
     main.run();                 // bloquea el hilo llamante hasta `stop()`.

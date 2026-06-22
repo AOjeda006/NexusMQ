@@ -94,6 +94,7 @@ add_executable(nexus-tests
   unit/cluster/raft_link_test.cpp
   unit/cluster/raft_receiver_test.cpp
   unit/cluster/raft_transport_test.cpp
+  unit/cluster/raft_transport_loopback_test.cpp
   sim/raft_sim_test.cpp
   e2e/broker_e2e_test.cpp
   unit/client/dead_letter_test.cpp

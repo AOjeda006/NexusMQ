@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -15,9 +16,12 @@
 #include "broker/request_router.hpp"
 #include "broker/topic_catalog.hpp"
 #include "broker/topic_manager.hpp"
+#include "cluster/peer_directory.hpp"
+#include "cluster/raft_transport.hpp"
 #include "common/error.hpp"
 #include "common/types.hpp"
 #include "consensus/raft_node.hpp"
+#include "consensus/raft_wire.hpp"
 #include "ingress/health_monitor.hpp"
 #include "ingress/jwt.hpp"
 #include "ingress/rest_gateway.hpp"
@@ -70,6 +74,12 @@ public:
         /// elección/heartbeat y semilla. El periodo de tick del reactor sale del
         /// `heartbeat_interval`.
         RaftConfig raft_config;
+        /// Puerto del **plano inter-nodo** (Raft entre nodos, ADR-0025). `nullopt` lo desactiva
+        /// (nodo aislado: votante único); `0` = efímero (útil en tests).
+        std::optional<std::uint16_t> cluster_port;
+        /// Directorio de peers del clúster (`NodeId` -> dirección inter-nodo) para el transporte de
+        /// Raft. Suele excluir a este nodo.
+        PeerDirectory peers;
     };
 
     /// @brief Crea las piezas del broker y **valida** que el proactor (io_uring) se puede crear.
@@ -100,6 +110,9 @@ public:
     /// Puerto del plano de operación realmente enlazado; `0` si está desactivado o sin `bind`.
     [[nodiscard]] std::uint16_t admin_port() const noexcept;
 
+    /// Puerto del plano inter-nodo realmente enlazado; `0` si está desactivado o sin `bind`.
+    [[nodiscard]] std::uint16_t cluster_port() const noexcept;
+
     /// Lanza el bucle de aceptación y corre el reactor hasta `stop()` (bloquea el hilo llamante).
     void run();
 
@@ -121,7 +134,31 @@ private:
     ///   `run` tras arrancar el pool. @p main es el reactor del núcleo 0.
     void start_raft_ticks(Reactor& main);
 
+    /// @brief Crea el `RaftTransport` de cada núcleo (sobre su `Proactor`) y lo instala como
+    /// sumidero
+    ///   de los portadores de ese núcleo, para que la replicación salga por la red a los peers.
+    /// @details Núcleo 0 inline; núcleos 1..N-1 por su buzón (el transporte y el sumidero son
+    ///   reactor-locales). No-op si no hay plano inter-nodo (`cluster_port` sin fijar). @p main es
+    ///   el reactor del núcleo 0.
+    void start_raft_transport(Reactor& main);
+
+    /// @brief Bucle de aceptación del plano inter-nodo: por cada conexión, sirve sus sobres de Raft
+    ///   y los enruta al portador dueño. Corre en el núcleo 0.
+    [[nodiscard]] task<void> cluster_accept_loop(Reactor& reactor, Listener& listener);
+
+    /// @brief Enruta un `RaftEnvelope` recibido al `RaftCarrier` dueño de su partición
+    ///   (`partition % N`), entregándoselo con `on_message` en el hilo de ese núcleo.
+    /// @param[in,out] source Reactor que recibió el sobre (desde el que se hace el `submit_to`).
+    void dispatch_raft_envelope(Reactor& source, const RaftEnvelope& envelope);
+
     Config config_;
+    /// Directorio de peers del clúster (copia de `config_.peers`); lo referencian los transportes,
+    /// así que se declara **antes** que ellos (se destruye después).
+    PeerDirectory peers_;
+    /// Transporte de Raft por núcleo (creado en `run`, sobre el `Proactor` de cada reactor).
+    /// Declarado **antes** que `pool_` y `catalog_` para destruirse **después** (las corrutinas
+    /// emisoras del pool y los portadores del catálogo lo referencian).
+    std::vector<std::unique_ptr<RaftTransport>> raft_transports_;
     /// Catálogo de topics fragmentado por núcleo (ADR-0026): un `TopicManager` por reactor. El del
     /// núcleo 0 atiende las conexiones; el plano de datos enruta cada partición a su dueño.
     TopicCatalog catalog_;
@@ -144,6 +181,7 @@ private:
     std::optional<AdminRouter> admin_router_;
     std::optional<Listener> listener_;
     std::optional<Listener> admin_listener_;
+    std::optional<Listener> cluster_listener_;
     std::optional<RequestRouter> router_;
     /// Enruta las operaciones de partición a su reactor dueño (se puebla en `run`, tras el pool).
     std::optional<PartitionRouter> partition_router_;

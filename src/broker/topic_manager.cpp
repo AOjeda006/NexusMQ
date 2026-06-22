@@ -40,12 +40,14 @@ std::int64_t now_ms() {
 }  // namespace
 
 TopicManager::TopicManager(std::filesystem::path data_dir, int num_cores, int owner_core,
-                           NodeId node_id, RaftConfig raft_config) noexcept
+                           NodeId node_id, RaftConfig raft_config,
+                           std::vector<NodeId> voter_peers) noexcept
     : data_dir_(std::move(data_dir)),
       num_cores_(num_cores < 1 ? 1 : num_cores),
       owner_core_(owner_core < 0 || owner_core >= num_cores_ ? 0 : owner_core),
       node_id_(node_id),
-      raft_config_(raft_config) {}
+      raft_config_(raft_config),
+      voter_peers_(std::move(voter_peers)) {}
 
 TopicManager::~TopicManager() = default;
 
@@ -87,9 +89,10 @@ expected<TopicMetadata> TopicManager::create_topic(std::string name, std::int32_
             topic->add_partition(pid, std::make_unique<Partition>(std::move(*log)));
             continue;
         }
-        // Partición replicada: votante único (sin peers) hasta D3.5; el portador Raft la conduce.
+        // Partición replicada: el grupo Raft lo forman este nodo y `voter_peers_` (resto del
+        // clúster); vacío = votante único. El portador Raft la conduce.
         expected<ReplicatedPartition> rp =
-            ReplicatedPartition::create(node_id_, /*peers=*/{}, std::move(*log), raft_config_);
+            ReplicatedPartition::create(node_id_, voter_peers_, std::move(*log), raft_config_);
         if (!rp) {
             return std::unexpected(rp.error());
         }

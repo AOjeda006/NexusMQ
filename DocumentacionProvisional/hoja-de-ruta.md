@@ -1081,6 +1081,20 @@ Harness de benchmark vacío y CI:
         `Proactor` del reactor); el *composition root* instalará el `RaftTransport` al arrancar. Sin
         cambio de comportamiento (votante único sigue autoconfirmándose). 715/715 GCC/Clang/ASan;
         format + tidy limpios.
+      - [x] **D3.5-6b** Integración en el `Server` (composition root del plano inter-nodo):
+        `Config` gana `cluster_port` (puerto inter-nodo) y `peers` (`PeerDirectory`); `bind` enlaza el
+        listener inter-nodo; `run` crea un `RaftTransport` por núcleo sobre su `Proactor` y lo instala
+        como sumidero de sus portadores (`start_raft_transport`, núcleo 0 inline + buzón al resto), y
+        levanta el `cluster_accept_loop` que sirve cada conexión con `serve_raft_connection` y enruta
+        cada sobre al portador dueño (`partition % N`) con `dispatch_raft_envelope` (directo si es el
+        propio núcleo, `submit_to` si no). **Membresía de votantes:** `TopicManager`/`TopicCatalog`
+        propagan los `voter_peers` (= `peers.node_ids()`) a `ReplicatedPartition::create`, formando el
+        grupo Raft multi-votante (simplificación: replicación total). Orden de miembros del `Server`
+        elegido para que los transportes se destruyan **después** del pool y el catálogo. Validado por
+        un **test de integración sobre socket real** (io_uring): un `RaftTransport` conecta y envía un
+        sobre que el otro extremo recibe y decodifica de extremo a extremo. 716/716
+        GCC/Clang/ASan/**TSan**; format + tidy limpios. *(El e2e multi-nodo —elección + replicación a
+        quórum + failover— es D3.7.)*
   - [ ] **D3.6** Disparo de la **compactación** (`compact_to`, D2) por política desde el portador, ya con
     seguridad en el servidor vivo.
   - [ ] **D3.7** Tests e2e: cluster de 3 nodos reales (sockets), elección, replicación a quórum y failover

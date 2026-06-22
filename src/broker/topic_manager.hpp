@@ -46,10 +46,16 @@ public:
     /// @param owner_core Núcleo que atiende esta instancia (se acota a `[0, num_cores)`).
     /// @param node_id Identidad de este nodo (votante de las particiones replicadas).
     /// @param raft_config Parámetros de Raft (timeouts, semilla) de las particiones replicadas.
+    /// @param voter_peers Los **demás** votantes del grupo Raft de cada partición replicada (los
+    /// node
+    ///   ids del resto del clúster). Vacío = votante único (se autoconfirma). Simplificación de
+    ///   esta fase: replicación total (cada partición replicada vive en todos los nodos del
+    ///   directorio).
     /// @note Definido fuera de línea: `replicas_` es `vector<unique_ptr<ReplicaContext>>` con
     ///   `ReplicaContext` incompleto en la cabecera (pimpl).
     explicit TopicManager(std::filesystem::path data_dir, int num_cores = 1, int owner_core = 0,
-                          NodeId node_id = 0, RaftConfig raft_config = {}) noexcept;
+                          NodeId node_id = 0, RaftConfig raft_config = {},
+                          std::vector<NodeId> voter_peers = {}) noexcept;
     TopicManager(const TopicManager&) = delete;
     TopicManager& operator=(const TopicManager&) = delete;
     TopicManager(TopicManager&&) = delete;
@@ -120,6 +126,7 @@ private:
     int owner_core_;          ///< Núcleo que atiende esta instancia (`[0, num_cores_)`).
     NodeId node_id_;          ///< Identidad del nodo (votante de las particiones replicadas).
     RaftConfig raft_config_;  ///< Parámetros de Raft de las particiones replicadas.
+    std::vector<NodeId> voter_peers_;  ///< Los demás votantes del grupo Raft (resto del clúster).
     mutable std::mutex mutex_;
     std::unordered_map<std::string, std::unique_ptr<Topic>> topics_;
     /// Sumidero de Raft compartido por los portadores de este núcleo (reenvía al transporte real,

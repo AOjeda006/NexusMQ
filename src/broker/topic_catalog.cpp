@@ -9,12 +9,12 @@
 namespace nexus {
 
 TopicCatalog::TopicCatalog(const std::filesystem::path& data_dir, int num_cores, NodeId node_id,
-                           RaftConfig raft_config) {
+                           RaftConfig raft_config, const std::vector<NodeId>& voter_peers) {
     const int cores = num_cores < 1 ? 1 : num_cores;
     managers_.reserve(static_cast<std::size_t>(cores));
     for (int core = 0; core < cores; ++core) {
-        managers_.push_back(
-            std::make_unique<TopicManager>(data_dir, cores, core, node_id, raft_config));
+        managers_.push_back(std::make_unique<TopicManager>(data_dir, cores, core, node_id,
+                                                           raft_config, voter_peers));
     }
 }
 

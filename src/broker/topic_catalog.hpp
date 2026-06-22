@@ -38,8 +38,11 @@ public:
     /// @param num_cores Número de núcleos del nodo (>= 1; valores < 1 se tratan como 1).
     /// @param node_id Identidad del nodo (votante de las particiones replicadas).
     /// @param raft_config Parámetros de Raft de las particiones replicadas.
+    /// @param voter_peers Los demás votantes del grupo Raft (node ids del resto del clúster); vacío
+    ///   = votante único. Se propaga a cada `TopicManager`.
     explicit TopicCatalog(const std::filesystem::path& data_dir, int num_cores = 1,
-                          NodeId node_id = 0, RaftConfig raft_config = {});
+                          NodeId node_id = 0, RaftConfig raft_config = {},
+                          const std::vector<NodeId>& voter_peers = {});
     TopicCatalog(const TopicCatalog&) = delete;
     TopicCatalog& operator=(const TopicCatalog&) = delete;
     TopicCatalog(TopicCatalog&&) = delete;
