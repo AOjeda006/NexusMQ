@@ -3,6 +3,7 @@
 # .cpp del reactor); el resto (task, scheduler, colas, allocator) sigue siendo header-only.
 add_library(nexus-reactor
   cross_core.cpp
+  periodic_timers.cpp
   reactor.cpp
   reactor_pool.cpp)
 add_library(nexus::reactor ALIAS nexus-reactor)

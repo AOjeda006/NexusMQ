@@ -37,6 +37,15 @@ void Reactor::connect_peers(std::vector<Reactor*> peers) {
     peers_ = std::move(peers);
 }
 
+PeriodicTimers::Id Reactor::every(PeriodicTimers::Duration interval,
+                                  PeriodicTimers::Callback callback) {
+    return timers_.add(std::chrono::steady_clock::now(), interval, std::move(callback));
+}
+
+void Reactor::cancel_timer(PeriodicTimers::Id id) {
+    timers_.cancel(id);
+}
+
 void Reactor::spawn(task<void> coro) {
     const std::coroutine_handle<> handle = coro.handle();
     if (!handle) {
@@ -63,16 +72,19 @@ bool Reactor::poll_once() {
     const int delivered = mailbox_.drain(run_message);
     resumed += sched_.run_ready();
     // 3) Espera E/S: si hubo trabajo no bloquea (deadline = ahora); si no, bloquea hasta una
-    //    completion / wake / el backstop. Las completions reanudan sus corrutinas en el acto.
+    //    completion / wake / el próximo temporizador (o el backstop). Las completions reanudan sus
+    //    corrutinas en el acto.
     const bool busy = resumed > 0 || delivered > 0;
     const auto now = std::chrono::steady_clock::now();
-    const int completions =
-        proactor_->wait_completions(kMaxCompletions, busy ? now : now + kIdleBackstop);
-    // 4) Las completions pueden haber programado corrutinas (p. ej. con yield_to) → reanúdalas.
+    const auto deadline = busy ? now : timers_.next_deadline(now + kIdleBackstop);
+    const int completions = proactor_->wait_completions(kMaxCompletions, deadline);
+    // 4) Dispara los temporizadores vencidos (p. ej. el tick de Raft) y reanuda lo que encolen.
+    const std::size_t fired = timers_.fire_due(std::chrono::steady_clock::now());
+    // 5) Las completions/timers pueden haber programado corrutinas (p. ej. yield_to) → reanúdalas.
     resumed += sched_.run_ready();
-    // 5) Recoge los frames de las corrutinas detached ya terminadas (libera su memoria).
+    // 6) Recoge los frames de las corrutinas detached ya terminadas (libera su memoria).
     std::erase_if(spawned_, [](const task<void>& coro) { return coro.done(); });
-    return resumed > 0 || delivered > 0 || completions > 0;
+    return resumed > 0 || delivered > 0 || completions > 0 || fired > 0;
 }
 
 void Reactor::run() {

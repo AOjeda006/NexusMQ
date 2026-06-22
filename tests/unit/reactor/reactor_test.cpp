@@ -71,6 +71,33 @@ TEST(Reactor, Spawn_CorrutinaConIo_SeReanudaTrasLaCompletion) {
     EXPECT_EQ(bytes_read, 4);
 }
 
+TEST(Reactor, Every_TemporizadorVencido_SeDisparaEnPollOnce) {
+    using namespace std::chrono_literals;
+    nexus::Reactor reactor(/*core_id=*/0, /*num_cores=*/1, std::make_unique<nexus::FakeProactor>());
+    int fired = 0;
+    // Intervalo 0: vence de inmediato y en cada giro → disparo determinista por poll_once.
+    reactor.every(0ms, [&fired](nexus::MonoTime) { ++fired; });
+
+    EXPECT_EQ(fired, 0);  // registrado, aún no se ha girado el bucle
+    reactor.poll_once();
+    EXPECT_EQ(fired, 1);
+    reactor.poll_once();
+    EXPECT_EQ(fired, 2);
+}
+
+TEST(Reactor, CancelTimer_DetieneLosDisparos) {
+    using namespace std::chrono_literals;
+    nexus::Reactor reactor(/*core_id=*/0, /*num_cores=*/1, std::make_unique<nexus::FakeProactor>());
+    int fired = 0;
+    const nexus::PeriodicTimers::Id id = reactor.every(0ms, [&fired](nexus::MonoTime) { ++fired; });
+
+    reactor.poll_once();
+    EXPECT_EQ(fired, 1);
+    reactor.cancel_timer(id);
+    reactor.poll_once();
+    EXPECT_EQ(fired, 1);  // cancelado: no vuelve a dispararse
+}
+
 TEST(Reactor, Stop_DesdeOtroHilo_TerminaElBucleRun) {
     nexus::Reactor reactor(/*core_id=*/0, /*num_cores=*/1, std::make_unique<nexus::FakeProactor>());
     std::thread runner([&reactor] { reactor.run(); });

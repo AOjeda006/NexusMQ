@@ -38,6 +38,7 @@ add_executable(nexus-tests
   unit/protocol/messages_test.cpp
   unit/reactor/allocator_test.cpp
   unit/reactor/cross_core_test.cpp
+  unit/reactor/periodic_timers_test.cpp
   unit/reactor/reactor_test.cpp
   unit/reactor/reactor_pool_test.cpp
   unit/reactor/scheduler_test.cpp

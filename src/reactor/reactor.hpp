@@ -10,9 +10,11 @@
 
 #include "common/move_only_function.hpp"
 #include "common/task.hpp"
+#include "common/types.hpp"
 #include "io/proactor.hpp"
 #include "reactor/allocator.hpp"
 #include "reactor/cross_core.hpp"
+#include "reactor/periodic_timers.hpp"
 #include "reactor/scheduler.hpp"
 
 namespace nexus {
@@ -59,6 +61,14 @@ public:
     ///   lo libera cuando la corrutina termina. Solo desde el hilo del reactor.
     void spawn(task<void> coro);
 
+    /// @brief Registra @p callback para dispararse cada @p interval desde el bucle del reactor
+    ///   (fuente del `on_tick` de Raft). Solo desde el hilo del reactor.
+    /// @return El id del temporizador (para `cancel_timer`).
+    PeriodicTimers::Id every(PeriodicTimers::Duration interval, PeriodicTimers::Callback callback);
+
+    /// @brief Cancela el temporizador @p id. Solo desde el hilo del reactor; no desde un callback.
+    void cancel_timer(PeriodicTimers::Id id);
+
     /// @brief Envía @p work al reactor @p core_id (a su buzón) y lo despierta. Cross-core.
     void submit_to(int core_id, Work work);
 
@@ -75,6 +85,7 @@ private:
     CoroScheduler sched_;
     ArenaAllocator alloc_;
     CrossCoreMailbox mailbox_;
+    PeriodicTimers timers_;  // temporizadores periódicos conducidos por poll_once (tick de Raft)
     std::vector<task<void>> spawned_;  // frames de corrutinas detached que el reactor posee
     std::vector<Reactor*> peers_;  // no propietarios; los cablea el pool (indexados por core_id)
     std::atomic<bool> stopping_{false};

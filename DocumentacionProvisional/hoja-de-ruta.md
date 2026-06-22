@@ -1002,6 +1002,13 @@ Harness de benchmark vacío y CI:
         `ReplicatedPartition::create` devuelve por valor) y destructor virtual. Refactor **sin cambio de
         comportamiento** (sigue creándose `Partition`). Test de despacho polimórfico sobre la réplica.
         674/674 en GCC/Clang/ASan/**TSan**; format + tidy limpios. *(No requiere ADR: materializa ADR-0016.)*
+      - [x] **D3.4d-2** Temporizadores periódicos en el reactor (`reactor/periodic_timers.{hpp,cpp}` +
+        `Reactor::every`/`cancel_timer`): fuente del `on_tick` de Raft desde el bucle del reactor (antes
+        solo despertaba por E/S o `wake`). `PeriodicTimers` es **lógica pura** (recibe el `now`) → se
+        prueba determinista sin reloj real; `poll_once` le inyecta `steady_clock::now()`, acota su espera
+        al próximo vencimiento (`next_deadline`) y dispara los vencidos (`fire_due`, reprograma a
+        `now + interval` sin ráfaga de recuperación). 683/683 en GCC/Clang/ASan/**TSan**; format + tidy
+        limpios.
   - [ ] **D3.5** Transporte inter-nodo **real** detrás del `RaftMessageSink`: conexiones TCP persistentes
     a peers (direccionadas por config), envío con longitud-prefijo del `RaftEnvelope` y recepción/
     desencuadre por el `FrameReader`; recepción → `RaftCarrier::on_message`.
