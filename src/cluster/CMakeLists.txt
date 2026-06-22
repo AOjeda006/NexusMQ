@@ -2,7 +2,8 @@
 # Capa: resuelve y conecta nodos del clúster; compone common + io + consensus + wire.
 add_library(nexus-cluster
   peer_directory.cpp
-  raft_link.cpp)
+  raft_link.cpp
+  raft_transport.cpp)
 add_library(nexus::cluster ALIAS nexus-cluster)
 
 target_include_directories(nexus-cluster PUBLIC ${PROJECT_SOURCE_DIR}/src)

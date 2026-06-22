@@ -1054,6 +1054,16 @@ Harness de benchmark vacío y CI:
         en el frame de la corrutina hasta la completion). TDD: unitarios con `FakeProactor` (éxito/
         error/host inválido) + round-trip `connect→send→recv` por loopback io_uring (un solo hilo).
         701/701 GCC/Clang/ASan; IOCP **compile-verificado con MinGW-w64**; format + tidy limpios.
+      - [x] **D3.5-4** Transporte saliente `RaftTransport` (`cluster/raft_transport.{hpp,cpp}`,
+        implementa `RaftMessageSink`): el `RaftCarrier` llama `send` (síncrono, hilo del reactor) y el
+        transporte **encola por peer** y lanza una **corrutina emisora** (vía `Spawner` inyectado =
+        `Reactor::spawn`) que conecta con `Socket::async_connect` y drena la cola con el
+        `RaftEnvelopeWriter`. Conexión **persistente reutilizada** entre sobres; ante fallo de envío
+        cierra y reconecta; **best-effort** (descarta si el peer es desconocido/uno mismo, la cola se
+        llena, o la conexión falla — Raft reenvía). Reactor-local (uno por núcleo): sin locks;
+        `unordered_map<NodeId, PeerLink>` da estabilidad de referencias a las emisoras. TDD con
+        `FakeProactor` + spawner capturador (round-trip, varios sobres en orden, fallo de conexión,
+        reuso de conexión). 707/707 GCC/Clang/ASan; format + tidy limpios.
   - [ ] **D3.6** Disparo de la **compactación** (`compact_to`, D2) por política desde el portador, ya con
     seguridad en el servidor vivo.
   - [ ] **D3.7** Tests e2e: cluster de 3 nodos reales (sockets), elección, replicación a quórum y failover
