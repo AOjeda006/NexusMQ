@@ -50,11 +50,11 @@ private:
                                                    std::int64_t now_unix_seconds) const;
     [[nodiscard]] task<HttpResponse> route_topics(const HttpRequest& request,
                                                   std::string_view resource) const;
-    [[nodiscard]] HttpResponse route_groups(const HttpRequest& request) const;
+    [[nodiscard]] task<HttpResponse> route_groups(const HttpRequest& request) const;
     [[nodiscard]] HttpResponse list_topics(const HttpRequest& request) const;
     [[nodiscard]] task<HttpResponse> create_topic(const HttpRequest& request) const;
-    [[nodiscard]] HttpResponse describe_topic(const HttpRequest& request,
-                                              std::string_view name) const;
+    [[nodiscard]] task<HttpResponse> describe_topic(const HttpRequest& request,
+                                                    std::string_view name) const;
     [[nodiscard]] task<HttpResponse> delete_topic(std::string_view name) const;
 
     AdminService& admin_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)

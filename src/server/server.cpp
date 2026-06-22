@@ -14,6 +14,7 @@
 #include "broker/consumer_group.hpp"
 #include "broker/group_coordinator.hpp"
 #include "io/io_uring_backend.hpp"
+#include "reactor/cross_core_call.hpp"
 #include "server/admin_http.hpp"
 #include "server/connection.hpp"
 
@@ -84,11 +85,25 @@ Server::Server(Config config, ReactorPool::ProactorFactory proactor_factory)
     }
 }
 
-std::vector<GroupSummary> Server::list_groups(Page page) {
-    // Lee el coordinador del núcleo 0 (mismo hilo que el admin, sin carrera). Con N=1 todo grupo se
-    // coordina ahí (todo `hash % 1 == 0`), así que la lista es completa; con N>1 solo ve los grupos
-    // coordinados en el núcleo 0 — la agregación cross-core del listado queda pendiente (D3.4c).
-    const std::vector<GroupDigest> digests = group_catalog_.groups(0).list_groups();
+task<std::vector<GroupSummary>> Server::list_groups(Page page) {
+    // Agrega el coordinador de cada núcleo: cada grupo se coordina en `hash(group_id) % N`, así que
+    // el listado completo cruza núcleos (ADR-0026). El admin se sirve en el núcleo 0; con N=1 el
+    // `call_on` es local e inline. Antes de `run` (monohilo) se lee directamente el núcleo 0.
+    std::vector<GroupDigest> digests;
+    if (partition_router_) {
+        Reactor& self = *main_reactor_.load(std::memory_order_acquire);
+        for (int core = 0; core < group_catalog_.core_count(); ++core) {
+            std::vector<GroupDigest> shard = co_await call_on(
+                self, partition_router_->reactor(core),
+                [this, core] { return group_catalog_.groups(core).list_groups(); });
+            digests.insert(digests.end(), std::make_move_iterator(shard.begin()),
+                           std::make_move_iterator(shard.end()));
+        }
+    } else {
+        digests = group_catalog_.groups(0).list_groups();
+    }
+    std::ranges::sort(digests, {}, &GroupDigest::group_id);  // orden global determinista.
+
     std::vector<GroupSummary> summaries;
     summaries.reserve(digests.size());
     for (const GroupDigest& digest : digests) {
@@ -100,11 +115,12 @@ std::vector<GroupSummary> Server::list_groups(Page page) {
     }
     const std::size_t offset = page.offset();
     if (offset >= summaries.size()) {
-        return {};
+        co_return std::vector<GroupSummary>{};
     }
     const std::size_t end = std::min(summaries.size(), offset + page.size);
-    return {std::make_move_iterator(summaries.begin() + static_cast<std::ptrdiff_t>(offset)),
-            std::make_move_iterator(summaries.begin() + static_cast<std::ptrdiff_t>(end))};
+    co_return std::vector<GroupSummary>{
+        std::make_move_iterator(summaries.begin() + static_cast<std::ptrdiff_t>(offset)),
+        std::make_move_iterator(summaries.begin() + static_cast<std::ptrdiff_t>(end))};
 }
 
 expected<void> Server::create_topic(const std::string& name, std::int32_t partition_count) {

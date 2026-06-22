@@ -980,11 +980,16 @@ Harness de benchmark vacío y CI:
       `groups_by_core`/`offsets_by_core` y enruta Join/Sync/Heartbeat/Leave/OffsetCommit/OffsetFetch al shard del
       núcleo coordinador por paso de mensajes (`call_on`), decodificando en el borde y moviendo la petición al
       *frame*. Cada grupo tiene **dueño único** (linealizable sin locks). 672/672 en GCC/Clang/ASan/**TSan**.
-    - [ ] **D3.4c** *(resto)* **agregación cross-core del admin** a N>1: `list_groups` hoy solo ve los grupos
-      coordinados en el núcleo 0 y `describe_topic` solo los watermarks de las particiones del núcleo 0 — falta
-      agregar con `call_on` sobre todos los núcleos (requiere `list_groups`/`describe_topic` asíncronos en el
-      puerto admin). Con N=1 ambos son completos. Luego, **decidir encender N>1 por defecto** (hoy
-      `num_reactors=1`; N>1 es opt-in por config y ya está validado e2e).
+    - [x] **D3.4c-8** **Agregación cross-core del admin** (ADR-0026, regla 3): `AdminService::describe_topic` y
+      `list_groups` pasan a **corrutinas**; `describe_topic` agrega el *high-watermark*/epoch de cada partición
+      desde su núcleo dueño (`pid % N`) por `call_on`, y `Server::list_groups` agrega el `GroupCoordinator` de
+      **todos** los núcleos (orden global por `group_id`). Con N=1 el `call_on` es local e inline. Cierra el hueco
+      de observabilidad del admin a N>1. 673/673 en GCC/Clang/ASan/**TSan**.
+    - **Decisión (D3.4c):** **N>1 se mantiene opt-in** (`num_reactors=1` por defecto). Es un proyecto de
+      aprendizaje mono-nodo; el sharding está implementado y validado e2e/TSan, pero arrancar
+      `hardware_concurrency()` hilos por defecto cambia el uso de recursos y el determinismo de los tests sin
+      aportar a un nodo de desarrollo. El operador lo activa por config cuando quiere repartir entre núcleos.
+      *(Reversible; no requiere ADR nuevo —no contradice ADR-0026, que fija el reparto, no el valor por defecto.)*
     - [ ] **D3.4d** `ReplicatedPartition` (en vez de `Partition`) cuando `replication_factor > 1`, conducida por
       su `RaftCarrier` en el reactor dueño (tick desde el bucle del reactor).
   - [ ] **D3.5** Transporte inter-nodo **real** detrás del `RaftMessageSink`: conexiones TCP persistentes

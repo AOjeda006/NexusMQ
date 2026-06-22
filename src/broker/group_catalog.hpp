@@ -56,7 +56,8 @@ public:
 
     /// Punteros a los coordinadores de todos los núcleos (para `RequestRouter::bind_cluster`).
     [[nodiscard]] std::vector<GroupCoordinator*> all_groups() const;
-    /// Punteros a los almacenes de offsets de todos los núcleos (para `RequestRouter::bind_cluster`).
+    /// Punteros a los almacenes de offsets de todos los núcleos (para
+    /// `RequestRouter::bind_cluster`).
     [[nodiscard]] std::vector<OffsetManager*> all_offsets() const;
 
 private:

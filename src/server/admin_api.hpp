@@ -31,8 +31,9 @@ namespace nexus {
 /// @invariant `node_id_` y el *group lister* no cambian tras construir.
 class AdminApi final : public AdminService {
 public:
-    /// Función que enumera los grupos (paginada); la provee el cableado del server.
-    using GroupLister = std::function<std::vector<GroupSummary>(Page)>;
+    /// Función que enumera los grupos (paginada) **agregando todos los núcleos**; la provee el
+    /// cableado del server. Es una corrutina (`task`): la agregación cruza núcleos (`call_on`).
+    using GroupLister = std::function<task<std::vector<GroupSummary>>(Page)>;
 
     AdminApi(TopicManager& topics, NodeId node_id, GroupLister group_lister = {});
 
@@ -51,11 +52,17 @@ public:
 
     [[nodiscard]] task<expected<TopicSummary>> create_topic(const CreateTopicSpec& spec) override;
     [[nodiscard]] task<expected<void>> delete_topic(std::string_view name) override;
-    [[nodiscard]] expected<TopicDescription> describe_topic(std::string_view name) const override;
+    [[nodiscard]] task<expected<TopicDescription>> describe_topic(std::string_view name) override;
     [[nodiscard]] std::vector<TopicSummary> list_topics(Page page) const override;
-    [[nodiscard]] std::vector<GroupSummary> list_groups(Page page) const override;
+    [[nodiscard]] task<std::vector<GroupSummary>> list_groups(Page page) override;
 
 private:
+    /// @brief Estado de la partición @p pid del topic @p name (id/leader/high-watermark/epoch).
+    /// @details El *high-watermark*/epoch viven en el núcleo dueño (`pid % N`): cableado, los lee
+    /// por
+    ///   `call_on`; sin cablear, localmente. El topic ya existe (lo comprueba `describe_topic`).
+    [[nodiscard]] task<PartitionInfo> partition_info(std::string name, PartitionId pid);
+
     TopicManager& topics_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     NodeId node_id_;
     GroupLister group_lister_;

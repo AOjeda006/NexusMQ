@@ -14,6 +14,7 @@
 #include "broker/topic.hpp"
 #include "broker/topic_manager.hpp"
 #include "common/error.hpp"
+#include "common/record.hpp"
 #include "common/task.hpp"
 #include "ingress/admin_service.hpp"
 #include "ingress/pagination.hpp"
@@ -31,6 +32,14 @@ nexus::expected<nexus::TopicSummary> run_create(nexus::AdminApi& admin,
 }
 nexus::expected<void> run_delete(nexus::AdminApi& admin, std::string_view name) {
     return nexus::sync_wait(admin.delete_topic(name));
+}
+// `describe_topic`/`list_groups` también son corrutinas (sin cablear no se suspenden): `sync_wait`.
+nexus::expected<nexus::TopicDescription> run_describe(nexus::AdminApi& admin,
+                                                      std::string_view name) {
+    return nexus::sync_wait(admin.describe_topic(name));
+}
+std::vector<nexus::GroupSummary> run_list_groups(nexus::AdminApi& admin, nexus::Page page) {
+    return nexus::sync_wait(admin.list_groups(page));
 }
 
 // Conduce `create_topic` cuando puede suspenderse (fan-out cross-core): dos reactores con
@@ -110,7 +119,7 @@ TEST(AdminApi, DescribeTopic_DevuelveParticiones) {
     nexus::AdminApi admin{topics, kNodeId};
     ASSERT_TRUE(run_create(admin, nexus::CreateTopicSpec{.name = "orders", .partition_count = 2}));
 
-    const auto description = admin.describe_topic("orders");
+    const auto description = run_describe(admin, "orders");
     ASSERT_TRUE(description.has_value());
     EXPECT_EQ(description->summary.name, "orders");
     ASSERT_EQ(description->partitions.size(), 2U);
@@ -124,7 +133,7 @@ TEST(AdminApi, DescribeTopic_Inexistente_Rechaza) {
     TempDir dir{"desc404"};
     nexus::TopicManager topics{dir.path()};
     nexus::AdminApi admin{topics, kNodeId};
-    const auto result = admin.describe_topic("no-existe");
+    const auto result = run_describe(admin, "no-existe");
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code(), nexus::ErrorCode::NotFound);
 }
@@ -153,13 +162,13 @@ TEST(AdminApi, ListTopics_OrdenadosYPaginados) {
 TEST(AdminApi, ListGroups_UsaElListerInyectado) {
     TempDir dir{"groups"};
     nexus::TopicManager topics{dir.path()};
-    auto lister = [](nexus::Page /*page*/) {
-        return std::vector<nexus::GroupSummary>{nexus::GroupSummary{
+    auto lister = [](nexus::Page /*page*/) -> nexus::task<std::vector<nexus::GroupSummary>> {
+        co_return std::vector<nexus::GroupSummary>{nexus::GroupSummary{
             .group_id = "g1", .state = "Stable", .generation = 4, .member_count = 2}};
     };
     nexus::AdminApi admin{topics, kNodeId, lister};
 
-    const auto groups = admin.list_groups(nexus::Page{});
+    const auto groups = run_list_groups(admin, nexus::Page{});
     ASSERT_EQ(groups.size(), 1U);
     EXPECT_EQ(groups[0].group_id, "g1");
     EXPECT_EQ(groups[0].state, "Stable");
@@ -170,7 +179,7 @@ TEST(AdminApi, ListGroups_SinLister_DevuelveVacio) {
     TempDir dir{"nogroups"};
     nexus::TopicManager topics{dir.path()};
     nexus::AdminApi admin{topics, kNodeId};
-    EXPECT_TRUE(admin.list_groups(nexus::Page{}).empty());
+    EXPECT_TRUE(run_list_groups(admin, nexus::Page{}).empty());
 }
 
 TEST(AdminApi, CreateTopic_Cableado_FanOutATodosLosNucleos) {
@@ -205,6 +214,46 @@ TEST(AdminApi, CreateTopic_Cableado_FanOutATodosLosNucleos) {
     EXPECT_EQ(t0.get("t")->partition(1), nullptr);
     EXPECT_NE(t1.get("t")->partition(1), nullptr);
     EXPECT_EQ(t1.get("t")->partition(0), nullptr);
+}
+
+TEST(AdminApi, DescribeTopic_Cableado_AgregaWatermarksDeCadaNucleo) {
+    TempDir dir{"describe_xcore"};
+    nexus::Reactor r0{0, 2, std::make_unique<nexus::FakeProactor>()};
+    nexus::Reactor r1{1, 2, std::make_unique<nexus::FakeProactor>()};
+    r0.connect_peers({&r0, &r1});
+    r1.connect_peers({&r0, &r1});
+    nexus::TopicManager t0{dir.path(), /*num_cores=*/2, /*owner_core=*/0};
+    nexus::TopicManager t1{dir.path(), /*num_cores=*/2, /*owner_core=*/1};
+    ASSERT_TRUE(t0.create_topic("t", 2).has_value());  // metadatos completos en cada núcleo;
+    ASSERT_TRUE(t1.create_topic("t", 2).has_value());  // cada uno abre solo su partición.
+
+    // Bumpea el high-watermark de la partición 1 (dueña: núcleo 1) escribiendo 3 records.
+    nexus::RecordBatchHeader header;
+    header.record_count = 3;
+    const nexus::RecordBatch batch{header, std::vector<std::byte>(3, std::byte{0x7})};
+    ASSERT_TRUE(t1.get("t")->partition(1)->produce(batch).has_value());
+
+    nexus::PartitionRouter partitions{{&r0, &r1}};
+    nexus::AdminApi admin{t0, kNodeId};
+    admin.bind_cluster(r0, partitions, {&t0, &t1});
+
+    // describe se sirve en el núcleo 0; el watermark de p1 lo lee del núcleo 1 por el buzón.
+    nexus::expected<nexus::TopicDescription> out;
+    bool done = false;
+    r0.spawn([](nexus::AdminApi& api, nexus::expected<nexus::TopicDescription>& result,
+                bool& finished) -> nexus::task<void> {
+        result = co_await api.describe_topic("t");
+        finished = true;
+    }(admin, out, done));
+    for (int i = 0; i < 64 && !done; ++i) {
+        r0.poll_once();
+        r1.poll_once();
+    }
+    ASSERT_TRUE(done);
+    ASSERT_TRUE(out.has_value());
+    ASSERT_EQ(out->partitions.size(), 2U);
+    EXPECT_EQ(out->partitions[0].high_watermark, 0);  // p0 (núcleo 0): log vacío.
+    EXPECT_EQ(out->partitions[1].high_watermark, 3);  // p1 (núcleo 1): leído cross-core.
 }
 
 }  // namespace

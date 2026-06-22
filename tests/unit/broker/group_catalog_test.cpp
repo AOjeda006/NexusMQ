@@ -1,5 +1,6 @@
 // GroupCatalog: un GroupShard (coordinador de grupos + offsets) por núcleo (sharding ADR-0026).
-// Verifica el recuento de núcleos, el clamp, la independencia de shards y los punteros del cableado.
+// Verifica el recuento de núcleos, el clamp, la independencia de shards y los punteros del
+// cableado.
 #include "broker/group_catalog.hpp"
 
 #include <gtest/gtest.h>

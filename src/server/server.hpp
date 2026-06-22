@@ -38,9 +38,10 @@ namespace nexus {
 ///   `bind` enlaza el puerto (plano de control), `run` arranca el pool (`start_main_inline`:
 ///   workers 1..N-1 en hilos, núcleo 0 inline), lanza el bucle de aceptación en el núcleo 0 y lo
 ///   corre (bloquea), `stop` lo despierta para salir y une el pool. Las conexiones se aceptan en el
-///   núcleo 0; cada partición se enruta a su reactor dueño (`partition % N`) y cada grupo a su núcleo
-///   coordinador (`hash(group_id) % N`) por paso de mensajes (sharding *shared-nothing*, ADR-0026).
-///   `num_reactors` fija N (por defecto 1; N>1 es opt-in y reparte el plano de datos entre núcleos).
+///   núcleo 0; cada partición se enruta a su reactor dueño (`partition % N`) y cada grupo a su
+///   núcleo coordinador (`hash(group_id) % N`) por paso de mensajes (sharding *shared-nothing*,
+///   ADR-0026). `num_reactors` fija N (por defecto 1; N>1 es opt-in y reparte el plano de datos
+///   entre núcleos).
 class Server {
 public:
     struct Config {
@@ -98,9 +99,12 @@ public:
     void stop() noexcept;
 
 private:
-    /// Enumera los grupos coordinados en el núcleo 0, traducidos a DTOs y paginados (para el
-    /// `AdminApi`). No es `const`: accede al `GroupCatalog` (mutable) del propio hilo del admin.
-    [[nodiscard]] std::vector<GroupSummary> list_groups(Page page);
+    /// @brief Enumera los grupos de **todos** los núcleos (cada uno coordina los suyos,
+    ///   `hash(group_id) % N`), traducidos a DTOs, ordenados por id y paginados (para el
+    ///   `AdminApi`).
+    /// @details Corrutina: agrega con `call_on` sobre cada núcleo desde el núcleo 0 (donde se sirve
+    ///   el admin); con un solo núcleo el `call_on` es local e inline.
+    [[nodiscard]] task<std::vector<GroupSummary>> list_groups(Page page);
 
     Config config_;
     /// Catálogo de topics fragmentado por núcleo (ADR-0026): un `TopicManager` por reactor. El del

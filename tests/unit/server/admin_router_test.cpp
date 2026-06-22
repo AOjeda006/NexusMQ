@@ -31,14 +31,16 @@ public:
     nexus::task<nexus::expected<void>> delete_topic(std::string_view /*name*/) override {
         co_return nexus::expected<void>{};
     }
-    nexus::expected<nexus::TopicDescription> describe_topic(
-        std::string_view /*name*/) const override {
-        return nexus::make_error(nexus::ErrorCode::NotFound, "no");
+    nexus::task<nexus::expected<nexus::TopicDescription>> describe_topic(
+        std::string_view /*name*/) override {
+        co_return nexus::make_error(nexus::ErrorCode::NotFound, "no");
     }
     std::vector<nexus::TopicSummary> list_topics(nexus::Page /*page*/) const override {
         return topics;
     }
-    std::vector<nexus::GroupSummary> list_groups(nexus::Page /*page*/) const override { return {}; }
+    nexus::task<std::vector<nexus::GroupSummary>> list_groups(nexus::Page /*page*/) override {
+        co_return std::vector<nexus::GroupSummary>{};
+    }
 };
 
 nexus::HttpRequest make_request(nexus::HttpMethod method, std::string target) {

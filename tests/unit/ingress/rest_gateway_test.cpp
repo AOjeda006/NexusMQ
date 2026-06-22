@@ -48,22 +48,23 @@ public:
         co_return nexus::expected<void>{};
     }
 
-    nexus::expected<nexus::TopicDescription> describe_topic(std::string_view name) const override {
+    nexus::task<nexus::expected<nexus::TopicDescription>> describe_topic(
+        std::string_view name) override {
         if (describe_fails) {
-            return nexus::make_error(nexus::ErrorCode::NotFound, "topic inexistente");
+            co_return nexus::make_error(nexus::ErrorCode::NotFound, "topic inexistente");
         }
         nexus::TopicDescription description;
         description.summary = nexus::TopicSummary{.name = std::string{name}, .partition_count = 2};
         description.partitions = {nexus::PartitionInfo{.id = 0, .leader = 1, .high_watermark = 5},
                                   nexus::PartitionInfo{.id = 1, .leader = 1, .high_watermark = 9}};
-        return description;
+        co_return description;
     }
 
     std::vector<nexus::TopicSummary> list_topics(nexus::Page /*page*/) const override {
         return topics;
     }
-    std::vector<nexus::GroupSummary> list_groups(nexus::Page /*page*/) const override {
-        return groups;
+    nexus::task<std::vector<nexus::GroupSummary>> list_groups(nexus::Page /*page*/) override {
+        co_return groups;
     }
 };
 

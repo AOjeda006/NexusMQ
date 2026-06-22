@@ -118,7 +118,7 @@ task<HttpResponse> RestGateway::handle(const HttpRequest& request,
         co_return co_await route_topics(request, resource);
     }
     if (resource == "/groups") {
-        co_return route_groups(request);
+        co_return co_await route_groups(request);
     }
     co_return problem_explicit(404, "recurso no encontrado", path);
 }
@@ -140,7 +140,7 @@ task<HttpResponse> RestGateway::route_topics(const HttpRequest& request,
         co_return problem_explicit(404, "recurso no encontrado", request.path());
     }
     if (request.method == HttpMethod::Get) {
-        co_return describe_topic(request, name);
+        co_return co_await describe_topic(request, name);
     }
     if (request.method == HttpMethod::Delete) {
         co_return co_await delete_topic(name);
@@ -189,10 +189,11 @@ task<HttpResponse> RestGateway::create_topic(const HttpRequest& request) const {
     co_return response;
 }
 
-HttpResponse RestGateway::describe_topic(const HttpRequest& request, std::string_view name) const {
-    const auto description = admin_.describe_topic(name);
+task<HttpResponse> RestGateway::describe_topic(const HttpRequest& request,
+                                               std::string_view name) const {
+    const expected<TopicDescription> description = co_await admin_.describe_topic(name);
     if (!description) {
-        return problem_response(description.error(), request.path());
+        co_return problem_response(description.error(), request.path());
     }
     JsonWriter writer;
     writer.begin_object();
@@ -212,7 +213,7 @@ HttpResponse RestGateway::describe_topic(const HttpRequest& request, std::string
     }
     writer.end_array();
     writer.end_object();
-    return json_response(200, writer.take());
+    co_return json_response(200, writer.take());
 }
 
 task<HttpResponse> RestGateway::delete_topic(std::string_view name) const {
@@ -227,16 +228,16 @@ task<HttpResponse> RestGateway::delete_topic(std::string_view name) const {
     co_return response;
 }
 
-HttpResponse RestGateway::route_groups(const HttpRequest& request) const {
+task<HttpResponse> RestGateway::route_groups(const HttpRequest& request) const {
     if (request.method != HttpMethod::Get) {
-        return problem_explicit(405, "método no permitido en /groups", request.path());
+        co_return problem_explicit(405, "método no permitido en /groups", request.path());
     }
     const auto page = parse_pagination(request.query(), config_.pagination);
     if (!page) {
-        return problem_response(page.error(), request.path());
+        co_return problem_response(page.error(), request.path());
     }
-    const std::vector<GroupSummary> groups = admin_.list_groups(*page);
-    return json_response(
+    const std::vector<GroupSummary> groups = co_await admin_.list_groups(*page);
+    co_return json_response(
         200, paged_json(*page, groups, [](JsonWriter& writer, const GroupSummary& group) {
             writer.begin_object();
             writer.field("groupId", group.group_id);

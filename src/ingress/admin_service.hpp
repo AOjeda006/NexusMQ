@@ -82,15 +82,21 @@ public:
     /// @brief Borra el topic @p name. `NotFound` si no existe. Corrutina (fan-out cross-core).
     [[nodiscard]] virtual task<expected<void>> delete_topic(std::string_view name) = 0;
 
-    /// Describe el topic @p name (resumen + particiones). `NotFound` si no existe.
-    [[nodiscard]] virtual expected<TopicDescription> describe_topic(
-        std::string_view name) const = 0;
+    /// @brief Describe el topic @p name (resumen + particiones). `NotFound` si no existe.
+    /// @details Corrutina: los *high-watermark*/epoch de cada partición viven en su núcleo dueño,
+    /// así
+    ///   que se agregan por paso de mensajes (`call_on`, ADR-0026); el borde REST la `co_await`ea.
+    [[nodiscard]] virtual task<expected<TopicDescription>> describe_topic(
+        std::string_view name) = 0;
 
     /// Lista los topics (ordenados por nombre) paginados según @p page.
     [[nodiscard]] virtual std::vector<TopicSummary> list_topics(Page page) const = 0;
 
-    /// Lista los grupos de consumidores (ordenados por id) paginados según @p page.
-    [[nodiscard]] virtual std::vector<GroupSummary> list_groups(Page page) const = 0;
+    /// @brief Lista los grupos de consumidores (ordenados por id) paginados según @p page.
+    /// @details Corrutina: cada grupo se coordina en su núcleo (`hash(group_id) % N`, ADR-0026),
+    /// así
+    ///   que el listado **agrega** con `call_on` sobre todos los núcleos.
+    [[nodiscard]] virtual task<std::vector<GroupSummary>> list_groups(Page page) = 0;
 };
 
 }  // namespace nexus
