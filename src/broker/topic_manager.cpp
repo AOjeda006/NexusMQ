@@ -12,7 +12,6 @@
 
 #include "broker/partition.hpp"
 #include "broker/replicated_partition.hpp"
-#include "consensus/null_message_sink.hpp"
 #include "consensus/raft_carrier.hpp"
 #include "consensus/raft_state_store.hpp"
 #include "storage/log_config.hpp"
@@ -21,12 +20,12 @@
 namespace nexus {
 
 /// @brief Estado por réplica de una partición replicada. Afinidad: REACTOR-LOCAL.
-/// @details Posee el sumidero, el almacén durable y el portador, **en ese orden**: el portador se
-///   destruye primero (referencia al almacén, al sumidero y al `RaftNode` de su partición), luego
-///   el almacén y por último el sumidero. La partición (el `RaftNode`) vive en `topics_`, que se
-///   destruye después de `replicas_` (ver el orden de miembros de `TopicManager`).
+/// @details Posee el almacén durable y el portador, **en ese orden**: el portador se destruye
+///   primero (referencia al almacén, al sumidero compartido del manager y al `RaftNode` de su
+///   partición), luego el almacén. El sumidero (`raft_sink_`) y la partición (el `RaftNode`, en
+///   `topics_`) viven en el `TopicManager` y se destruyen después de `replicas_` (ver el orden de
+///   miembros).
 struct ReplicaContext {
-    std::unique_ptr<RaftMessageSink> sink;
     std::unique_ptr<RaftStateStore> store;
     std::unique_ptr<RaftCarrier> carrier;
 };
@@ -104,10 +103,11 @@ expected<TopicMetadata> TopicManager::create_topic(std::string name, std::int32_
             return std::unexpected(store.error());
         }
         auto ctx = std::make_unique<ReplicaContext>();
-        ctx->sink = std::make_unique<NullMessageSink>();
         ctx->store = std::make_unique<RaftStateStore>(std::move(*store));
+        // Todos los portadores del núcleo comparten `raft_sink_` (reenvía al transporte real cuando
+        // se instale; hasta entonces descarta: votante único sin transporte).
         ctx->carrier =
-            std::make_unique<RaftCarrier>(name, pid, raw->raft(), *ctx->sink, ctx->store.get());
+            std::make_unique<RaftCarrier>(name, pid, raw->raft(), raft_sink_, ctx->store.get());
         if (const expected<void> recovered = ctx->carrier->recover(); !recovered) {
             return std::unexpected(recovered.error());
         }

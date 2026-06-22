@@ -17,12 +17,14 @@
 #include "broker/topic.hpp"
 #include "common/error.hpp"
 #include "common/types.hpp"
+#include "consensus/deferred_message_sink.hpp"
 #include "consensus/raft_node.hpp"
 #include "protocol/messages.hpp"
 
 namespace nexus {
 
 class RaftCarrier;
+class RaftMessageSink;
 
 /// @brief Estado por réplica de una partición replicada (Raft): su portador, almacén durable y
 ///   sumidero. Definido en el `.cpp` (la cabecera solo lo declara). Afinidad: REACTOR-LOCAL.
@@ -105,6 +107,13 @@ public:
     ///   este núcleo.
     [[nodiscard]] RaftCarrier* carrier_for(std::string_view topic, PartitionId partition) const;
 
+    /// @brief Instala el sumidero de Raft real (el transporte inter-nodo) al que enviarán todos los
+    ///   portadores de este núcleo; `nullptr` lo desconecta (los sobres se descartan).
+    /// @details Lo llama el *composition root* al arrancar el reactor (cuando ya existe el
+    ///   `Proactor`). Antes de instalarlo, los portadores funcionan como votante único sin
+    ///   transporte. Solo desde el hilo del reactor (el sumidero diferido es reactor-local).
+    void set_message_sink(RaftMessageSink* sink) noexcept { raft_sink_.set_target(sink); }
+
 private:
     std::filesystem::path data_dir_;
     int num_cores_;           ///< Núcleos del nodo (>= 1).
@@ -113,9 +122,13 @@ private:
     RaftConfig raft_config_;  ///< Parámetros de Raft de las particiones replicadas.
     mutable std::mutex mutex_;
     std::unordered_map<std::string, std::unique_ptr<Topic>> topics_;
-    /// Portadores/almacén/sumidero de las particiones replicadas. Declarado **tras** `topics_` para
-    /// que se destruya **antes** (un portador referencia el `RaftNode` de su partición en
-    /// `topics_`).
+    /// Sumidero de Raft compartido por los portadores de este núcleo (reenvía al transporte real,
+    /// instalado al arrancar). Declarado **antes** que `replicas_` para que se destruya **después**
+    /// (los portadores lo referencian).
+    DeferredMessageSink raft_sink_;
+    /// Portadores/almacén de las particiones replicadas. Declarado **tras** `topics_` y
+    /// `raft_sink_` para destruirse **antes** (un portador referencia el `RaftNode` de su partición
+    /// en `topics_` y el `raft_sink_`).
     std::vector<std::unique_ptr<ReplicaContext>> replicas_;
 };
 

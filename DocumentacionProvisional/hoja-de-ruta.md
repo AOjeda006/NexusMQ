@@ -1072,6 +1072,15 @@ Harness de benchmark vacío y CI:
         real (listener + accept + `submit_to` al núcleo dueño) va en D3.5-6. TDD con `FakeProactor`
         (varios sobres, EOF inmediato, sobre inválido) + lookup. 712/712 GCC/Clang/ASan; format + tidy
         limpios.
+      - [x] **D3.5-6a** Inyección del sumidero (refactor): `DeferredMessageSink`
+        (`consensus/deferred_message_sink.hpp`) reenvía a un `RaftMessageSink` fijable; sin objetivo
+        descarta (como `NullMessageSink`). `TopicManager` deja de crear un `NullMessageSink` por
+        réplica y comparte **un** `DeferredMessageSink` por núcleo entre todos sus portadores, con
+        `set_message_sink(...)`. Resuelve el desfase de tiempos: los portadores se construyen en el
+        plano de control (al crear el topic), antes de que exista el transporte (que necesita el
+        `Proactor` del reactor); el *composition root* instalará el `RaftTransport` al arrancar. Sin
+        cambio de comportamiento (votante único sigue autoconfirmándose). 715/715 GCC/Clang/ASan;
+        format + tidy limpios.
   - [ ] **D3.6** Disparo de la **compactación** (`compact_to`, D2) por política desde el portador, ya con
     seguridad en el servidor vivo.
   - [ ] **D3.7** Tests e2e: cluster de 3 nodos reales (sockets), elección, replicación a quórum y failover

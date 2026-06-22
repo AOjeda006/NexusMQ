@@ -86,6 +86,7 @@ add_executable(nexus-tests
   unit/consensus/raft_rpc_test.cpp
   unit/consensus/raft_wire_test.cpp
   unit/consensus/raft_carrier_test.cpp
+  unit/consensus/deferred_message_sink_test.cpp
   unit/consensus/raft_log_test.cpp
   unit/consensus/raft_state_store_test.cpp
   unit/consensus/raft_node_test.cpp
