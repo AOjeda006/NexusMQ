@@ -1031,6 +1031,12 @@ Harness de benchmark vacío y CI:
   - [ ] **D3.5** Transporte inter-nodo **real** detrás del `RaftMessageSink`: conexiones TCP persistentes
     a peers (direccionadas por config), envío con longitud-prefijo del `RaftEnvelope` y recepción/
     desencuadre por el `FrameReader`; recepción → `RaftCarrier::on_message`.
+      - [x] **D3.5-1** Directorio de peers (`cluster/peer_directory.{hpp,cpp}`, nuevo subsistema
+        `nexus::cluster`): `PeerAddress{host, port}` (puerto del **plano inter-nodo**, separado del de
+        cliente) y `PeerDirectory` inmutable `NodeId -> PeerAddress` con `find`/`contains`/`node_ids`
+        (ordenado). Afinidad INMUTABLE/THREAD-SAFE (solo-lectura tras construirse): se comparte entre
+        reactores sin sincronización. Lo poblará el *composition root* desde la config del clúster.
+        Pura lógica de valor, TDD. 692/692 GCC/Clang/ASan; format + tidy limpios.
   - [ ] **D3.6** Disparo de la **compactación** (`compact_to`, D2) por política desde el portador, ya con
     seguridad en el servidor vivo.
   - [ ] **D3.7** Tests e2e: cluster de 3 nodos reales (sockets), elección, replicación a quórum y failover

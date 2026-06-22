@@ -89,6 +89,7 @@ add_executable(nexus-tests
   unit/consensus/raft_log_test.cpp
   unit/consensus/raft_state_store_test.cpp
   unit/consensus/raft_node_test.cpp
+  unit/cluster/peer_directory_test.cpp
   sim/raft_sim_test.cpp
   e2e/broker_e2e_test.cpp
   unit/client/dead_letter_test.cpp
@@ -121,6 +122,7 @@ target_link_libraries(nexus-tests PRIVATE
   nexus::wire
   nexus::reactor
   nexus::consensus
+  nexus::cluster
   nexus::broker
   nexus::ingress
   nexus::telemetry
