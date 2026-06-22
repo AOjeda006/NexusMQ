@@ -1037,6 +1037,15 @@ Harness de benchmark vacío y CI:
         (ordenado). Afinidad INMUTABLE/THREAD-SAFE (solo-lectura tras construirse): se comparte entre
         reactores sin sincronización. Lo poblará el *composition root* desde la config del clúster.
         Pura lógica de valor, TDD. 692/692 GCC/Clang/ASan; format + tidy limpios.
+      - [x] **D3.5-2** Enlace inter-nodo longitud-prefijo (`cluster/raft_link.{hpp,cpp}`):
+        `RaftEnvelopeReader`/`RaftEnvelopeWriter` que leen/escriben `RaftEnvelope` sobre un `Socket`
+        async (wire: `length:u32` LE + bytes del sobre). Reensambla parciales y acota tamaño
+        (anti-DoS), reusando `Encoder`/`Decoder` + `Socket`. **Ajuste de plan:** el plano inter-nodo
+        usa un enlace **propio** en vez del `FrameReader`/`ApiKey` del cliente — añadir un `ApiKey`
+        de Raft al enum del cliente rompería su `switch` de despacho (`-Wswitch -Werror`) y acoplaría
+        ambos planos; un enlace dedicado los mantiene **ortogonales** (ADR-0004/0025). TDD con
+        `FakeProactor` (round-trip + casos de borde: oversize, length 0, EOF). 697/697
+        GCC/Clang/ASan; format + tidy limpios.
   - [ ] **D3.6** Disparo de la **compactación** (`compact_to`, D2) por política desde el portador, ya con
     seguridad en el servidor vivo.
   - [ ] **D3.7** Tests e2e: cluster de 3 nodos reales (sockets), elección, replicación a quórum y failover
