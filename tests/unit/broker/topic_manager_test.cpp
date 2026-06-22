@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -14,6 +15,8 @@
 #include "common/error.hpp"
 #include "common/record.hpp"
 #include "common/types.hpp"
+#include "consensus/raft_carrier.hpp"
+#include "consensus/raft_node.hpp"
 
 namespace {
 
@@ -159,6 +162,59 @@ TEST(TopicManager, ArgumentosDeShardingInvalidos_SeAcotan) {
     EXPECT_EQ(manager.owner_core(), 0);  // fuera de rango → 0
     ASSERT_TRUE(manager.create_topic("t", 3).has_value());
     EXPECT_EQ(manager.get("t")->partition_count(), 3U);  // num_cores=1 → abre todas
+}
+
+// RaftConfig con timeouts cortos para que la elección del votante único sea rápida y determinista.
+nexus::RaftConfig fast_raft() {
+    using namespace std::chrono_literals;
+    nexus::RaftConfig cfg;
+    cfg.election_timeout_min = 50ms;
+    cfg.election_timeout_max = 60ms;
+    cfg.heartbeat_interval = 10ms;
+    cfg.random_seed = 42;
+    return cfg;
+}
+
+TEST(TopicManager, CreateTopicReplicado_CreaReplicatedPartitionConPortador) {
+    using namespace std::chrono_literals;
+    TempDir dir{"replicado"};
+    nexus::TopicManager manager{dir.path(), /*num_cores=*/1, /*owner_core=*/0, /*node_id=*/1,
+                                fast_raft()};
+
+    const nexus::expected<nexus::TopicMetadata> meta =
+        manager.create_topic("r", 1, {}, /*replication_factor=*/3);
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_EQ(meta->replication_factor, 3);
+
+    // Hay un portador para la única partición replicada de este núcleo.
+    const std::vector<nexus::RaftCarrier*> carriers = manager.carriers();
+    ASSERT_EQ(carriers.size(), 1U);
+    nexus::PartitionBase* part = manager.get("r")->partition(0);
+    ASSERT_NE(part, nullptr);
+    EXPECT_FALSE(part->is_leader());  // aún no se ha conducido la FSM
+
+    // Conduce la FSM con on_tick hasta que el votante único se elige líder.
+    nexus::MonoTime now{};
+    for (int i = 0; i < 200 && !part->is_leader(); ++i) {
+        now += 10ms;
+        carriers[0]->on_tick(now);
+    }
+    ASSERT_TRUE(part->is_leader());
+
+    // Ya como líder, produce por la interfaz base y el high-watermark avanza (acks=quórum=1).
+    nexus::RecordBatchHeader header;
+    header.record_count = 3;
+    const nexus::RecordBatch batch{header, std::vector<std::byte>(12, std::byte{0x7})};
+    ASSERT_TRUE(part->produce(batch).has_value());
+    EXPECT_EQ(part->high_watermark(), 3);
+}
+
+TEST(TopicManager, CreateTopicNoReplicado_NoTienePortadores) {
+    TempDir dir{"no_rep"};
+    nexus::TopicManager manager{dir.path()};
+    ASSERT_TRUE(manager.create_topic("t", 2).has_value());  // replication_factor por defecto = 1
+    EXPECT_TRUE(manager.carriers().empty());
+    EXPECT_TRUE(manager.get("t")->partition(0)->is_leader());  // Partition: siempre líder
 }
 
 }  // namespace

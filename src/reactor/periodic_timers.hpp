@@ -44,7 +44,8 @@ public:
     /// @return El menor `next_due` si es anterior a @p cap; si no (o sin temporizadores), @p cap.
     [[nodiscard]] MonoTime next_deadline(MonoTime cap) const;
 
-    /// @brief Dispara los temporizadores vencidos a @p now (invoca `callback(now)`) y los reprograma
+    /// @brief Dispara los temporizadores vencidos a @p now (invoca `callback(now)`) y los
+    /// reprograma
     ///   a `now + interval`.
     /// @return Cuántos se dispararon.
     std::size_t fire_due(MonoTime now);

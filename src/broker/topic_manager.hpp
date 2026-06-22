@@ -17,9 +17,16 @@
 #include "broker/topic.hpp"
 #include "common/error.hpp"
 #include "common/types.hpp"
+#include "consensus/raft_node.hpp"
 #include "protocol/messages.hpp"
 
 namespace nexus {
+
+class RaftCarrier;
+
+/// @brief Estado por réplica de una partición replicada (Raft): su portador, almacén durable y
+///   sumidero. Definido en el `.cpp` (la cabecera solo lo declara). Afinidad: REACTOR-LOCAL.
+struct ReplicaContext;
 
 /// @brief Gestiona el ciclo de vida de los topics del nodo (plano de control). Afinidad:
 ///   THREAD-SAFE (un mutex protege el mapa; las creaciones/borrados son poco frecuentes).
@@ -35,23 +42,30 @@ public:
     /// @param data_dir Raíz de los logs de partición.
     /// @param num_cores Número de núcleos del nodo (>= 1; valores < 1 se tratan como 1).
     /// @param owner_core Núcleo que atiende esta instancia (se acota a `[0, num_cores)`).
-    explicit TopicManager(std::filesystem::path data_dir, int num_cores = 1,
-                          int owner_core = 0) noexcept
-        : data_dir_(std::move(data_dir)),
-          num_cores_(num_cores < 1 ? 1 : num_cores),
-          owner_core_(owner_core < 0 || owner_core >= num_cores_ ? 0 : owner_core) {}
+    /// @param node_id Identidad de este nodo (votante de las particiones replicadas).
+    /// @param raft_config Parámetros de Raft (timeouts, semilla) de las particiones replicadas.
+    /// @note Definido fuera de línea: `replicas_` es `vector<unique_ptr<ReplicaContext>>` con
+    ///   `ReplicaContext` incompleto en la cabecera (pimpl).
+    explicit TopicManager(std::filesystem::path data_dir, int num_cores = 1, int owner_core = 0,
+                          NodeId node_id = 0, RaftConfig raft_config = {}) noexcept;
     TopicManager(const TopicManager&) = delete;
     TopicManager& operator=(const TopicManager&) = delete;
     TopicManager(TopicManager&&) = delete;
     TopicManager& operator=(TopicManager&&) = delete;
-    ~TopicManager() = default;
+    ~TopicManager();
 
     /// @brief Crea un topic con @p partition_count particiones (abre un log por cada una).
+    /// @details Si @p replication_factor > 1, las particiones propias se crean como
+    ///   `ReplicatedPartition` (respaldadas por Raft) y se les asocia un `RaftCarrier` que las
+    ///   conduce; si es 1, son `Partition` (mono-nodo, *ack* local). En esta fase (pre-D3.5, sin
+    ///   transporte inter-nodo) el grupo Raft lo forma **solo** el nodo local (sin peers): votante
+    ///   único que se autoconfirma; D3.5 cableará los peers reales del clúster.
     /// @return Los metadatos del topic, o un error (`InvalidArgument` si ya existe o el conteo es
-    ///   inválido; error de E/S si no se puede abrir algún log).
+    ///   inválido; error de E/S si no se puede abrir algún log o su estado Raft).
     [[nodiscard]] expected<TopicMetadata> create_topic(std::string name,
                                                        std::int32_t partition_count,
-                                                       TopicConfig config = {});
+                                                       TopicConfig config = {},
+                                                       std::int16_t replication_factor = 1);
 
     /// Borra un topic del registro (los ficheros en disco se conservan). `NotFound` si no existe.
     [[nodiscard]] expected<void> delete_topic(std::string_view name);
@@ -81,12 +95,22 @@ public:
 
     [[nodiscard]] std::size_t topic_count() const;
 
+    /// @brief Portadores Raft de las particiones replicadas de este núcleo (para que el reactor
+    ///   dueño los conduzca con `on_tick`). Vacío si no hay particiones replicadas.
+    [[nodiscard]] std::vector<RaftCarrier*> carriers() const;
+
 private:
     std::filesystem::path data_dir_;
-    int num_cores_;   ///< Núcleos del nodo (>= 1).
-    int owner_core_;  ///< Núcleo que atiende esta instancia (`[0, num_cores_)`).
+    int num_cores_;           ///< Núcleos del nodo (>= 1).
+    int owner_core_;          ///< Núcleo que atiende esta instancia (`[0, num_cores_)`).
+    NodeId node_id_;          ///< Identidad del nodo (votante de las particiones replicadas).
+    RaftConfig raft_config_;  ///< Parámetros de Raft de las particiones replicadas.
     mutable std::mutex mutex_;
     std::unordered_map<std::string, std::unique_ptr<Topic>> topics_;
+    /// Portadores/almacén/sumidero de las particiones replicadas. Declarado **tras** `topics_` para
+    /// que se destruya **antes** (un portador referencia el `RaftNode` de su partición en
+    /// `topics_`).
+    std::vector<std::unique_ptr<ReplicaContext>> replicas_;
 };
 
 }  // namespace nexus

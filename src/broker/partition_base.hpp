@@ -29,7 +29,8 @@ public:
     PartitionBase() = default;
     virtual ~PartitionBase() = default;
 
-    /// @brief Anexa (o propone, en réplica) @p batch tras validar idempotencia. HOT PATH (§7.11 #1).
+    /// @brief Anexa (o propone, en réplica) @p batch tras validar idempotencia. HOT PATH (§7.11
+    /// #1).
     /// @return El último offset asignado al batch, o un error.
     [[nodiscard]] virtual expected<Offset> produce(const RecordBatch& batch) = 0;
 

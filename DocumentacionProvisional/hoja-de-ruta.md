@@ -1009,6 +1009,16 @@ Harness de benchmark vacío y CI:
         al próximo vencimiento (`next_deadline`) y dispara los vencidos (`fire_due`, reprograma a
         `now + interval` sin ráfaga de recuperación). 683/683 en GCC/Clang/ASan/**TSan**; format + tidy
         limpios.
+      - [x] **D3.4d-3** `TopicManager` crea `ReplicatedPartition` cuando `replication_factor > 1` y
+        posee, por partición replicada, un `RaftCarrier` (+ `RaftStateStore` para durabilidad +
+        `NullMessageSink`, placeholder hasta el transporte de D3.5). Constructor con `node_id` +
+        `RaftConfig`; `create_topic` gana `replication_factor`; `carriers()` expone los portadores para
+        que el reactor dueño los conduzca (D3.4d-4). `ReplicaContext` (pimpl en el `.cpp`) ordena la
+        destrucción: portador → almacén → sumidero, y `replicas_` antes que `topics_` (el portador
+        referencia el `RaftNode` de su partición). **Supuesto (pre-D3.5):** el grupo Raft lo forma solo
+        el nodo local (peers vacíos) → votante único que se autoconfirma; D3.5 cableará los peers reales.
+        Test: topic replicado → `on_tick` hasta líder → produce/fetch por `PartitionBase`, hwm avanza.
+        685/685 en GCC/Clang/ASan/**TSan**; format + tidy limpios.
   - [ ] **D3.5** Transporte inter-nodo **real** detrás del `RaftMessageSink`: conexiones TCP persistentes
     a peers (direccionadas por config), envío con longitud-prefijo del `RaftEnvelope` y recepción/
     desencuadre por el `FrameReader`; recepción → `RaftCarrier::on_message`.
