@@ -99,6 +99,12 @@ public:
     ///   dueño los conduzca con `on_tick`). Vacío si no hay particiones replicadas.
     [[nodiscard]] std::vector<RaftCarrier*> carriers() const;
 
+    /// @brief Portador Raft de la réplica @p topic / @p partition de este núcleo (para enrutarle un
+    ///   `RaftEnvelope` recibido del plano inter-nodo).
+    /// @return El portador, o `nullptr` si no hay una partición replicada `(topic, partition)` en
+    ///   este núcleo.
+    [[nodiscard]] RaftCarrier* carrier_for(std::string_view topic, PartitionId partition) const;
+
 private:
     std::filesystem::path data_dir_;
     int num_cores_;           ///< Núcleos del nodo (>= 1).

@@ -3,6 +3,7 @@
 add_library(nexus-cluster
   peer_directory.cpp
   raft_link.cpp
+  raft_receiver.cpp
   raft_transport.cpp)
 add_library(nexus::cluster ALIAS nexus-cluster)
 

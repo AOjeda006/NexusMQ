@@ -1064,6 +1064,14 @@ Harness de benchmark vacío y CI:
         `unordered_map<NodeId, PeerLink>` da estabilidad de referencias a las emisoras. TDD con
         `FakeProactor` + spawner capturador (round-trip, varios sobres en orden, fallo de conexión,
         reuso de conexión). 707/707 GCC/Clang/ASan; format + tidy limpios.
+      - [x] **D3.5-5** Lado entrante (pieza reusable): `serve_raft_connection`
+        (`cluster/raft_receiver.{hpp,cpp}`) sirve una conexión inter-nodo en bucle leyendo sobres con
+        el `RaftEnvelopeReader` y entregándolos a un `RaftEnvelopeHandler` hasta EOF/error (best-effort:
+        cierra, el peer reconecta). Y `TopicManager::carrier_for(topic, partition)`: localiza el
+        portador de una réplica para enrutarle un sobre recibido (o `nullptr`). El despacho cross-core
+        real (listener + accept + `submit_to` al núcleo dueño) va en D3.5-6. TDD con `FakeProactor`
+        (varios sobres, EOF inmediato, sobre inválido) + lookup. 712/712 GCC/Clang/ASan; format + tidy
+        limpios.
   - [ ] **D3.6** Disparo de la **compactación** (`compact_to`, D2) por política desde el portador, ya con
     seguridad en el servidor vivo.
   - [ ] **D3.7** Tests e2e: cluster de 3 nodos reales (sockets), elección, replicación a quórum y failover

@@ -131,6 +131,16 @@ std::vector<RaftCarrier*> TopicManager::carriers() const {
     return result;
 }
 
+RaftCarrier* TopicManager::carrier_for(std::string_view topic, PartitionId partition) const {
+    const std::scoped_lock lock{mutex_};
+    for (const std::unique_ptr<ReplicaContext>& ctx : replicas_) {
+        if (ctx->carrier->partition() == partition && ctx->carrier->topic() == topic) {
+            return ctx->carrier.get();
+        }
+    }
+    return nullptr;
+}
+
 expected<void> TopicManager::delete_topic(std::string_view name) {
     const std::scoped_lock lock{mutex_};
     const auto it = topics_.find(std::string{name});

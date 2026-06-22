@@ -217,4 +217,26 @@ TEST(TopicManager, CreateTopicNoReplicado_NoTienePortadores) {
     EXPECT_TRUE(manager.get("t")->partition(0)->is_leader());  // Partition: siempre líder
 }
 
+TEST(TopicManager, CarrierFor_DevuelveElPortadorDeLaReplicaONullptr) {
+    TempDir dir{"carrier_for"};
+    nexus::TopicManager manager{dir.path(), /*num_cores=*/1, /*owner_core=*/0, /*node_id=*/1,
+                                fast_raft()};
+    ASSERT_TRUE(manager.create_topic("r", 2, {}, /*replication_factor=*/3).has_value());
+
+    nexus::RaftCarrier* carrier = manager.carrier_for("r", 1);
+    ASSERT_NE(carrier, nullptr);
+    EXPECT_EQ(carrier->topic(), "r");
+    EXPECT_EQ(carrier->partition(), 1);
+
+    EXPECT_EQ(manager.carrier_for("r", 99), nullptr);    // partición inexistente
+    EXPECT_EQ(manager.carrier_for("otro", 0), nullptr);  // topic inexistente
+}
+
+TEST(TopicManager, CarrierFor_TopicNoReplicado_DevuelveNullptr) {
+    TempDir dir{"carrier_for_norep"};
+    nexus::TopicManager manager{dir.path()};
+    ASSERT_TRUE(manager.create_topic("t", 1).has_value());
+    EXPECT_EQ(manager.carrier_for("t", 0), nullptr);  // Partition (no replicada): sin portador
+}
+
 }  // namespace
