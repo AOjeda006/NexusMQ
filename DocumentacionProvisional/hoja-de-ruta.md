@@ -985,11 +985,12 @@ Harness de benchmark vacío y CI:
       desde su núcleo dueño (`pid % N`) por `call_on`, y `Server::list_groups` agrega el `GroupCoordinator` de
       **todos** los núcleos (orden global por `group_id`). Con N=1 el `call_on` es local e inline. Cierra el hueco
       de observabilidad del admin a N>1. 673/673 en GCC/Clang/ASan/**TSan**.
-    - **Decisión (D3.4c):** **N>1 se mantiene opt-in** (`num_reactors=1` por defecto). Es un proyecto de
-      aprendizaje mono-nodo; el sharding está implementado y validado e2e/TSan, pero arrancar
-      `hardware_concurrency()` hilos por defecto cambia el uso de recursos y el determinismo de los tests sin
-      aportar a un nodo de desarrollo. El operador lo activa por config cuando quiere repartir entre núcleos.
-      *(Reversible; no requiere ADR nuevo —no contradice ADR-0026, que fija el reparto, no el valor por defecto.)*
+    - [x] **D3.4c-9** **N>1 encendido por defecto** (decisión del autor): `Config.num_reactors <= 0` = **auto**
+      = `hardware_concurrency()` (resuelto antes de dimensionar los catálogos; mínimo 1). El daemon aprovecha
+      todos los núcleos sin configurar; se fija un valor explícito para acotarlo (p. ej. 1 en pruebas
+      deterministas). **Toda la suite e2e pasa a multi-reactor** (N=4 en este entorno) y queda **verde bajo TSan**
+      (673/673 GCC/Clang/ASan/TSan): el reparto shared-nothing no tiene carreras de punta a punta. *(No requiere
+      ADR nuevo: ADR-0026 fija el reparto, no el valor por defecto.)*
     - [ ] **D3.4d** `ReplicatedPartition` (en vez de `Partition`) cuando `replication_factor > 1`, conducida por
       su `RaftCarrier` en el reactor dueño (tick desde el bucle del reactor).
   - [ ] **D3.5** Transporte inter-nodo **real** detrás del `RaftMessageSink`: conexiones TCP persistentes

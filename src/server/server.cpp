@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <memory>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -28,6 +29,18 @@ constexpr unsigned int kRingDepth = 256;
 /// Factoría por defecto del `Proactor` de cada reactor: io_uring (plano de control).
 std::unique_ptr<Proactor> make_io_uring_proactor(int /*core_id*/) {
     return std::make_unique<IoUringBackend>(kRingDepth);
+}
+
+/// @brief Resuelve `num_reactors`: `<= 0` significa **auto** (todos los núcleos disponibles).
+/// @details Se aplica **antes** de construir los catálogos (que se dimensionan con este valor), por
+///   eso normaliza el `Config` en la lista de inicialización. `hardware_concurrency()` puede
+///   devolver 0 si no lo detecta → mínimo 1.
+Server::Config resolve_config(Server::Config config) {
+    if (config.num_reactors <= 0) {
+        const unsigned detected = std::thread::hardware_concurrency();
+        config.num_reactors = detected > 0 ? static_cast<int>(detected) : 1;
+    }
+    return config;
 }
 
 /// Bucle de aceptación del plano de datos: una corrutina de servicio por conexión.
@@ -55,13 +68,10 @@ task<void> admin_accept_loop(Reactor& reactor, Listener& listener, const AdminRo
 }  // namespace
 
 Server::Server(Config config, ReactorPool::ProactorFactory proactor_factory)
-    : config_(std::move(config)),
+    : config_(resolve_config(std::move(config))),
       catalog_(config_.data_dir, config_.num_reactors),
       group_catalog_(config_.num_reactors),
       proactor_factory_(proactor_factory ? std::move(proactor_factory) : make_io_uring_proactor) {
-    if (config_.num_reactors <= 0) {
-        config_.num_reactors = 1;
-    }
     // Valida el plano de control en construcción: si io_uring no está disponible, la factoría por
     // defecto lanza aquí (no en el hilo del reactor), preservando el contrato de fallo previo.
     static_cast<void>(proactor_factory_(0));

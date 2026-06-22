@@ -40,8 +40,8 @@ namespace nexus {
 ///   corre (bloquea), `stop` lo despierta para salir y une el pool. Las conexiones se aceptan en el
 ///   núcleo 0; cada partición se enruta a su reactor dueño (`partition % N`) y cada grupo a su
 ///   núcleo coordinador (`hash(group_id) % N`) por paso de mensajes (sharding *shared-nothing*,
-///   ADR-0026). `num_reactors` fija N (por defecto 1; N>1 es opt-in y reparte el plano de datos
-///   entre núcleos).
+///   ADR-0026). `num_reactors` fija N (por defecto **auto** = todos los núcleos; fija un valor para
+///   acotarlo —p. ej. 1 en pruebas deterministas—).
 class Server {
 public:
     struct Config {
@@ -62,8 +62,9 @@ public:
         std::string jwt_secret;
         /// Mínimo de espacio libre en disco (bytes) para `/readyz`. `0` = sin chequeo de disco.
         std::uintmax_t min_free_disk_bytes = 0;
-        /// Número de reactores del pool (uno por núcleo). `<= 0` se trata como 1.
-        int num_reactors = 1;
+        /// Número de reactores del pool (uno por núcleo). `<= 0` = **auto** (todos los núcleos
+        /// disponibles, `hardware_concurrency()`); fija un valor explícito para acotarlo.
+        int num_reactors = 0;
     };
 
     /// @brief Crea las piezas del broker y **valida** que el proactor (io_uring) se puede crear.
