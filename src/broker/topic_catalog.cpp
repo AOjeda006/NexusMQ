@@ -8,11 +8,13 @@
 
 namespace nexus {
 
-TopicCatalog::TopicCatalog(const std::filesystem::path& data_dir, int num_cores) {
+TopicCatalog::TopicCatalog(const std::filesystem::path& data_dir, int num_cores, NodeId node_id,
+                           RaftConfig raft_config) {
     const int cores = num_cores < 1 ? 1 : num_cores;
     managers_.reserve(static_cast<std::size_t>(cores));
     for (int core = 0; core < cores; ++core) {
-        managers_.push_back(std::make_unique<TopicManager>(data_dir, cores, core));
+        managers_.push_back(
+            std::make_unique<TopicManager>(data_dir, cores, core, node_id, raft_config));
     }
 }
 
@@ -26,11 +28,12 @@ std::vector<TopicManager*> TopicCatalog::managers() const {
 }
 
 expected<TopicMetadata> TopicCatalog::create_topic(const std::string& name,
-                                                   std::int32_t partition_count,
-                                                   TopicConfig config) {
+                                                   std::int32_t partition_count, TopicConfig config,
+                                                   std::int16_t replication_factor) {
     TopicMetadata authoritative;  // la del núcleo 0; las demás son idénticas salvo el instante.
     for (std::size_t core = 0; core < managers_.size(); ++core) {
-        expected<TopicMetadata> meta = managers_[core]->create_topic(name, partition_count, config);
+        expected<TopicMetadata> meta =
+            managers_[core]->create_topic(name, partition_count, config, replication_factor);
         if (!meta) {
             // Garantía fuerte: deshace los núcleos ya creados (orden inverso); el borrado es
             // inocuo (idempotente), así que su resultado se ignora a propósito.

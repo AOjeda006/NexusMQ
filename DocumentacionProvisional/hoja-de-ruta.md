@@ -991,7 +991,7 @@ Harness de benchmark vacío y CI:
       deterministas). **Toda la suite e2e pasa a multi-reactor** (N=4 en este entorno) y queda **verde bajo TSan**
       (673/673 GCC/Clang/ASan/TSan): el reparto shared-nothing no tiene carreras de punta a punta. *(No requiere
       ADR nuevo: ADR-0026 fija el reparto, no el valor por defecto.)*
-    - [ ] **D3.4d** `ReplicatedPartition` (en vez de `Partition`) cuando `replication_factor > 1`, conducida por
+    - [x] **D3.4d** `ReplicatedPartition` (en vez de `Partition`) cuando `replication_factor > 1`, conducida por
       su `RaftCarrier` en el reactor dueño (tick desde el bucle del reactor). Por sub-pasos:
       - [x] **D3.4d-1** Interfaz `PartitionBase` (`broker/partition_base.hpp`): superficie común de hot-path
         (`produce`/`fetch`/`high_watermark`/`is_leader`/`leader_epoch`/`log`) de la que derivan **tanto**
@@ -1019,6 +1019,15 @@ Harness de benchmark vacío y CI:
         el nodo local (peers vacíos) → votante único que se autoconfirma; D3.5 cableará los peers reales.
         Test: topic replicado → `on_tick` hasta líder → produce/fetch por `PartitionBase`, hwm avanza.
         685/685 en GCC/Clang/ASan/**TSan**; format + tidy limpios.
+      - [x] **D3.4d-4** El `Server` conduce los portadores desde el reactor dueño: `TopicCatalog` propaga
+        `node_id`/`RaftConfig`/`replication_factor`; `Server::Config` gana `RaftConfig` y `create_topic`
+        gana `replication_factor`; `Server::run` registra en cada reactor un `every(heartbeat_interval)`
+        que llama `on_tick` a los portadores de su núcleo (núcleo 0 inline; núcleos 1..N-1 por el buzón,
+        ya que el conjunto de temporizadores es reactor-local). Tick + produce/fetch de una partición
+        corren en su **mismo** hilo dueño (sin carreras). E2E mono-nodo: topic replicado → produce
+        reintenta hasta que el tick elige líder → confirma (quórum=1) → fetch ve el high_watermark.
+        686/686 en GCC/Clang/ASan/**TSan** (e2e replicado verde bajo TSan); format + tidy limpios. *(No
+        requiere ADR: materializa ADR-0016/0025/0026.)*
   - [ ] **D3.5** Transporte inter-nodo **real** detrás del `RaftMessageSink`: conexiones TCP persistentes
     a peers (direccionadas por config), envío con longitud-prefijo del `RaftEnvelope` y recepción/
     desencuadre por el `FrameReader`; recepción → `RaftCarrier::on_message`.

@@ -17,6 +17,7 @@
 #include "broker/topic_manager.hpp"
 #include "common/error.hpp"
 #include "common/types.hpp"
+#include "consensus/raft_node.hpp"
 #include "ingress/health_monitor.hpp"
 #include "ingress/jwt.hpp"
 #include "ingress/rest_gateway.hpp"
@@ -65,6 +66,10 @@ public:
         /// Número de reactores del pool (uno por núcleo). `<= 0` = **auto** (todos los núcleos
         /// disponibles, `hardware_concurrency()`); fija un valor explícito para acotarlo.
         int num_reactors = 0;
+        /// Parámetros de Raft de las particiones replicadas (`replication_factor > 1`): timeouts de
+        /// elección/heartbeat y semilla. El periodo de tick del reactor sale del
+        /// `heartbeat_interval`.
+        RaftConfig raft_config;
     };
 
     /// @brief Crea las piezas del broker y **valida** que el proactor (io_uring) se puede crear.
@@ -79,9 +84,11 @@ public:
     Server(Server&&) = delete;
     Server& operator=(Server&&) = delete;
 
-    /// Crea un topic con @p partition_count particiones (plano de control; antes de servir).
-    [[nodiscard]] expected<void> create_topic(const std::string& name,
-                                              std::int32_t partition_count);
+    /// @brief Crea un topic con @p partition_count particiones (plano de control; antes de servir).
+    /// @param replication_factor `> 1` crea particiones replicadas por Raft (con portador); `1` =
+    ///   mono-nodo (`Partition`).
+    [[nodiscard]] expected<void> create_topic(const std::string& name, std::int32_t partition_count,
+                                              std::int16_t replication_factor = 1);
 
     /// Enlaza el listener y prepara el router con el puerto efectivo. Idempotente-no: llamar una
     /// vez.
@@ -106,6 +113,13 @@ private:
     /// @details Corrutina: agrega con `call_on` sobre cada núcleo desde el núcleo 0 (donde se sirve
     ///   el admin); con un solo núcleo el `call_on` es local e inline.
     [[nodiscard]] task<std::vector<GroupSummary>> list_groups(Page page);
+
+    /// @brief Registra en cada reactor dueño un temporizador que conduce (`on_tick`) los portadores
+    ///   Raft de sus particiones replicadas (cadencia = `raft_config.heartbeat_interval`).
+    /// @details El núcleo 0 se registra inline (este hilo); los núcleos 1..N-1 reciben el registro
+    ///   por su buzón (el conjunto de temporizadores es reactor-local, no thread-safe). Lo llama
+    ///   `run` tras arrancar el pool. @p main es el reactor del núcleo 0.
+    void start_raft_ticks(Reactor& main);
 
     Config config_;
     /// Catálogo de topics fragmentado por núcleo (ADR-0026): un `TopicManager` por reactor. El del

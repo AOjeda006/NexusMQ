@@ -5,6 +5,7 @@
 #include "server/server.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <string>
@@ -14,6 +15,7 @@
 
 #include "broker/consumer_group.hpp"
 #include "broker/group_coordinator.hpp"
+#include "consensus/raft_carrier.hpp"
 #include "io/io_uring_backend.hpp"
 #include "reactor/cross_core_call.hpp"
 #include "server/admin_http.hpp"
@@ -69,7 +71,7 @@ task<void> admin_accept_loop(Reactor& reactor, Listener& listener, const AdminRo
 
 Server::Server(Config config, ReactorPool::ProactorFactory proactor_factory)
     : config_(resolve_config(std::move(config))),
-      catalog_(config_.data_dir, config_.num_reactors),
+      catalog_(config_.data_dir, config_.num_reactors, config_.node_id, config_.raft_config),
       group_catalog_(config_.num_reactors),
       proactor_factory_(proactor_factory ? std::move(proactor_factory) : make_io_uring_proactor) {
     // Valida el plano de control en construcción: si io_uring no está disponible, la factoría por
@@ -133,9 +135,12 @@ task<std::vector<GroupSummary>> Server::list_groups(Page page) {
         std::make_move_iterator(summaries.begin() + static_cast<std::ptrdiff_t>(end))};
 }
 
-expected<void> Server::create_topic(const std::string& name, std::int32_t partition_count) {
-    // Plano de control pre-run (monohilo): el catálogo replica el topic a todos los núcleos.
-    expected<TopicMetadata> meta = catalog_.create_topic(name, partition_count);
+expected<void> Server::create_topic(const std::string& name, std::int32_t partition_count,
+                                    std::int16_t replication_factor) {
+    // Plano de control pre-run (monohilo): el catálogo replica el topic a todos los núcleos. Con
+    // replication_factor > 1 cada núcleo crea sus particiones como ReplicatedPartition + portador.
+    expected<TopicMetadata> meta =
+        catalog_.create_topic(name, partition_count, {}, replication_factor);
     if (!meta) {
         return std::unexpected(meta.error());
     }
@@ -169,6 +174,34 @@ std::uint16_t Server::admin_port() const noexcept {
     return admin_listener_ ? admin_listener_->local_port() : 0;
 }
 
+void Server::start_raft_ticks(Reactor& main) {
+    const auto interval =
+        std::max(config_.raft_config.heartbeat_interval, std::chrono::milliseconds{1});
+    for (int core = 0; core < config_.num_reactors; ++core) {
+        std::vector<RaftCarrier*> carriers = catalog_.manager(core).carriers();
+        if (carriers.empty()) {
+            continue;  // este núcleo no sirve particiones replicadas.
+        }
+        // El portador se conduce en el hilo de SU reactor (la FSM/log/producción de su partición
+        // son reactor-locales): nada de tocar el RaftNode desde otro hilo.
+        auto tick = [carriers = std::move(carriers)](MonoTime now) {
+            for (RaftCarrier* carrier : carriers) {
+                carrier->on_tick(now);
+            }
+        };
+        Reactor& owner = pool_.reactor(core);
+        if (core == 0) {
+            owner.every(interval, std::move(tick));  // núcleo 0: este hilo, registro directo.
+        } else {
+            // Núcleos 1..N-1 corren en su propio hilo; registra el temporizador EN ese hilo por el
+            // buzón (el conjunto de temporizadores del reactor no es thread-safe).
+            main.submit_to(core, [&owner, interval, tick = std::move(tick)]() mutable {
+                owner.every(interval, std::move(tick));
+            });
+        }
+    }
+}
+
 void Server::run() {
     if (!listener_ || !router_) {
         return;  // Precondición: `bind()` antes de `run()`; sin listener no hay nada que servir.
@@ -200,6 +233,7 @@ void Server::run() {
         // El admin REST también propaga crear/borrar topic a todos los núcleos (ADR-0026).
         admin_api_->bind_cluster(main, *partition_router_, catalog_.managers());
     }
+    start_raft_ticks(main);
 
     main.spawn(accept_loop(main, *listener_, *router_));
     if (admin_listener_ && admin_router_) {

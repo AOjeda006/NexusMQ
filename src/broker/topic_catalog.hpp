@@ -15,6 +15,8 @@
 #include "broker/topic.hpp"
 #include "broker/topic_manager.hpp"
 #include "common/error.hpp"
+#include "common/types.hpp"
+#include "consensus/raft_node.hpp"
 
 namespace nexus {
 
@@ -34,7 +36,10 @@ class TopicCatalog {
 public:
     /// @param data_dir Raíz de los logs de partición.
     /// @param num_cores Número de núcleos del nodo (>= 1; valores < 1 se tratan como 1).
-    explicit TopicCatalog(const std::filesystem::path& data_dir, int num_cores = 1);
+    /// @param node_id Identidad del nodo (votante de las particiones replicadas).
+    /// @param raft_config Parámetros de Raft de las particiones replicadas.
+    explicit TopicCatalog(const std::filesystem::path& data_dir, int num_cores = 1,
+                          NodeId node_id = 0, RaftConfig raft_config = {});
     TopicCatalog(const TopicCatalog&) = delete;
     TopicCatalog& operator=(const TopicCatalog&) = delete;
     TopicCatalog(TopicCatalog&&) = delete;
@@ -62,7 +67,8 @@ public:
     ///   todos los núcleos la hace el `RequestRouter` por paso de mensajes (ADR-0026), no aquí.
     [[nodiscard]] expected<TopicMetadata> create_topic(const std::string& name,
                                                        std::int32_t partition_count,
-                                                       TopicConfig config = {});
+                                                       TopicConfig config = {},
+                                                       std::int16_t replication_factor = 1);
 
 private:
     std::vector<std::unique_ptr<TopicManager>>

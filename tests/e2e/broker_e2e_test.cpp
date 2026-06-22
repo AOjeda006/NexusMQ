@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -19,6 +20,7 @@
 #include "common/error.hpp"
 #include "common/record.hpp"
 #include "common/types.hpp"
+#include "consensus/raft_node.hpp"
 #include "io/socket.hpp"
 #include "protocol/codec.hpp"
 #include "protocol/error_code.hpp"
@@ -311,6 +313,104 @@ TEST(BrokerE2E, MultiReactor_ProduceFetchYCreateTopicCrossCore) {
         const nexus::expected<nexus::ProduceResponse> resp = nexus::ProduceResponse::decode(dec);
         ASSERT_TRUE(resp.has_value());
         EXPECT_EQ(resp->error_code, nexus::WireError::None);
+    }
+
+    client->close();
+    server->stop();
+    server_thread.join();
+}
+
+// Topic replicado (replication_factor > 1) mono-nodo: las particiones son `ReplicatedPartition`
+// conducidas por el `RaftCarrier` desde el tick del reactor dueño (D3.4d). El votante único se
+// elige líder por el tick; hasta entonces produce devuelve "no líder", así que el cliente
+// reintenta. Tras la elección, produce confirma (quórum=1) y fetch ve el high_watermark =
+// commit_index. Bajo TSan, además, comprueba que tick + produce/fetch sobre la misma partición no
+// tienen carreras.
+TEST(BrokerE2E, ReplicatedTopic_ProduceTrasEleccionPorTick_RoundTrip) {
+    using namespace std::chrono_literals;
+    TempDir dir{"replicado"};
+    nexus::Server::Config config;
+    config.host = "127.0.0.1";
+    config.port = 0;
+    config.data_dir = dir.path();
+    config.advertised_host = "127.0.0.1";
+    config.num_reactors = 1;
+    config.node_id = 1;
+    // Timeouts cortos para que la elección del votante único sea rápida; el tick sale del
+    // heartbeat.
+    config.raft_config.election_timeout_min = 50ms;
+    config.raft_config.election_timeout_max = 60ms;
+    config.raft_config.heartbeat_interval = 10ms;
+    config.raft_config.random_seed = 7;
+
+    std::optional<nexus::Server> server;
+    try {
+        server.emplace(std::move(config));
+    } catch (const std::system_error& ex) {
+        GTEST_SKIP() << "io_uring no disponible en este entorno: " << ex.what();
+    }
+
+    ASSERT_TRUE(server->create_topic("r", 1, /*replication_factor=*/3).has_value());
+    ASSERT_TRUE(server->bind().has_value());
+    const std::uint16_t port = server->port();
+    ASSERT_NE(port, 0);
+
+    std::thread server_thread{[&server] { server->run(); }};
+
+    nexus::expected<nexus::Socket> client = nexus::Socket::connect("127.0.0.1", port);
+    ASSERT_TRUE(client.has_value());
+    const int fd = client->fd();
+
+    // Produce 3 records a "r"/0, reintentando hasta que el tick del reactor elija líder.
+    const std::vector<std::byte> batch = encode_batch(3);
+    nexus::WireError produce_error = nexus::WireError::None;
+    bool produced = false;
+    for (int attempt = 0; attempt < 100 && !produced; ++attempt) {
+        nexus::ProduceRequest preq;
+        preq.topic = "r";
+        preq.partition = 0;
+        preq.batch = nexus::ByteSpan{batch.data(), batch.size()};
+        nexus::Buffer pbody;
+        nexus::Encoder penc{pbody};
+        preq.encode(penc);
+        ASSERT_TRUE(send_frame(fd, nexus::ApiKey::Produce, /*correlation_id=*/1, pbody.as_span()));
+        const std::vector<std::byte> rframe = recv_frame(fd);
+        ASSERT_FALSE(rframe.empty());
+        nexus::Decoder dec{nexus::ByteSpan{rframe.data(), rframe.size()}};
+        ASSERT_TRUE(nexus::FrameHeader::decode(dec).has_value());
+        const nexus::expected<nexus::ProduceResponse> resp = nexus::ProduceResponse::decode(dec);
+        ASSERT_TRUE(resp.has_value());
+        produce_error = resp->error_code;
+        if (produce_error == nexus::WireError::None) {
+            EXPECT_EQ(resp->base_offset, 0);
+            produced = true;
+            break;
+        }
+        std::this_thread::sleep_for(20ms);  // deja al reactor avanzar la elección por el tick.
+    }
+    EXPECT_TRUE(produced) << "produce no confirmó; último error: "
+                          << static_cast<int>(produce_error);
+
+    // Fetch: el high_watermark refleja el commit (acks=quórum=1) tras la confirmación.
+    nexus::FetchRequest freq;
+    freq.topic = "r";
+    freq.partition = 0;
+    freq.fetch_offset = 0;
+    freq.max_bytes = 64 * 1024;
+    nexus::Buffer fbody;
+    nexus::Encoder fenc{fbody};
+    freq.encode(fenc);
+    ASSERT_TRUE(send_frame(fd, nexus::ApiKey::Fetch, /*correlation_id=*/2, fbody.as_span()));
+    {
+        const std::vector<std::byte> rframe = recv_frame(fd);
+        ASSERT_FALSE(rframe.empty());
+        nexus::Decoder dec{nexus::ByteSpan{rframe.data(), rframe.size()}};
+        ASSERT_TRUE(nexus::FrameHeader::decode(dec).has_value());
+        const nexus::expected<nexus::FetchResponse> resp = nexus::FetchResponse::decode(dec);
+        ASSERT_TRUE(resp.has_value());
+        EXPECT_EQ(resp->error_code, nexus::WireError::None);
+        EXPECT_EQ(resp->high_watermark, 3);
+        EXPECT_FALSE(resp->batches.empty());
     }
 
     client->close();
