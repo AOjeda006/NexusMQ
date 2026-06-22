@@ -71,8 +71,10 @@ struct IocpBackend::Port {
         Proactor::Completion on_done;
         HANDLE handle = INVALID_HANDLE_VALUE;
         bool is_accept = false;
+        bool is_connect = false;
         SOCKET accept_sock = INVALID_SOCKET;
         SOCKET listen_sock = INVALID_SOCKET;
+        SOCKET connect_sock = INVALID_SOCKET;
         // AcceptEx escribe las direcciones local/remota: cada una necesita sizeof(sockaddr)+16.
         std::array<std::byte, 2 * (sizeof(sockaddr_in) + 16)> accept_buf{};
         bool forced = false;  // resultado predeterminado (fsync/errores inmediatos)
@@ -81,6 +83,7 @@ struct IocpBackend::Port {
 
     HANDLE iocp = nullptr;
     LPFN_ACCEPTEX accept_ex = nullptr;
+    LPFN_CONNECTEX connect_ex = nullptr;
     std::unordered_set<HANDLE> associated;
     std::unordered_map<OVERLAPPED*, std::unique_ptr<Op>> inflight;
     std::multimap<MonoTime, Proactor::Completion> timers;
@@ -145,6 +148,17 @@ struct IocpBackend::Port {
                    sizeof(accept_ex), &bytes, nullptr, nullptr);
     }
 
+    /// Carga el puntero a `ConnectEx` (función de extensión) la primera vez, vía `WSAIoctl`.
+    void ensure_connect_ex(SOCKET sock) {
+        if (connect_ex != nullptr) {
+            return;
+        }
+        GUID guid = WSAID_CONNECTEX;
+        DWORD bytes = 0;
+        ::WSAIoctl(sock, SIO_GET_EXTENSION_FUNCTION_POINTER, &guid, sizeof(guid), &connect_ex,
+                   sizeof(connect_ex), &bytes, nullptr, nullptr);
+    }
+
     /// Calcula el timeout (ms) de la espera: el menor entre @p deadline y el temporizador más
     /// próximo; `0` si ya venció. Acotado para no pasar `INFINITE` por accidente.
     DWORD timeout_until(MonoTime deadline) const {
@@ -186,6 +200,16 @@ struct IocpBackend::Port {
             ::setsockopt(op.accept_sock, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT,
                          reinterpret_cast<const char*>(&op.listen_sock), sizeof(op.listen_sock));
             return static_cast<Proactor::IoResult>(op.accept_sock);
+        }
+        if (op.is_connect) {
+            DWORD bytes = 0;
+            if (::GetOverlappedResult(op.handle, &op.ov, &bytes, FALSE) == FALSE) {
+                return neg_error(::GetLastError());
+            }
+            // SO_UPDATE_CONNECT_CONTEXT finaliza el socket conectado (ConnectEx lo exige para que
+            // el socket funcione con el resto de la API: getpeername, shutdown, etc.).
+            ::setsockopt(op.connect_sock, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, nullptr, 0);
+            return 0;  // conexión establecida
         }
         DWORD bytes = 0;
         if (::GetOverlappedResult(op.handle, &op.ov, &bytes, FALSE) == FALSE) {
@@ -308,6 +332,44 @@ void IocpBackend::submit_accept(NativeHandle listen_fd, Completion on_done) {
         if (err != ERROR_IO_PENDING) {
             ::closesocket(accept_sock);
             raw->accept_sock = INVALID_SOCKET;
+            port_->post_forced(raw, neg_error(err));
+        }
+    }
+}
+
+void IocpBackend::submit_connect(NativeHandle fd, ByteSpan addr, Completion on_done) {
+    SOCKET sock = as_socket(fd);
+    port_->associate(socket_as_handle(sock));
+    port_->ensure_connect_ex(sock);
+
+    auto op = std::make_unique<Port::Op>();
+    op->on_done = std::move(on_done);
+    op->handle = socket_as_handle(sock);
+    op->is_connect = true;
+    op->connect_sock = sock;
+
+    // ConnectEx exige que el socket esté enlazado localmente antes de conectar.
+    sockaddr_in local = {};
+    local.sin_family = AF_INET;
+    local.sin_addr.s_addr = INADDR_ANY;
+    local.sin_port = 0;
+    // NOLINTNEXTLINE(*-reinterpret-cast): API de sockets (sockaddr).
+    if (::bind(sock, reinterpret_cast<sockaddr*>(&local), sizeof(local)) == SOCKET_ERROR) {
+        Port::Op* raw = port_->track(std::move(op));
+        port_->post_forced(raw, neg_error(::WSAGetLastError()));
+        return;
+    }
+    Port::Op* raw = port_->track(std::move(op));
+    if (port_->connect_ex == nullptr) {
+        port_->post_forced(raw, neg_error(WSAEOPNOTSUPP));
+        return;
+    }
+    DWORD sent = 0;
+    // NOLINTNEXTLINE(*-reinterpret-cast): bytes del sockaddr destino (los provee el llamante).
+    if (port_->connect_ex(sock, reinterpret_cast<const sockaddr*>(addr.data()),
+                          static_cast<int>(addr.size()), nullptr, 0, &sent, &raw->ov) == FALSE) {
+        const DWORD err = ::WSAGetLastError();
+        if (err != ERROR_IO_PENDING) {
             port_->post_forced(raw, neg_error(err));
         }
     }

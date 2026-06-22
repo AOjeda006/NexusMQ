@@ -25,7 +25,7 @@ namespace nexus {
 class FakeProactor final : public Proactor {
 public:
     /// Tipo de operación encolada (para que el test inspeccione qué se pidió).
-    enum class OpKind : std::uint8_t { Read, Write, Fsync, Accept, Recv, Send, Timer };
+    enum class OpKind : std::uint8_t { Read, Write, Fsync, Accept, Connect, Recv, Send, Timer };
 
     /// Operación registrada y pendiente de completar.
     struct Op {
@@ -61,6 +61,12 @@ public:
     void submit_accept(int listen_fd, Completion on_done) override {
         pending_.push_back(
             Op{.kind = OpKind::Accept, .fd = listen_fd, .on_done = std::move(on_done)});
+    }
+    void submit_connect(int fd, ByteSpan addr, Completion on_done) override {
+        pending_.push_back(Op{.kind = OpKind::Connect,
+                              .fd = fd,
+                              .write_buffer = addr,
+                              .on_done = std::move(on_done)});
     }
     void submit_recv(int fd, MutByteSpan buffer, Completion on_done) override {
         pending_.push_back(Op{

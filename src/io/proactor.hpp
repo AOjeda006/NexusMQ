@@ -46,6 +46,11 @@ public:
     virtual void submit_fsync(NativeHandle fd, bool datasync, Completion on_done) = 0;
     /// Acepta una conexión entrante en @p listen_fd (result = handle del socket aceptado).
     virtual void submit_accept(NativeHandle listen_fd, Completion on_done) = 0;
+    /// @brief Conecta @p fd (socket TCP creado, sin conectar) a la dirección @p addr (bytes de un
+    ///   `sockaddr`); result = 0 en éxito, `< 0` errno en fallo.
+    /// @details @p addr debe **sobrevivir hasta la completion** (el SO la lee de forma asíncrona):
+    ///   pásala desde un almacenamiento que viva en el *frame* de la corrutina que hace `co_await`.
+    virtual void submit_connect(NativeHandle fd, ByteSpan addr, Completion on_done) = 0;
     /// Recibe de un socket @p fd en @p buffer.
     virtual void submit_recv(NativeHandle fd, MutByteSpan buffer, Completion on_done) = 0;
     /// Envía @p data por el socket @p fd.

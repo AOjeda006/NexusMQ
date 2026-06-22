@@ -290,6 +290,14 @@ void IoUringBackend::submit_accept(int listen_fd, Completion on_done) {
     ring_->submit_op(IORING_OP_ACCEPT, listen_fd, 0, 0, 0, 0, std::move(on_done));
 }
 
+void IoUringBackend::submit_connect(int fd, ByteSpan addr, Completion on_done) {
+    // IORING_OP_CONNECT: el puntero al `sockaddr` va en `addr` y su longitud en `off` (como
+    // io_uring_prep_connect). El kernel lee el `sockaddr` de forma asíncrona: el llamante garantiza
+    // que vive hasta la completion (vía el frame de su corrutina).
+    ring_->submit_op(IORING_OP_CONNECT, fd, address_of(addr.data()), 0,
+                     static_cast<std::uint64_t>(addr.size()), 0, std::move(on_done));
+}
+
 void IoUringBackend::submit_recv(int fd, MutByteSpan buffer, Completion on_done) {
     ring_->submit_op(IORING_OP_RECV, fd, address_of(buffer.data()),
                      static_cast<std::uint32_t>(buffer.size()), 0, 0, std::move(on_done));

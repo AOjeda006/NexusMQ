@@ -38,6 +38,7 @@ public:
     void submit_write(int fd, ByteSpan data, std::uint64_t offset, Completion on_done) override;
     void submit_fsync(int fd, bool datasync, Completion on_done) override;
     void submit_accept(int listen_fd, Completion on_done) override;
+    void submit_connect(int fd, ByteSpan addr, Completion on_done) override;
     void submit_recv(int fd, MutByteSpan buffer, Completion on_done) override;
     void submit_send(int fd, ByteSpan data, Completion on_done) override;
     void submit_timer(MonoTime deadline, Completion on_done) override;

@@ -106,6 +106,49 @@ TEST(Socket, Connect_HostInvalido_DevuelveInvalidArgument) {
     EXPECT_EQ(sock.error().code(), nexus::ErrorCode::InvalidArgument);
 }
 
+TEST(Socket, AsyncConnect_HostInvalido_DevuelveInvalidArgument) {
+    nexus::FakeProactor fake;
+    std::optional<nexus::expected<nexus::Socket>> result;
+    auto driver = collect(nexus::Socket::async_connect(fake, "no-es-una-ip", 1234), result);
+    driver.handle().resume();  // falla en inet_pton, antes de suspender: no llega a submit_connect
+
+    EXPECT_EQ(fake.pending(), 0U);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_FALSE(result->has_value());
+    EXPECT_EQ(result->error().code(), nexus::ErrorCode::InvalidArgument);
+}
+
+TEST(Socket, AsyncConnect_Completa_DevuelveSocketConectado) {
+    nexus::FakeProactor fake;
+    std::optional<nexus::expected<nexus::Socket>> result;
+    auto driver = collect(nexus::Socket::async_connect(fake, "127.0.0.1", 1234), result);
+    driver.handle().resume();  // crea el fd y emite submit_connect (queda pendiente)
+
+    ASSERT_EQ(fake.pending(), 1U);
+    EXPECT_EQ(fake.peek(0).kind, nexus::FakeProactor::OpKind::Connect);
+    EXPECT_EQ(fake.peek(0).write_buffer.size(), sizeof(sockaddr_in));  // bytes del sockaddr destino
+
+    fake.arm_front(0);  // éxito (result = 0 estilo io_uring)
+    fake.run_completions(1);
+    ASSERT_TRUE(result.has_value());
+    ASSERT_TRUE(result->has_value());
+    EXPECT_TRUE((*result)->is_open());
+}
+
+TEST(Socket, AsyncConnect_Error_DevuelveIoError) {
+    nexus::FakeProactor fake;
+    std::optional<nexus::expected<nexus::Socket>> result;
+    auto driver = collect(nexus::Socket::async_connect(fake, "127.0.0.1", 1234), result);
+    driver.handle().resume();
+
+    ASSERT_EQ(fake.pending(), 1U);
+    fake.arm_front(-ECONNREFUSED);  // error: errno negado
+    fake.run_completions(1);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_FALSE(result->has_value());
+    EXPECT_EQ(result->error().code(), nexus::ErrorCode::IoError);
+}
+
 #ifdef NEXUS_HAVE_IOURING
 
 // Corrutina servidora: acepta una conexión, lee un mensaje y lo devuelve (eco); produce lo leído.
@@ -181,6 +224,63 @@ TEST(SocketIoUring, AcceptRecvSend_EcoPorLoopback) {
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(*result, message);
     EXPECT_EQ(echoed, message);
+}
+
+// Cliente: conecta con Socket::async_connect, envía @p message y devuelve el eco del servidor.
+nexus::task<nexus::expected<std::string>> connect_and_echo(nexus::Proactor& proactor,
+                                                           std::uint16_t port,
+                                                           std::string message) {
+    nexus::expected<nexus::Socket> sock =
+        co_await nexus::Socket::async_connect(proactor, "127.0.0.1", port);
+    if (!sock) {
+        co_return std::unexpected(sock.error());
+    }
+    const nexus::ByteSpan data{reinterpret_cast<const std::byte*>(message.data()), message.size()};
+    const nexus::expected<std::size_t> sent = co_await sock->async_send(proactor, data);
+    if (!sent) {
+        co_return std::unexpected(sent.error());
+    }
+    std::array<std::byte, 64> buffer{};
+    const nexus::expected<std::size_t> received = co_await sock->async_recv(proactor, buffer);
+    if (!received) {
+        co_return std::unexpected(received.error());
+    }
+    co_return std::string{reinterpret_cast<const char*>(buffer.data()), *received};
+}
+
+TEST(SocketIoUring, AsyncConnect_RoundTripPorLoopback) {
+    try {
+        (void)nexus::IoUringBackend{8};
+    } catch (const std::system_error&) {
+        GTEST_SKIP() << "io_uring no disponible en este entorno";
+    }
+    auto listener = nexus::Listener::bind("127.0.0.1", 0);
+    ASSERT_TRUE(listener.has_value());
+    const std::uint16_t port = listener->local_port();
+    ASSERT_GT(port, 0);
+
+    // Servidor (eco) y cliente (async_connect) sobre el MISMO proactor/hilo: prueba determinista de
+    // la composición connect→send→recv sin segundo hilo.
+    nexus::IoUringBackend proactor{32};
+    auto server = serve_echo(proactor, *listener);
+    server.handle().resume();  // accept pendiente
+    const std::string message = "ping inter-nodo";
+    auto client = connect_and_echo(proactor, port, message);
+    client.handle().resume();  // connect pendiente
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while ((!server.done() || !client.done()) && std::chrono::steady_clock::now() < deadline) {
+        proactor.run_completions(16);
+    }
+
+    ASSERT_TRUE(server.done());
+    ASSERT_TRUE(client.done());
+    const nexus::expected<std::string> server_result = server.handle().promise().result();
+    const nexus::expected<std::string> client_result = client.handle().promise().result();
+    ASSERT_TRUE(server_result.has_value());
+    ASSERT_TRUE(client_result.has_value());
+    EXPECT_EQ(*server_result, message);
+    EXPECT_EQ(*client_result, message);
 }
 
 #endif  // NEXUS_HAVE_IOURING

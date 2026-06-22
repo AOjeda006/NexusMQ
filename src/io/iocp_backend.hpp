@@ -70,6 +70,7 @@ public:
                       Completion on_done) override;
     void submit_fsync(NativeHandle fd, bool datasync, Completion on_done) override;
     void submit_accept(NativeHandle listen_fd, Completion on_done) override;
+    void submit_connect(NativeHandle fd, ByteSpan addr, Completion on_done) override;
     void submit_recv(NativeHandle fd, MutByteSpan buffer, Completion on_done) override;
     void submit_send(NativeHandle fd, ByteSpan data, Completion on_done) override;
     void submit_timer(MonoTime deadline, Completion on_done) override;

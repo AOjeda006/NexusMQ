@@ -143,6 +143,36 @@ expected<Socket> Socket::connect(std::string_view host, std::uint16_t port) {
     return socket;
 }
 
+task<expected<Socket>> Socket::async_connect(Proactor& proactor, std::string_view host,
+                                             std::uint16_t port) {
+    ensure_winsock();
+    // Socket *overlapped* (lo exige IOCP); el backend lo enlaza localmente antes de ConnectEx.
+    const SOCKET sock =
+        ::WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_OVERLAPPED);
+    if (sock == INVALID_SOCKET) {
+        co_return io_error("socket");
+    }
+    Socket socket{static_cast<NativeHandle>(sock)};  // RAII: cierra si algo falla a partir de aquí
+
+    // `addr` y `host_z` viven en el frame de esta corrutina: sobreviven al co_await (el SO los
+    // lee).
+    sockaddr_in addr = {};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    const std::string host_z{host};
+    if (::inet_pton(AF_INET, host_z.c_str(), &addr.sin_addr) != 1) {
+        co_return make_error(ErrorCode::InvalidArgument, "host IPv4 inválido: " + host_z);
+    }
+    // NOLINTNEXTLINE(*-reinterpret-cast): bytes del sockaddr para el puerto Proactor.
+    const ByteSpan addr_bytes{reinterpret_cast<const std::byte*>(&addr), sizeof(addr)};
+    if (const expected<void> connected =
+            co_await ConnectAwaitable{proactor, static_cast<NativeHandle>(sock), addr_bytes};
+        !connected) {
+        co_return std::unexpected(connected.error());
+    }
+    co_return socket;
+}
+
 void Socket::set_nodelay(bool enabled) const {
     const BOOL value = enabled ? TRUE : FALSE;
     // Mejor esfuerzo: TCP_NODELAY es una optimización de latencia, no es crítico si falla.
@@ -241,6 +271,33 @@ expected<Socket> Socket::connect(std::string_view host, std::uint16_t port) {
         return io_error("connect");
     }
     return socket;
+}
+
+task<expected<Socket>> Socket::async_connect(Proactor& proactor, std::string_view host,
+                                             std::uint16_t port) {
+    const int fd = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (fd < 0) {
+        co_return io_error("socket");
+    }
+    Socket socket{fd};  // toma posesión: cierra el fd si algo falla a partir de aquí (RAII)
+
+    // `addr` y `host_z` viven en el frame de esta corrutina: sobreviven al co_await (el kernel lee
+    // el `sockaddr` de forma asíncrona en IORING_OP_CONNECT).
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    const std::string host_z{host};
+    if (::inet_pton(AF_INET, host_z.c_str(), &addr.sin_addr) != 1) {
+        co_return make_error(ErrorCode::InvalidArgument, "host IPv4 inválido: " + host_z);
+    }
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): bytes del sockaddr para el
+    // puerto.
+    const ByteSpan addr_bytes{reinterpret_cast<const std::byte*>(&addr), sizeof(addr)};
+    if (const expected<void> connected = co_await ConnectAwaitable{proactor, fd, addr_bytes};
+        !connected) {
+        co_return std::unexpected(connected.error());
+    }
+    co_return socket;
 }
 
 void Socket::set_nodelay(bool enabled) const {

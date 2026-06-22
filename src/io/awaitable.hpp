@@ -151,6 +151,22 @@ private:
     NativeHandle listen_fd_;
 };
 
+/// `co_await` sobre un `connect`; éxito (sin valor) o `IoError`.
+class ConnectAwaitable : public detail::IoAwaitable<ConnectAwaitable> {
+public:
+    ConnectAwaitable(Proactor& proactor, NativeHandle fd, ByteSpan addr) noexcept
+        : IoAwaitable(proactor), fd_(fd), addr_(addr) {}
+
+    void submit(Proactor::Completion on_done) {
+        proactor_.submit_connect(fd_, addr_, std::move(on_done));
+    }
+    [[nodiscard]] expected<void> await_resume() const { return detail::result_to_void(result_); }
+
+private:
+    NativeHandle fd_;
+    ByteSpan addr_;  // bytes del sockaddr; deben vivir hasta la completion (frame del que llama)
+};
+
 /// `co_await` sobre un `recv`; produce los bytes recibidos (`0` = conexión cerrada).
 class RecvAwaitable : public detail::IoAwaitable<RecvAwaitable> {
 public:
@@ -219,6 +235,10 @@ private:
 [[nodiscard]] inline AcceptAwaitable async_accept(Proactor& proactor,
                                                   NativeHandle listen_fd) noexcept {
     return AcceptAwaitable{proactor, listen_fd};
+}
+[[nodiscard]] inline ConnectAwaitable async_connect(Proactor& proactor, NativeHandle fd,
+                                                    ByteSpan addr) noexcept {
+    return ConnectAwaitable{proactor, fd, addr};
 }
 [[nodiscard]] inline RecvAwaitable async_recv(Proactor& proactor, NativeHandle fd,
                                               MutByteSpan buffer) noexcept {

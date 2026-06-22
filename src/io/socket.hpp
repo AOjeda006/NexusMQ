@@ -32,6 +32,17 @@ public:
     /// @details La conexión es plano de control; el transporte de datos posterior es async. Pensado
     ///   para el cliente y los tests. @return el socket conectado o `IoError`/`InvalidArgument`.
     [[nodiscard]] static expected<Socket> connect(std::string_view host, std::uint16_t port);
+
+    /// @brief Crea un socket TCP y lo conecta de forma **asíncrona** a @p host : @p port vía el
+    ///   `Proactor` (io_uring `CONNECT` / IOCP `ConnectEx`), **sin bloquear el reactor**.
+    /// @details A diferencia de `connect` (bloqueante, plano de control), encaja en el bucle de
+    ///   *completions* y es apta para el hot-path inter-nodo (conexión a peers de Raft, ADR-0025).
+    /// @param[in,out] proactor Puerto de E/S del reactor sobre el que se conecta.
+    /// @return El socket conectado, o `InvalidArgument` (host IPv4 inválido) / `IoError` (fallo de
+    ///   socket o conexión).
+    [[nodiscard]] static task<expected<Socket>> async_connect(Proactor& proactor,
+                                                              std::string_view host,
+                                                              std::uint16_t port);
     ~Socket();
     Socket(Socket&& other) noexcept;
     Socket& operator=(Socket&& other) noexcept;

@@ -1046,6 +1046,14 @@ Harness de benchmark vacío y CI:
         ambos planos; un enlace dedicado los mantiene **ortogonales** (ADR-0004/0025). TDD con
         `FakeProactor` (round-trip + casos de borde: oversize, length 0, EOF). 697/697
         GCC/Clang/ASan; format + tidy limpios.
+      - [x] **D3.5-3** `connect` asíncrono en el puerto `Proactor` (`submit_connect`): conecta sin
+        bloquear el reactor (lo necesita el transporte saliente a peers). Implementado en io_uring
+        (`IORING_OP_CONNECT`: `sockaddr` en `addr`, longitud en `off`) y en IOCP (`ConnectEx` con
+        bind local previo + `SO_UPDATE_CONNECT_CONTEXT`); `FakeProactor` gana `OpKind::Connect`.
+        Nuevo `ConnectAwaitable` + `Socket::async_connect` (crea el socket y conecta; `sockaddr` vive
+        en el frame de la corrutina hasta la completion). TDD: unitarios con `FakeProactor` (éxito/
+        error/host inválido) + round-trip `connect→send→recv` por loopback io_uring (un solo hilo).
+        701/701 GCC/Clang/ASan; IOCP **compile-verificado con MinGW-w64**; format + tidy limpios.
   - [ ] **D3.6** Disparo de la **compactación** (`compact_to`, D2) por política desde el portador, ya con
     seguridad en el servidor vivo.
   - [ ] **D3.7** Tests e2e: cluster de 3 nodos reales (sockets), elección, replicación a quórum y failover
