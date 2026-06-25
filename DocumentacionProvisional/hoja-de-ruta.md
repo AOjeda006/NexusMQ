@@ -1097,8 +1097,21 @@ Harness de benchmark vacío y CI:
         sobre que el otro extremo recibe y decodifica de extremo a extremo. 716/716
         GCC/Clang/ASan/**TSan**; format + tidy limpios. *(El e2e multi-nodo —elección + replicación a
         quórum + failover— es D3.7.)*
-  - [ ] **D3.6** Disparo de la **compactación** (`compact_to`, D2) por política desde el portador, ya con
-    seguridad en el servidor vivo.
+  - [x] **D3.6** Disparo de la **compactación** (`compact_to`, D2) por política desde el portador, ya con
+    seguridad en el servidor vivo. Completo (D3.6-1..2).
+      - [x] **D3.6-1** `RaftCarrier` con `RaftLog` opcional + `CompactionPolicy` (umbral de entradas
+        aplicadas; `0` = desactivada). Tras avanzar la FSM (`on_tick`/`on_message`), `maybe_compact()`
+        dispara `compact_to(commit_index)` cuando `commit_index − snapshot_index` alcanza el umbral.
+        Es mantenimiento **best-effort**: un fallo de E/S deja el log intacto y se reintenta en el
+        próximo tick (no rompe el consenso; §5: solo se compacta lo replicado en mayoría y aplicado).
+        `ReplicatedPartition::raft_log()` expone el log para que el portador haga la E/S (la FSM no,
+        ADR-0015). TDD: votante único → líder → produce → tick → compacta (supera/bajo umbral y
+        política desactivada).
+      - [x] **D3.6-2** Cableado en el servidor: `CompactionPolicy` se propaga
+        `Server::Config` → `TopicCatalog` → `TopicManager` → `RaftCarrier`. El `Server` la activa por
+        defecto (`kDefaultCompactionThreshold = 10000` entradas; umbral 0 la desactiva). Test de
+        integración en `TopicManager` (umbral bajo) que comprueba que la política llega al portador y
+        dispara la compactación. 720/720 GCC/Clang/ASan/**TSan**; format + tidy limpios.
   - [ ] **D3.7** Tests e2e: cluster de 3 nodos reales (sockets), elección, replicación a quórum y failover
     de líder bajo caos.
 - [ ] **D4** **Cableado de TLS + proxy** en el plano de datos del server (la criptografía/`TlsContext` y el
