@@ -890,10 +890,10 @@ Harness de benchmark vacío y CI:
     (`on_install_snapshot_reply`). Se amplía el `variant` de `RaftMessage` y se añade
     `Snapshot::last_included_offset`. 4 tests (incl. round-trip end-to-end por red virtual). **No**
     se dispara la compactación automáticamente hasta cablearla con seguridad en el servidor vivo (D3).
-- [ ] **D3** **Swap-in en caliente** del stack Raft + multi-reactor en el `Server` vivo con **transporte
+- [x] **D3** **Swap-in en caliente** del stack Raft + multi-reactor en el `Server` vivo con **transporte
   real** (hoy `ReplicatedPartition`/`call_on`/`PartitionRouter` se prueban con red virtual; falta
   enchufarlos al servidor de producción y mover los RPC de Raft por la red). Decisión de arquitectura en
-  **ADR-0025**. Se aborda por incrementos pequeños y siempre verdes:
+  **ADR-0025**. Completo (D3.1..D3.7). Se abordó por incrementos pequeños y siempre verdes:
   - [x] **ADR-0025** Plano inter-nodo separado con **sobre de wire** que rutea por `(topic, partition)`,
     **portador por partición** afinado al reactor dueño que persiste (D1) antes de enviar y compacta (D2)
     por política, y `Server` sobre `ReactorPool` con `RequestRouter` asíncrono. Incluye refactor previo:
@@ -1112,8 +1112,24 @@ Harness de benchmark vacío y CI:
         defecto (`kDefaultCompactionThreshold = 10000` entradas; umbral 0 la desactiva). Test de
         integración en `TopicManager` (umbral bajo) que comprueba que la política llega al portador y
         dispara la compactación. 720/720 GCC/Clang/ASan/**TSan**; format + tidy limpios.
-  - [ ] **D3.7** Tests e2e: cluster de 3 nodos reales (sockets), elección, replicación a quórum y failover
-    de líder bajo caos.
+  - [x] **D3.7** Tests e2e: cluster de 3 nodos reales (sockets), elección, replicación a quórum y failover
+    de líder. Completo. `Server::set_peers` permite cablear las **direcciones** de los peers tras `bind()`
+    (los puertos inter-nodo efímeros solo se conocen entonces; la membresía de votantes se fija al
+    construir). Nuevo `tests/e2e/cluster_e2e_test.cpp` con un arnés `Cluster` que levanta N `Server`
+    reales sobre loopback (plano de cliente + plano inter-nodo), enlaza, cablea peers con los puertos
+    efímeros reales y arranca cada uno en su hilo. Tres pruebas sobre la red real:
+      - **Elección + commit a quórum:** los 3 nodos eligen un líder; una escritura confirma cuando una
+        mayoría (2/3) la replica por TCP y el `commit_index` la alcanza (el `high_watermark` del líder
+        sube a 3).
+      - **Replicación visible en un seguidor:** un nodo distinto del líder acaba exponiendo la escritura
+        (el líder le replica la entrada y le propaga el commit vía `leader_commit`).
+      - **Failover de líder:** se mata al líder; los 2 supervivientes (quórum 2/3) eligen uno nuevo
+        (distinto del caído) que confirma una segunda escritura continuando el log (`base_offset` 3,
+        `high_watermark` 6).
+
+      723/723 GCC/Clang/ASan/**TSan**; format + tidy limpios. *(Cierra el **Bloque D**: D1/D2/D3 dejan de
+      ser mecanismo latente —el consenso se replica de verdad por la red, sobrevive a reinicios y compacta
+      en el servidor vivo.)*
 - [ ] **D4** **Cableado de TLS + proxy** en el plano de datos del server (la criptografía/`TlsContext` y el
   `Proxy` existen, ADR-0019; falta enchufarlos al flujo de conexiones real).
 - [ ] **D5** **Poblar las métricas del broker** en el hot-path (la telemetría existe, ADR-0017; faltan los
