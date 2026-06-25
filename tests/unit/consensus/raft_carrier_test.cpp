@@ -251,4 +251,95 @@ TEST(RaftCarrier, Recover_SiembraElEstadoLeidoDeDisco) {
     EXPECT_EQ(part->raft().current_term(), 5);  // restaurado de disco.
 }
 
+// Lleva un votante único a líder conduciéndolo con su portador.
+nexus::MonoTime drive_to_leader(nexus::RaftCarrier& carrier, nexus::ReplicatedPartition& part) {
+    nexus::MonoTime now{};
+    for (int i = 0; i < 300 && !part.is_leader(); ++i) {
+        now += 10ms;
+        carrier.on_tick(now);
+    }
+    return now;
+}
+
+TEST(RaftCarrier, Compacta_AlSuperarUmbralDeEntradasAplicadas) {
+    TempDir dir{"compact_1"};
+    auto plog = nexus::PartitionLog::open(dir.path(), nexus::LogConfig{});
+    ASSERT_TRUE(plog.has_value());
+    nexus::RaftConfig cfg;
+    cfg.random_seed = 7;
+    auto part = nexus::ReplicatedPartition::create(1, {}, std::move(*plog), cfg);
+    ASSERT_TRUE(part.has_value());
+
+    DiscardSink sink;
+    nexus::RaftCarrier carrier{"orders",
+                               0,
+                               part->raft(),
+                               sink,
+                               nullptr,
+                               &part->raft_log(),
+                               nexus::CompactionPolicy{.applied_entries_threshold = 3}};
+    nexus::MonoTime now = drive_to_leader(carrier, *part);
+    ASSERT_TRUE(part->is_leader());
+    ASSERT_EQ(part->raft_log().snapshot_index(), 0);  // nada compactado todavía.
+
+    // Tres entradas aplicadas (votante único: confirma de inmediato) alcanzan el umbral.
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_TRUE(part->produce(make_batch(1)).has_value());
+    }
+    ASSERT_EQ(part->commit_index(), 3);
+
+    now += 10ms;
+    carrier.on_tick(now);
+    EXPECT_EQ(part->raft_log().snapshot_index(), 3);  // compactó hasta el commit_index.
+}
+
+TEST(RaftCarrier, NoCompacta_BajoElUmbral) {
+    TempDir dir{"compact_2"};
+    auto plog = nexus::PartitionLog::open(dir.path(), nexus::LogConfig{});
+    ASSERT_TRUE(plog.has_value());
+    nexus::RaftConfig cfg;
+    cfg.random_seed = 7;
+    auto part = nexus::ReplicatedPartition::create(1, {}, std::move(*plog), cfg);
+    ASSERT_TRUE(part.has_value());
+
+    DiscardSink sink;
+    nexus::RaftCarrier carrier{"orders",
+                               0,
+                               part->raft(),
+                               sink,
+                               nullptr,
+                               &part->raft_log(),
+                               nexus::CompactionPolicy{.applied_entries_threshold = 10}};
+    nexus::MonoTime now = drive_to_leader(carrier, *part);
+    ASSERT_TRUE(part->is_leader());
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_TRUE(part->produce(make_batch(1)).has_value());
+    }
+    now += 10ms;
+    carrier.on_tick(now);
+    EXPECT_EQ(part->raft_log().snapshot_index(), 0);  // 3 < 10: no compacta.
+}
+
+TEST(RaftCarrier, NoCompacta_PoliticaDesactivadaPorDefecto) {
+    // Con `RaftLog` pero sin política (umbral 0, por defecto) el portador nunca compacta.
+    TempDir dir{"compact_3"};
+    auto plog = nexus::PartitionLog::open(dir.path(), nexus::LogConfig{});
+    ASSERT_TRUE(plog.has_value());
+    nexus::RaftConfig cfg;
+    cfg.random_seed = 7;
+    auto part = nexus::ReplicatedPartition::create(1, {}, std::move(*plog), cfg);
+    ASSERT_TRUE(part.has_value());
+
+    DiscardSink sink;
+    nexus::RaftCarrier carrier{"orders", 0, part->raft(), sink, nullptr, &part->raft_log()};
+    nexus::MonoTime now = drive_to_leader(carrier, *part);
+    ASSERT_TRUE(part->is_leader());
+    for (int i = 0; i < 5; ++i) {
+        ASSERT_TRUE(part->produce(make_batch(1)).has_value());
+    }
+    now += 10ms;
+    carrier.on_tick(now);
+    EXPECT_EQ(part->raft_log().snapshot_index(), 0);  // política desactivada: nunca compacta.
+}
+
 }  // namespace

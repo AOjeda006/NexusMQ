@@ -70,6 +70,9 @@ public:
 
     /// Acceso a la FSM de Raft para que el portador la conduzca (`tick`/`on_*`/`take_messages`).
     [[nodiscard]] RaftNode& raft() noexcept { return *raft_; }
+    /// @brief Acceso al `RaftLog` para que el portador dispare la compactación (`compact_to`,
+    ///   ADR-0024). La E/S de compactación la hace el portador, no la FSM (ADR-0015).
+    [[nodiscard]] RaftLog& raft_log() noexcept { return *rlog_; }
     [[nodiscard]] const PartitionLog& log() const noexcept override { return *log_; }
 
 private:

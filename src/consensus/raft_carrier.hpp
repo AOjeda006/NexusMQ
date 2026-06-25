@@ -14,6 +14,19 @@ namespace nexus {
 
 class RaftNode;
 class RaftStateStore;
+class RaftLog;
+
+/// @brief Política de compactación del log de Raft del portador (ADR-0024/0025). Afinidad:
+///   INMUTABLE.
+/// @details Umbral simple sobre las entradas **aplicadas** (committed): cuando el número de
+/// entradas
+///   por encima de la base de snapshot (`commit_index − snapshot_index`) alcanza
+///   `applied_entries_threshold`, el portador dispara `compact_to(commit_index)` tras avanzar la
+///   FSM. `0` **desactiva** la compactación automática (valor por defecto: arranque conservador).
+struct CompactionPolicy {
+    /// Entradas aplicadas por encima del snapshot que disparan la compactación; `0` = desactivada.
+    Index applied_entries_threshold = 0;
+};
 
 /// @brief Sumidero de mensajes de Raft hacia la red (transporte inter-nodo). Afinidad:
 ///   REACTOR-LOCAL.
@@ -53,8 +66,13 @@ public:
     /// persistencia
     ///   (útil en pruebas de la lógica del portador). Si no es nulo, llama a `recover()` tras
     ///   construir y el portador persistirá el estado **antes** de transportar (regla §5).
+    /// @param log `RaftLog` de la réplica (no propietario); `nullptr` desactiva la compactación
+    ///   automática. Si no es nulo y @p compaction tiene umbral, el portador dispara `compact_to`
+    ///   por política tras avanzar la FSM (ADR-0024/0025).
+    /// @param compaction Política de compactación del log de Raft (umbral de entradas aplicadas).
     RaftCarrier(std::string topic, PartitionId partition, RaftNode& node, RaftMessageSink& sink,
-                RaftStateStore* store = nullptr);
+                RaftStateStore* store = nullptr, RaftLog* log = nullptr,
+                CompactionPolicy compaction = {});
 
     RaftCarrier(const RaftCarrier&) = delete;
     RaftCarrier& operator=(const RaftCarrier&) = delete;
@@ -86,12 +104,21 @@ private:
     void flush_outbox();
     /// Envuelve @p message en un `RaftEnvelope` de esta réplica y lo manda por el sumidero.
     void emit(const RaftMessage& message);
+    /// @brief Dispara `compact_to(commit_index)` si la política lo pide tras avanzar la FSM.
+    /// @details No-op si no hay `RaftLog`, si la política está desactivada (umbral 0) o si las
+    ///   entradas aplicadas por encima del snapshot aún no alcanzan el umbral. Es mantenimiento
+    ///   **best-effort**: un fallo de E/S deja el log intacto y se reintenta en el próximo tick (no
+    ///   rompe el consenso). Compacta exactamente en `commit_index` (precondición de `compact_to`:
+    ///   solo lo replicado en mayoría y aplicado).
+    void maybe_compact();
 
     std::string topic_;
     PartitionId partition_;
     RaftNode& node_;         // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     RaftMessageSink& sink_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     RaftStateStore* store_;  ///< Almacén durable del estado persistente (no propietario; opcional).
+    RaftLog* log_;           ///< Log de Raft para la compactación (no propietario; opcional).
+    CompactionPolicy compaction_;  ///< Política de compactación automática del log de Raft.
 };
 
 }  // namespace nexus

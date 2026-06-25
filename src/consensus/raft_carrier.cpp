@@ -7,6 +7,7 @@
 #include <utility>
 #include <variant>
 
+#include "consensus/raft_log.hpp"
 #include "consensus/raft_node.hpp"
 #include "consensus/raft_state.hpp"
 #include "consensus/raft_state_store.hpp"
@@ -14,8 +15,15 @@
 namespace nexus {
 
 RaftCarrier::RaftCarrier(std::string topic, PartitionId partition, RaftNode& node,
-                         RaftMessageSink& sink, RaftStateStore* store)
-    : topic_(std::move(topic)), partition_(partition), node_(node), sink_(sink), store_(store) {}
+                         RaftMessageSink& sink, RaftStateStore* store, RaftLog* log,
+                         CompactionPolicy compaction)
+    : topic_(std::move(topic)),
+      partition_(partition),
+      node_(node),
+      sink_(sink),
+      store_(store),
+      log_(log),
+      compaction_(compaction) {}
 
 expected<void> RaftCarrier::recover() {
     if (store_ == nullptr) {
@@ -32,6 +40,7 @@ expected<void> RaftCarrier::recover() {
 void RaftCarrier::on_tick(MonoTime now) {
     node_.tick(now);
     flush_outbox();
+    maybe_compact();
 }
 
 void RaftCarrier::on_message(MonoTime now, const RaftMessage& message) {
@@ -55,6 +64,7 @@ void RaftCarrier::on_message(MonoTime now, const RaftMessage& message) {
         node_.on_install_snapshot_reply(now, from, *reply);
     }
     flush_outbox();
+    maybe_compact();
 }
 
 void RaftCarrier::flush_outbox() {
@@ -67,6 +77,21 @@ void RaftCarrier::flush_outbox() {
     for (const RaftMessage& message : node_.take_messages()) {
         emit(message);
     }
+}
+
+void RaftCarrier::maybe_compact() {
+    if (log_ == nullptr || compaction_.applied_entries_threshold == 0) {
+        return;
+    }
+    const Index commit = node_.commit_index();
+    const Index base = log_->snapshot_index();
+    if (commit <= base || (commit - base) < compaction_.applied_entries_threshold) {
+        return;
+    }
+    // Best-effort: compacta el prefijo ya replicado en mayoría y aplicado (commit_index). Un fallo
+    // de E/S deja las entradas en su sitio y se reintenta en el próximo tick (no rompe el
+    // consenso).
+    [[maybe_unused]] const expected<void> compacted = log_->compact_to(commit);
 }
 
 void RaftCarrier::emit(const RaftMessage& message) {
