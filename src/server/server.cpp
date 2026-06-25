@@ -78,7 +78,7 @@ Server::Server(Config config, ReactorPool::ProactorFactory proactor_factory)
     : config_(resolve_config(std::move(config))),
       peers_(config_.peers),
       catalog_(config_.data_dir, config_.num_reactors, config_.node_id, config_.raft_config,
-               peers_.node_ids()),
+               peers_.node_ids(), config_.compaction),
       group_catalog_(config_.num_reactors),
       proactor_factory_(proactor_factory ? std::move(proactor_factory) : make_io_uring_proactor) {
     // Valida el plano de control en construcción: si io_uring no está disponible, la factoría por

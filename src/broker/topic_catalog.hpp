@@ -40,9 +40,12 @@ public:
     /// @param raft_config Parámetros de Raft de las particiones replicadas.
     /// @param voter_peers Los demás votantes del grupo Raft (node ids del resto del clúster); vacío
     ///   = votante único. Se propaga a cada `TopicManager`.
+    /// @param compaction Política de compactación del log de Raft; se propaga a cada `TopicManager`
+    ///   (y de ahí a cada `RaftCarrier`). Por defecto desactivada (umbral 0).
     explicit TopicCatalog(const std::filesystem::path& data_dir, int num_cores = 1,
                           NodeId node_id = 0, RaftConfig raft_config = {},
-                          const std::vector<NodeId>& voter_peers = {});
+                          const std::vector<NodeId>& voter_peers = {},
+                          CompactionPolicy compaction = {});
     TopicCatalog(const TopicCatalog&) = delete;
     TopicCatalog& operator=(const TopicCatalog&) = delete;
     TopicCatalog(TopicCatalog&&) = delete;

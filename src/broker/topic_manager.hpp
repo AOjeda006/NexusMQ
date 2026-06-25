@@ -18,6 +18,7 @@
 #include "common/error.hpp"
 #include "common/types.hpp"
 #include "consensus/deferred_message_sink.hpp"
+#include "consensus/raft_carrier.hpp"
 #include "consensus/raft_node.hpp"
 #include "protocol/messages.hpp"
 
@@ -53,9 +54,12 @@ public:
     ///   directorio).
     /// @note Definido fuera de línea: `replicas_` es `vector<unique_ptr<ReplicaContext>>` con
     ///   `ReplicaContext` incompleto en la cabecera (pimpl).
+    /// @param compaction Política de compactación del log de Raft (umbral de entradas aplicadas)
+    ///   que se pasa a cada `RaftCarrier`; por defecto desactivada (umbral 0).
     explicit TopicManager(std::filesystem::path data_dir, int num_cores = 1, int owner_core = 0,
                           NodeId node_id = 0, RaftConfig raft_config = {},
-                          std::vector<NodeId> voter_peers = {}) noexcept;
+                          std::vector<NodeId> voter_peers = {},
+                          CompactionPolicy compaction = {}) noexcept;
     TopicManager(const TopicManager&) = delete;
     TopicManager& operator=(const TopicManager&) = delete;
     TopicManager(TopicManager&&) = delete;
@@ -127,6 +131,7 @@ private:
     NodeId node_id_;          ///< Identidad del nodo (votante de las particiones replicadas).
     RaftConfig raft_config_;  ///< Parámetros de Raft de las particiones replicadas.
     std::vector<NodeId> voter_peers_;  ///< Los demás votantes del grupo Raft (resto del clúster).
+    CompactionPolicy compaction_;      ///< Política de compactación que se pasa a cada portador.
     mutable std::mutex mutex_;
     std::unordered_map<std::string, std::unique_ptr<Topic>> topics_;
     /// Sumidero de Raft compartido por los portadores de este núcleo (reenvía al transporte real,

@@ -80,6 +80,13 @@ public:
         /// Directorio de peers del clúster (`NodeId` -> dirección inter-nodo) para el transporte de
         /// Raft. Suele excluir a este nodo.
         PeerDirectory peers;
+        /// Umbral por defecto de compactación del log de Raft: entradas aplicadas por encima del
+        /// snapshot que disparan `compact_to` en el portador (ADR-0024).
+        static constexpr Index kDefaultCompactionThreshold = 10000;
+        /// Política de compactación del log de Raft de las particiones replicadas (ADR-0024/0025):
+        /// el portador dispara `compact_to(commit_index)` al superar el umbral de entradas
+        /// aplicadas. Activa por defecto en el servidor vivo; umbral 0 la desactiva.
+        CompactionPolicy compaction{.applied_entries_threshold = kDefaultCompactionThreshold};
     };
 
     /// @brief Crea las piezas del broker y **valida** que el proactor (io_uring) se puede crear.

@@ -12,6 +12,7 @@
 
 #include "broker/partition.hpp"
 #include "broker/partition_base.hpp"
+#include "broker/replicated_partition.hpp"
 #include "common/error.hpp"
 #include "common/record.hpp"
 #include "common/types.hpp"
@@ -207,6 +208,40 @@ TEST(TopicManager, CreateTopicReplicado_CreaReplicatedPartitionConPortador) {
     const nexus::RecordBatch batch{header, std::vector<std::byte>(12, std::byte{0x7})};
     ASSERT_TRUE(part->produce(batch).has_value());
     EXPECT_EQ(part->high_watermark(), 3);
+}
+
+TEST(TopicManager, PoliticaDeCompactacion_SePropagaAlPortador) {
+    using namespace std::chrono_literals;
+    TempDir dir{"compaction"};
+    // Umbral bajo (3) para disparar la compactación con pocas entradas: comprueba que la política
+    // del manager (último argumento) llega hasta el `RaftCarrier`. (num_cores=1, owner_core=0,
+    // node_id=1, sin voter_peers → votante único.)
+    const nexus::CompactionPolicy policy{.applied_entries_threshold = 3};
+    nexus::TopicManager manager{dir.path(), 1, 0, 1, fast_raft(), {}, policy};
+    ASSERT_TRUE(manager.create_topic("r", 1, {}, /*replication_factor=*/3).has_value());
+
+    auto* rep = dynamic_cast<nexus::ReplicatedPartition*>(manager.get("r")->partition(0));
+    ASSERT_NE(rep, nullptr);
+    const std::vector<nexus::RaftCarrier*> carriers = manager.carriers();
+    ASSERT_EQ(carriers.size(), 1U);
+
+    nexus::MonoTime now{};
+    for (int i = 0; i < 200 && !rep->is_leader(); ++i) {
+        now += 10ms;
+        carriers[0]->on_tick(now);
+    }
+    ASSERT_TRUE(rep->is_leader());
+    ASSERT_EQ(rep->raft_log().snapshot_index(), 0);
+
+    nexus::RecordBatchHeader header;
+    header.record_count = 1;
+    const nexus::RecordBatch batch{header, std::vector<std::byte>(4, std::byte{0x7})};
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_TRUE(rep->produce(batch).has_value());
+    }
+    now += 10ms;
+    carriers[0]->on_tick(now);
+    EXPECT_EQ(rep->raft_log().snapshot_index(), 3);  // el umbral de la política llegó al portador.
 }
 
 TEST(TopicManager, CreateTopicNoReplicado_NoTienePortadores) {

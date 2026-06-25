@@ -40,14 +40,15 @@ std::int64_t now_ms() {
 }  // namespace
 
 TopicManager::TopicManager(std::filesystem::path data_dir, int num_cores, int owner_core,
-                           NodeId node_id, RaftConfig raft_config,
-                           std::vector<NodeId> voter_peers) noexcept
+                           NodeId node_id, RaftConfig raft_config, std::vector<NodeId> voter_peers,
+                           CompactionPolicy compaction) noexcept
     : data_dir_(std::move(data_dir)),
       num_cores_(num_cores < 1 ? 1 : num_cores),
       owner_core_(owner_core < 0 || owner_core >= num_cores_ ? 0 : owner_core),
       node_id_(node_id),
       raft_config_(raft_config),
-      voter_peers_(std::move(voter_peers)) {}
+      voter_peers_(std::move(voter_peers)),
+      compaction_(compaction) {}
 
 TopicManager::~TopicManager() = default;
 
@@ -109,8 +110,8 @@ expected<TopicMetadata> TopicManager::create_topic(std::string name, std::int32_
         ctx->store = std::make_unique<RaftStateStore>(std::move(*store));
         // Todos los portadores del núcleo comparten `raft_sink_` (reenvía al transporte real cuando
         // se instale; hasta entonces descarta: votante único sin transporte).
-        ctx->carrier =
-            std::make_unique<RaftCarrier>(name, pid, raw->raft(), raft_sink_, ctx->store.get());
+        ctx->carrier = std::make_unique<RaftCarrier>(
+            name, pid, raw->raft(), raft_sink_, ctx->store.get(), &raw->raft_log(), compaction_);
         if (const expected<void> recovered = ctx->carrier->recover(); !recovered) {
             return std::unexpected(recovered.error());
         }
