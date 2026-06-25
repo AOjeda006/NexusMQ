@@ -77,6 +77,7 @@ add_executable(nexus-tests
   unit/ingress/tls_test.cpp
   unit/ingress/connection_state_test.cpp
   unit/ingress/proxy_test.cpp
+  unit/ingress/upstream_pool_test.cpp
   unit/telemetry/metrics_test.cpp
   unit/telemetry/logging_test.cpp
   unit/telemetry/tracing_test.cpp

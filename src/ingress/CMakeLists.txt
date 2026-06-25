@@ -12,13 +12,16 @@ add_library(nexus-ingress
   health_monitor.cpp
   problem_detail.cpp
   pagination.cpp
-  proxy.cpp)
+  proxy.cpp
+  upstream_pool.cpp)
 add_library(nexus::ingress ALIAS nexus-ingress)
 
 target_include_directories(nexus-ingress PUBLIC ${PROJECT_SOURCE_DIR}/src)
 # nexus::wire aporta el framing sobre conexión (FrameReader/Writer) y arrastra io+protocol; el
 # modo proxy (proxy.cpp) releva tramas, y connection_state.hpp usa el CreditWindow (header-only).
-target_link_libraries(nexus-ingress PUBLIC nexus::common nexus::wire nexus_options)
+# nexus::cluster aporta el PeerDirectory que el UpstreamPool usa para resolver direcciones del
+# plano de datos de los nodos aguas arriba (ADR-0027).
+target_link_libraries(nexus-ingress PUBLIC nexus::common nexus::wire nexus::cluster nexus_options)
 
 # TLS (OpenSSL): opcional. Si OpenSSL está disponible, compila tls.cpp (TlsContext/TlsConnection,
 # TLS 1.3 + mTLS) y define NEXUS_HAVE_OPENSSL para que el plano TLS y sus tests se activen; si no,
