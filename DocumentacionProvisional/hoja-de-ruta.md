@@ -1130,9 +1130,9 @@ Harness de benchmark vacío y CI:
       723/723 GCC/Clang/ASan/**TSan**; format + tidy limpios. *(Cierra el **Bloque D**: D1/D2/D3 dejan de
       ser mecanismo latente —el consenso se replica de verdad por la red, sobrevive a reinicios y compacta
       en el servidor vivo.)*
-- [~] **D4** **Cableado de TLS + proxy** en el plano de datos del server (la criptografía/`TlsContext` y el
-  `Proxy` existen, ADR-0019; falta enchufarlos al flujo de conexiones real). **TLS cableado (D4-1/D4-2);
-  proxy pendiente (D4-3).**
+- [x] **D4** **Cableado de TLS + proxy** en el plano de datos del server (la criptografía/`TlsContext` y el
+  `Proxy` existían, ADR-0019; ya enchufados al flujo de conexiones real). **TLS cableado (D4-1/D4-2); proxy
+  cableado (D4-3).**
   - [x] **D4-1** **Framing genérico sobre un concept `ByteStream`** (`wire/frame_io.hpp`). `FrameReader`/
     `FrameWriter` y `serve_connection` pasan a ser **plantillas** sobre un concept `ByteStream`
     (`async_recv`/`async_send` → `task<expected<size_t>>`) en vez de acoplarse al `Socket` concreto. Lo
@@ -1149,7 +1149,7 @@ Harness de benchmark vacío y CI:
     `Server` TLS real (RF=1: confirma al producir → `high_watermark` 5), y un **cliente en claro es
     rechazado** (handshake fallido → cierre; el plano TLS no degrada a claro). 725/725 GCC/Clang/ASan/TSan;
     format + tidy limpios.
-  - [~] **D4-3** **Cableado del modo proxy** en el plano de datos (el `Proxy` de I18 existe): requiere el
+  - [x] **D4-3** **Cableado del modo proxy** en el plano de datos (el `Proxy` de I18 existe): requiere el
     **dial/pool del nodo aguas arriba** (conexión asíncrona al plano de datos del nodo elegido y reúso de
     conexiones) antes de relevar tramas. **Decidido en ADR-0027** (proxy opt-in; `UpstreamPool` por reactor;
     directorio de direcciones del plano de datos distinto del de Raft). Se desglosa en incrementos:
@@ -1161,8 +1161,17 @@ Harness de benchmark vacío y CI:
       vacío → `NotFound`; tope de free-list) y e2e io_uring (diala una conexión nueva y la **reúsa por el
       mismo fd** tras `release`). `nexus-ingress` pasa a enlazar `nexus::cluster`. 729/729 GCC/Clang/ASan/TSan;
       format + tidy limpios.
-    - [ ] **D4-3b** **Enchufar** el modo proxy al plano de datos del `Server` (config opt-in: `Proxy::route`
-      elige el nodo, `UpstreamPool::acquire` provee la conexión, `Proxy::forward` releva, `release` al cerrar).
+    - [x] **D4-3b** **Enchufado** el modo proxy al plano de datos del `Server` (`server/server.{hpp,cpp}`).
+      `Server::Config` gana `ProxyConfig` (`upstreams: NodeId→PeerAddress` del plano de datos, `strategy`);
+      `bind()` construye el directorio del plano de datos, el `LoadBalancer` (todos los nodos en el anillo),
+      el `UpstreamPool` y el `Proxy` si el modo está activo (opt-in). `run()` lanza `proxy_accept_loop` en
+      lugar de `accept_loop`: cada conexión se enruta (`Proxy::route` por id de conexión), se obtiene una
+      conexión del pool (`acquire`), se releva (`Proxy::forward`) y se devuelve al pool (`release`) al cerrar
+      limpiamente. Nuevo `tests/e2e/proxy_server_e2e_test.cpp`: backend nativo + proxy opt-in; un cliente
+      conecta al **proxy** y su Produce/Fetch se releva al backend (base_offset 0, `high_watermark` 5).
+      **Fix (cazado por el e2e):** se activa `TCP_NODELAY` en el plano de datos (relevo proxy y `accept_loop`)
+      para evitar el interbloqueo **Nagle/delayed-ACK** que el doble salto del proxy hace patente (normativa
+      de redes: minimizar el RTT). 730/730 GCC/Clang/ASan/TSan; format + tidy limpios.
 - [ ] **D5** **Poblar las métricas del broker** en el hot-path (la telemetría existe, ADR-0017; faltan los
   contadores/histogramas en produce/fetch/replicación).
 
