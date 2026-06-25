@@ -120,6 +120,16 @@ public:
     /// Puerto del plano inter-nodo realmente enlazado; `0` si está desactivado o sin `bind`.
     [[nodiscard]] std::uint16_t cluster_port() const noexcept;
 
+    /// @brief Reemplaza el directorio de peers del plano inter-nodo (Raft).
+    /// @details Permite fijar las **direcciones** de los peers **después** de `bind()`, cuando los
+    ///   puertos inter-nodo efímeros (`cluster_port = 0`) ya se conocen (descubrimiento de puertos
+    ///   en arranque, tests de clúster). La **membresía de votantes** se fijó al construir
+    ///   (`peers.node_ids()`); este método solo debería cambiar direcciones, no el conjunto de
+    ///   `NodeId`. Tras `run()` el directorio es compartido e inmutable entre reactores: no lo
+    ///   llames con el plano inter-nodo en marcha.
+    /// @pre Antes de `run()` (el transporte lee el directorio al arrancar), desde un solo hilo.
+    void set_peers(PeerDirectory peers) noexcept { peers_ = std::move(peers); }
+
     /// Lanza el bucle de aceptación y corre el reactor hasta `stop()` (bloquea el hilo llamante).
     void run();
 
