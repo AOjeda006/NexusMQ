@@ -1149,9 +1149,20 @@ Harness de benchmark vacío y CI:
     `Server` TLS real (RF=1: confirma al producir → `high_watermark` 5), y un **cliente en claro es
     rechazado** (handshake fallido → cierre; el plano TLS no degrada a claro). 725/725 GCC/Clang/ASan/TSan;
     format + tidy limpios.
-  - [ ] **D4-3** **Cableado del modo proxy** en el plano de datos (el `Proxy` de I18 existe): requiere el
-    **dial/pool del líder aguas arriba** (conexión asíncrona al líder de cada partición y reúso de
-    conexiones) antes de relevar tramas no-líder. Pendiente (pieza mayor, posible ADR de pooling).
+  - [~] **D4-3** **Cableado del modo proxy** en el plano de datos (el `Proxy` de I18 existe): requiere el
+    **dial/pool del nodo aguas arriba** (conexión asíncrona al plano de datos del nodo elegido y reúso de
+    conexiones) antes de relevar tramas. **Decidido en ADR-0027** (proxy opt-in; `UpstreamPool` por reactor;
+    directorio de direcciones del plano de datos distinto del de Raft). Se desglosa en incrementos:
+    - [x] **D4-3a** **ADR-0027** + **`UpstreamPool`** (`ingress/upstream_pool.{hpp,cpp}`), REACTOR-LOCAL:
+      `acquire(proactor, node)` reúsa una conexión ociosa de la *free-list* del nodo o **diala una nueva**
+      asíncrona (`Socket::async_connect`) resolviendo la dirección con un `PeerDirectory` del plano de datos;
+      `release(node, socket)` la devuelve para reúso con *free-list* **acotada** (`max_idle_per_node`, cierra
+      el excedente). Préstamo exclusivo por relevo (sin intercalado de tramas). Tests: unitarios (directorio
+      vacío → `NotFound`; tope de free-list) y e2e io_uring (diala una conexión nueva y la **reúsa por el
+      mismo fd** tras `release`). `nexus-ingress` pasa a enlazar `nexus::cluster`. 729/729 GCC/Clang/ASan/TSan;
+      format + tidy limpios.
+    - [ ] **D4-3b** **Enchufar** el modo proxy al plano de datos del `Server` (config opt-in: `Proxy::route`
+      elige el nodo, `UpstreamPool::acquire` provee la conexión, `Proxy::forward` releva, `release` al cerrar).
 - [ ] **D5** **Poblar las métricas del broker** en el hot-path (la telemetría existe, ADR-0017; faltan los
   contadores/histogramas en produce/fetch/replicación).
 
