@@ -82,6 +82,7 @@ task<void> accept_loop(Reactor& reactor, Listener& listener, RequestRouter& rout
         if (!client) {
             co_return;  // listener cerrado o error: dejamos de aceptar.
         }
+        client->set_nodelay(true);  // plano de datos petición/respuesta: sin Nagle (baja latencia).
 #ifdef NEXUS_HAVE_OPENSSL
         if (tls != nullptr) {
             reactor.spawn(
@@ -90,6 +91,50 @@ task<void> accept_loop(Reactor& reactor, Listener& listener, RequestRouter& rout
         }
 #endif
         reactor.spawn(serve_connection(reactor.proactor(), std::move(*client), router));
+    }
+}
+
+/// @brief Sirve una conexión en **modo proxy** (ADR-0006/0027): elige un nodo aguas arriba, obtiene
+///   una conexión del pool y releva las tramas del cliente a ese nodo hasta que el cliente cierra.
+/// @details Al terminar limpiamente el relevo, la conexión aguas arriba se **devuelve al pool**
+/// para
+///   reúso; si el relevo falló (el nodo cayó a media operación), se descarta (se cierra al
+///   destruirse). Sin nodos en el anillo o con fallo de dialado, la conexión de cliente se cierra.
+///   @p conn_id es la clave de *consistent-hashing* (identidad de la conexión: enrutado estable por
+///   conexión, coherente con el relevo a nivel de conexión de I18).
+task<void> serve_proxy_connection(Proactor& proactor, Proxy& proxy, UpstreamPool& pool,
+                                  Socket client, std::uint64_t conn_id) {
+    const std::optional<NodeId> node = proxy.route(std::to_string(conn_id));
+    if (!node) {
+        co_return;  // sin nodos aguas arriba en el anillo: cerramos.
+    }
+    expected<Socket> upstream = co_await pool.acquire(proactor, *node);
+    if (!upstream) {
+        co_return;  // no se pudo dialar el nodo: cerramos.
+    }
+    // El plano de datos es petición/respuesta de baja latencia: desactiva Nagle en ambos extremos
+    // del relevo para no acumular el clásico interbloqueo Nagle/delayed-ACK al partir cada trama en
+    // cabecera + payload (normativa de redes: minimizar el impacto del RTT).
+    client.set_nodelay(true);
+    upstream->set_nodelay(true);
+    const expected<void> relayed = co_await proxy.forward(proactor, client, *upstream);
+    if (relayed) {
+        pool.release(*node, std::move(*upstream));  // conexión sana: la devolvemos para reúso.
+    }
+}
+
+/// Bucle de aceptación del plano de datos en **modo proxy**: una corrutina de relevo por conexión,
+/// con una clave de enrutado monótona por conexión (consistent-hashing del nodo aguas arriba).
+task<void> proxy_accept_loop(Reactor& reactor, Listener& listener, Proxy& proxy,
+                             UpstreamPool& pool) {
+    std::uint64_t next_conn_id = 0;
+    while (true) {
+        expected<Socket> client = co_await listener.async_accept(reactor.proactor());
+        if (!client) {
+            co_return;  // listener cerrado o error: dejamos de aceptar.
+        }
+        reactor.spawn(serve_proxy_connection(reactor.proactor(), proxy, pool, std::move(*client),
+                                             next_conn_id++));
     }
 }
 
@@ -221,6 +266,18 @@ expected<void> Server::bind() {
         tls_.emplace(std::move(*ctx));
     }
 #endif
+    // Modo proxy (opt-in, ADR-0006/0027): si hay nodos aguas arriba, construye el directorio del
+    // plano de datos, el balanceador (con todos los nodos en el anillo), el pool de conexiones y el
+    // proxy. El relevo lo sirve el bucle de aceptación del núcleo 0 (`proxy_accept_loop`).
+    if (config_.proxy.enabled()) {
+        upstream_dir_.emplace(config_.proxy.upstreams);
+        LoadBalancer& balancer = balancer_.emplace(config_.proxy.strategy);
+        for (const NodeId node : upstream_dir_->node_ids()) {
+            balancer.add_node(node);
+        }
+        upstream_pool_.emplace(*upstream_dir_);
+        proxy_.emplace(balancer);
+    }
     return {};
 }
 
@@ -356,13 +413,19 @@ void Server::run() {
     start_raft_transport(main);
     start_raft_ticks(main);
 
-    const TlsContext* tls_ptr = nullptr;
+    if (proxy_ && upstream_pool_) {
+        // Modo proxy (opt-in, ADR-0006/0027): el núcleo 0 releva cada conexión a un nodo aguas
+        // arriba en vez de servirla localmente. El relevo es en claro (no se cablea TLS en proxy).
+        main.spawn(proxy_accept_loop(main, *listener_, *proxy_, *upstream_pool_));
+    } else {
+        const TlsContext* tls_ptr = nullptr;
 #ifdef NEXUS_HAVE_OPENSSL
-    if (tls_) {
-        tls_ptr = &*tls_;  // contexto TLS compartido por el bucle de aceptación (núcleo 0).
-    }
+        if (tls_) {
+            tls_ptr = &*tls_;  // contexto TLS compartido por el bucle de aceptación (núcleo 0).
+        }
 #endif
-    main.spawn(accept_loop(main, *listener_, *router_, tls_ptr));
+        main.spawn(accept_loop(main, *listener_, *router_, tls_ptr));
+    }
     if (admin_listener_ && admin_router_) {
         main.spawn(admin_accept_loop(main, *admin_listener_, *admin_router_));
     }

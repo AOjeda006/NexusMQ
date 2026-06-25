@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "broker/group_catalog.hpp"
@@ -24,7 +25,10 @@
 #include "consensus/raft_wire.hpp"
 #include "ingress/health_monitor.hpp"
 #include "ingress/jwt.hpp"
+#include "ingress/load_balancer.hpp"  // BalanceStrategy: estrategia del modo proxy (ADR-0006)
+#include "ingress/proxy.hpp"          // Proxy: enrutado + relevo de tramas del modo proxy
 #include "ingress/rest_gateway.hpp"
+#include "ingress/upstream_pool.hpp"  // UpstreamPool: dial/reúso de conexiones aguas arriba (ADR-0027)
 #ifdef NEXUS_HAVE_OPENSSL
 #include "ingress/tls.hpp"  // TlsContext: terminación TLS del plano de datos (ADR-0019)
 #endif
@@ -100,6 +104,27 @@ public:
         };
         /// Configuración TLS del plano de datos (ADR-0019); ver `TlsConfig`.
         TlsConfig tls;
+        /// @brief Configuración del **modo proxy** del plano de datos (ADR-0006/0027).
+        /// @details Modo **secundario y opt-in**: si `upstreams` no está vacío, el servidor
+        /// **releva**
+        ///   las tramas de cada cliente a un nodo aguas arriba elegido con `strategy` (consistent-
+        ///   hashing por defecto), sobre conexiones reutilizables (`UpstreamPool`). Vacío = modo
+        ///   nativo directo (el servidor atiende localmente). En este corte, el relevo es **en
+        ///   claro** (terminar TLS y relevar es trabajo futuro): si se activa el proxy, se ignora
+        ///   `tls`.
+        struct ProxyConfig {
+            /// Direcciones del **plano de datos** de los nodos aguas arriba (`NodeId →
+            /// host:puerto`).
+            std::unordered_map<NodeId, PeerAddress> upstreams;
+            /// Estrategia de balanceo para elegir el nodo (ADR-0006); por defecto
+            /// consistent-hashing.
+            BalanceStrategy strategy = BalanceStrategy::ConsistentHashing;
+
+            /// @brief ¿Está activo el modo proxy? (hay al menos un nodo aguas arriba).
+            [[nodiscard]] bool enabled() const noexcept { return !upstreams.empty(); }
+        };
+        /// Configuración del modo proxy del plano de datos (ADR-0006/0027); ver `ProxyConfig`.
+        ProxyConfig proxy;
         /// Umbral por defecto de compactación del log de Raft: entradas aplicadas por encima del
         /// snapshot que disparan `compact_to` en el portador (ADR-0024).
         static constexpr Index kDefaultCompactionThreshold = 10000;
@@ -211,6 +236,16 @@ private:
     /// de servicio del pool lo referencian a través de `accept_loop`).
     std::optional<TlsContext> tls_;
 #endif
+    /// Piezas del **modo proxy** (ADR-0006/0027), pobladas en `bind()` si `config.proxy.enabled()`.
+    /// REACTOR-LOCAL: solo el núcleo 0 acepta y releva. Declaradas **antes** que `pool_` para
+    /// destruirse **después** (las corrutinas de relevo del pool las referencian). El orden interno
+    /// importa: `upstream_pool_` referencia a `upstream_dir_` y `proxy_` a `balancer_`, así que el
+    /// directorio y el balanceador van **antes** del pool y del proxy.
+    std::optional<PeerDirectory> upstream_dir_;  ///< Direcciones del plano de datos aguas arriba.
+    std::optional<LoadBalancer> balancer_;       ///< Selección de nodo (estrategia configurable).
+    std::optional<UpstreamPool>
+        upstream_pool_;           ///< Pool de conexiones aguas arriba (sobre el dir).
+    std::optional<Proxy> proxy_;  ///< Enrutado + relevo de tramas (sobre el balanc.).
     ReactorPool pool_;
     ReactorPool::ProactorFactory proactor_factory_;
     /// Núcleo 0 (lo corre `run` inline), publicado para que `stop` lo despierte desde otro hilo /
