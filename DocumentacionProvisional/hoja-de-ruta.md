@@ -1130,8 +1130,28 @@ Harness de benchmark vacío y CI:
       723/723 GCC/Clang/ASan/**TSan**; format + tidy limpios. *(Cierra el **Bloque D**: D1/D2/D3 dejan de
       ser mecanismo latente —el consenso se replica de verdad por la red, sobrevive a reinicios y compacta
       en el servidor vivo.)*
-- [ ] **D4** **Cableado de TLS + proxy** en el plano de datos del server (la criptografía/`TlsContext` y el
-  `Proxy` existen, ADR-0019; falta enchufarlos al flujo de conexiones real).
+- [~] **D4** **Cableado de TLS + proxy** en el plano de datos del server (la criptografía/`TlsContext` y el
+  `Proxy` existen, ADR-0019; falta enchufarlos al flujo de conexiones real). **TLS cableado (D4-1/D4-2);
+  proxy pendiente (D4-3).**
+  - [x] **D4-1** **Framing genérico sobre un concept `ByteStream`** (`wire/frame_io.hpp`). `FrameReader`/
+    `FrameWriter` y `serve_connection` pasan a ser **plantillas** sobre un concept `ByteStream`
+    (`async_recv`/`async_send` → `task<expected<size_t>>`) en vez de acoplarse al `Socket` concreto. Lo
+    cumplen `Socket` (claro) y `TlsConnection` (cifrado), de modo que el mismo bucle de servicio sirve
+    ambos planos **sin coste de llamada virtual** (DI estática en el hot-path, normativa de inyección de
+    dependencias). Refactor de comportamiento idéntico: los call-sites usan CTAD y no cambian; `nexus-wire`
+    pasa a INTERFACE (header-only) y se eliminan `frame_io.cpp`/`connection.cpp`.
+  - [x] **D4-2** **Terminación TLS del plano de datos** (`server/server.{hpp,cpp}`). `Server::Config` gana
+    `TlsConfig` (`cert_chain`/`private_key`/`client_ca`); `bind()` construye el `TlsContext` de servidor
+    (valida los PEM en el borde, mTLS si hay CA de cliente); el bucle de aceptación envuelve cada socket en
+    `TlsConnection`, completa el handshake y sirve sobre el flujo cifrado (`serve_tls_connection`). OpenSSL
+    es opcional (`NEXUS_HAVE_OPENSSL`): sin él o sin cert/clave, el plano queda en **texto plano**. Nuevo
+    `tests/e2e/tls_server_e2e_test.cpp`: un cliente TLS hace **Produce/Fetch sobre canal cifrado** contra un
+    `Server` TLS real (RF=1: confirma al producir → `high_watermark` 5), y un **cliente en claro es
+    rechazado** (handshake fallido → cierre; el plano TLS no degrada a claro). 725/725 GCC/Clang/ASan/TSan;
+    format + tidy limpios.
+  - [ ] **D4-3** **Cableado del modo proxy** en el plano de datos (el `Proxy` de I18 existe): requiere el
+    **dial/pool del líder aguas arriba** (conexión asíncrona al líder de cada partición y reúso de
+    conexiones) antes de relevar tramas no-líder. Pendiente (pieza mayor, posible ADR de pooling).
 - [ ] **D5** **Poblar las métricas del broker** en el hot-path (la telemetría existe, ADR-0017; faltan los
   contadores/histogramas en produce/fetch/replicación).
 
