@@ -3,7 +3,6 @@
 # `nexusd` solo añade el main (parseo de args + señales).
 add_library(nexus-server
   server.cpp
-  connection.cpp
   admin_api.cpp
   admin_router.cpp
   admin_http.cpp)
