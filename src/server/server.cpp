@@ -24,6 +24,11 @@
 
 namespace nexus {
 
+// Declaración adelantada para el parámetro de `accept_loop` cuando se compila **sin** OpenSSL (sin
+// `ingress/tls.hpp`): el puntero es siempre `nullptr` y nunca se desreferencia. Con OpenSSL, el
+// tipo ya viene completo desde la cabecera; esto es una redeclaración inocua.
+class TlsContext;
+
 namespace {
 
 /// Profundidad de la cola del anillo io_uring de cada reactor del servidor.
@@ -50,13 +55,40 @@ Server::Config resolve_config(Server::Config config) {
     return config;
 }
 
-/// Bucle de aceptación del plano de datos: una corrutina de servicio por conexión.
-task<void> accept_loop(Reactor& reactor, Listener& listener, RequestRouter& router) {
+#ifdef NEXUS_HAVE_OPENSSL
+/// @brief Sirve una conexión **cifrada**: envuelve el socket aceptado en una `TlsConnection`,
+///   completa el handshake TLS y entra en el bucle de servicio sobre el flujo cifrado.
+/// @details Un fallo (recurso SSL, verificación de certificado/mTLS, o EOF durante el handshake)
+///   cierra la conexión sin servir (RAII cierra socket y SSL). Solo se compila con OpenSSL.
+task<void> serve_tls_connection(Proactor& proactor, const TlsContext& tls, Socket sock,
+                                RequestRouter& router) {
+    expected<TlsConnection> conn = tls.accept(std::move(sock));
+    if (!conn) {
+        co_return;  // no se pudo crear el objeto SSL: cerramos.
+    }
+    if (const expected<void> handshaken = co_await conn->handshake(proactor); !handshaken) {
+        co_return;  // handshake fallido (verificación/transporte): cerramos.
+    }
+    co_await serve_connection(proactor, std::move(*conn), router);
+}
+#endif
+
+/// Bucle de aceptación del plano de datos: una corrutina de servicio por conexión. Si @p tls no es
+/// nulo, cada conexión se termina con TLS antes de servirla (ADR-0019); si es nulo, texto plano.
+task<void> accept_loop(Reactor& reactor, Listener& listener, RequestRouter& router,
+                       [[maybe_unused]] const TlsContext* tls) {
     while (true) {
         expected<Socket> client = co_await listener.async_accept(reactor.proactor());
         if (!client) {
             co_return;  // listener cerrado o error: dejamos de aceptar.
         }
+#ifdef NEXUS_HAVE_OPENSSL
+        if (tls != nullptr) {
+            reactor.spawn(
+                serve_tls_connection(reactor.proactor(), *tls, std::move(*client), router));
+            continue;
+        }
+#endif
         reactor.spawn(serve_connection(reactor.proactor(), std::move(*client), router));
     }
 }
@@ -177,6 +209,18 @@ expected<void> Server::bind() {
         }
         cluster_listener_ = std::move(*cluster);
     }
+#ifdef NEXUS_HAVE_OPENSSL
+    // Termina el plano de datos con TLS si hay certificado/clave (y mTLS si hay CA de cliente). Se
+    // valida en el borde (carga de PEM) antes de servir: un cert/clave inválido falla aquí.
+    if (config_.tls.enabled()) {
+        expected<TlsContext> ctx = TlsContext::server(
+            config_.tls.cert_chain, config_.tls.private_key, config_.tls.client_ca);
+        if (!ctx) {
+            return std::unexpected(ctx.error());
+        }
+        tls_.emplace(std::move(*ctx));
+    }
+#endif
     return {};
 }
 
@@ -312,7 +356,13 @@ void Server::run() {
     start_raft_transport(main);
     start_raft_ticks(main);
 
-    main.spawn(accept_loop(main, *listener_, *router_));
+    const TlsContext* tls_ptr = nullptr;
+#ifdef NEXUS_HAVE_OPENSSL
+    if (tls_) {
+        tls_ptr = &*tls_;  // contexto TLS compartido por el bucle de aceptación (núcleo 0).
+    }
+#endif
+    main.spawn(accept_loop(main, *listener_, *router_, tls_ptr));
     if (admin_listener_ && admin_router_) {
         main.spawn(admin_accept_loop(main, *admin_listener_, *admin_router_));
     }

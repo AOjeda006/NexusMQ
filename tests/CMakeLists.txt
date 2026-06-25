@@ -109,6 +109,7 @@ add_executable(nexus-tests
   e2e/cli_admin_e2e_test.cpp
   e2e/cluster_e2e_test.cpp
   e2e/tls_e2e_test.cpp
+  e2e/tls_server_e2e_test.cpp
   crash/partition_crash_test.cpp)
 
 # LatencyHistogram es header-only en tools/bench; el test lo incluye directamente.

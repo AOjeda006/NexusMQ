@@ -25,6 +25,9 @@
 #include "ingress/health_monitor.hpp"
 #include "ingress/jwt.hpp"
 #include "ingress/rest_gateway.hpp"
+#ifdef NEXUS_HAVE_OPENSSL
+#include "ingress/tls.hpp"  // TlsContext: terminación TLS del plano de datos (ADR-0019)
+#endif
 #include "io/socket.hpp"
 #include "reactor/partition_router.hpp"
 #include "reactor/reactor.hpp"
@@ -80,6 +83,23 @@ public:
         /// Directorio de peers del clúster (`NodeId` -> dirección inter-nodo) para el transporte de
         /// Raft. Suele excluir a este nodo.
         PeerDirectory peers;
+        /// @brief Configuración TLS del **plano de datos** (protocolo binario; ADR-0019).
+        /// @details Si `cert_chain` y `private_key` están definidos **y** el broker se compiló con
+        ///   OpenSSL, el plano de datos exige **TLS 1.3**; si además `client_ca` está definido,
+        ///   exige **mTLS** (verifica el certificado del cliente contra esa CA). Rutas vacías —o un
+        ///   build sin OpenSSL— dejan el plano en **texto plano**.
+        struct TlsConfig {
+            std::filesystem::path cert_chain;   ///< Cadena de certificado del servidor (PEM).
+            std::filesystem::path private_key;  ///< Clave privada del servidor (PEM).
+            std::filesystem::path client_ca;  ///< CA del cert de cliente (PEM); vacío = sin mTLS.
+
+            /// @brief ¿Se ha solicitado TLS? (certificado y clave presentes).
+            [[nodiscard]] bool enabled() const noexcept {
+                return !cert_chain.empty() && !private_key.empty();
+            }
+        };
+        /// Configuración TLS del plano de datos (ADR-0019); ver `TlsConfig`.
+        TlsConfig tls;
         /// Umbral por defecto de compactación del log de Raft: entradas aplicadas por encima del
         /// snapshot que disparan `compact_to` en el portador (ADR-0024).
         static constexpr Index kDefaultCompactionThreshold = 10000;
@@ -184,6 +204,13 @@ private:
     GroupCatalog group_catalog_;
     MetricsRegistry metrics_;
     HealthMonitor health_;
+#ifdef NEXUS_HAVE_OPENSSL
+    /// Contexto TLS del plano de datos (ADR-0019), poblado en `bind()` si `config.tls.enabled()`.
+    /// THREAD-SAFE: el bucle de aceptación (núcleo 0) abre cada `TlsConnection` desde él. `nullopt`
+    /// = texto plano. Declarado **antes** que `pool_` para destruirse **después** (las corrutinas
+    /// de servicio del pool lo referencian a través de `accept_loop`).
+    std::optional<TlsContext> tls_;
+#endif
     ReactorPool pool_;
     ReactorPool::ProactorFactory proactor_factory_;
     /// Núcleo 0 (lo corre `run` inline), publicado para que `stop` lo despierte desde otro hilo /
