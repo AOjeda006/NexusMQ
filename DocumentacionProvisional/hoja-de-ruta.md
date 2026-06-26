@@ -1243,9 +1243,26 @@ Harness de benchmark vacío y CI:
     fallo de fábrica, config inválida) + **e2e** contra `Server` real (la campaña completa sin errores y
     el high-watermark avanza al total publicado). 746/746 GCC/Clang/ASan/**TSan** (+10); format + tidy
     (lib) limpios.
-- [ ] **L2** **Campaña de latencia** end-to-end con `LatencyHistogram` (p50/p99/p999/max) bajo carga
-  representativa + **publicar las cifras** (entrada a la documentación final). Es uno de los entregables
-  declarados del proyecto (motor de log con cifras de rendimiento, ahora end-to-end con red).
+- [x] **L2** **Campaña de latencia** end-to-end con `LatencyHistogram` (p50/p99/p999/max) bajo carga
+  representativa + **publicar las cifras** (`docs/benchmarks.md`). Entregable declarado del proyecto:
+  el motor de log con cifras de rendimiento, ya **end-to-end con red**.
+  - **Arnés reproducible** (`scripts/bench/latency_campaign.sh`): arranca un `nexusd` efímero, barre
+    varias tasas fijas con `nexus-loadgen` (open-loop) y publica una tabla p50/p99/p999/max +
+    throughput logrado vs objetivo (saturación del método USE); limpia broker y datos al salir.
+  - **Build Release** (`linux-gcc-release`, `-O3 -DNDEBUG`): las cifras solo son representativas con
+    optimización (los presets Debug son para desarrollo/tests). Preset nuevo en `CMakePresets.json`.
+  - **Cifras** (1 nodo, 1 partición, loopback, payload 256 B, 4 conexiones; VM de nube, no *bare
+    metal*): región sana ≤2k req/s con **p99 sub-ms** (≤373 µs) y **p50 ~200 µs**; codo de encolado
+    entre 5k–15k (p99 de pocos ms, mediana plana); **techo ~18.7k req/s** por partición; pasado el
+    techo la latencia open-loop **diverge** (lo que un cliente closed-loop habría ocultado:
+    *coordinated omission*). 0 errores en todos los niveles.
+  - **Ajuste de diseño:** `tools/loadgen` pasa a construirse **siempre** (como `tools/cli`), no solo
+    con `NEXUS_BUILD_TESTS`: es una herramienta de entrega que solo depende del núcleo (sin
+    FetchContent), así el preset Release configura sin red. Sin cambios de C++ → format/tidy intactos;
+    746/746 en GCC/Clang/ASan (la reorganización de CMake no rompe la suite).
+
+> **Bloque L cerrado.** El broker tiene generador de carga open-loop (L1) y cifras de latencia
+> publicadas y reproducibles (L2).
 
 ---
 
