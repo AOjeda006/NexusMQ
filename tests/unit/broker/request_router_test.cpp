@@ -26,6 +26,7 @@
 #include "reactor/partition_router.hpp"
 #include "reactor/reactor.hpp"
 #include "support/fake_proactor.hpp"
+#include "telemetry/metrics.hpp"
 
 namespace {
 
@@ -566,6 +567,86 @@ TEST(RequestRouter, GrupoYOffset_EnrutadosAlNucleoCoordinador) {
     ASSERT_TRUE(jdone);
     EXPECT_EQ(g1.group_count(), 1U);
     EXPECT_EQ(g0.group_count(), 0U);
+}
+
+TEST(RequestRouter, Metrics_ProduceConExito_RegistraTraficoBytesYLatencia) {
+    TempDir dir{"m_produce"};
+    nexus::TopicManager topics{dir.path()};
+    ASSERT_TRUE(topics.create_topic("t", 1).has_value());
+    nexus::MetricsRegistry metrics;
+    nexus::RequestRouter router{topics, 0, "127.0.0.1", 9092};
+    router.set_metrics(metrics);
+
+    const std::vector<std::byte> batch = encode_batch(3);
+    nexus::ProduceRequest req;
+    req.topic = "t";
+    req.partition = 0;
+    req.batch = nexus::ByteSpan{batch.data(), batch.size()};
+    const nexus::Buffer body = encode_request(req);
+    nexus::Decoder dec{body.as_span()};
+    nexus::Buffer out;
+    ASSERT_TRUE(run_dispatch(router, nexus::ApiKey::Produce, 0, dec, out).has_value());
+
+    const nexus::Labels api{{"api", "produce"}};
+    EXPECT_EQ(metrics.counter("nexus_broker_requests_total", api).value(), 1U);
+    EXPECT_EQ(metrics.counter("nexus_broker_request_errors_total", api).value(), 0U);
+    EXPECT_EQ(metrics.counter("nexus_broker_request_bytes_total", api).value(), batch.size());
+    EXPECT_EQ(metrics.histogram("nexus_broker_request_duration_seconds", api).count(), 1U);
+}
+
+TEST(RequestRouter, Metrics_ProduceTopicInexistente_RegistraError) {
+    TempDir dir{"m_produce_err"};
+    nexus::TopicManager topics{dir.path()};
+    nexus::MetricsRegistry metrics;
+    nexus::RequestRouter router{topics, 0, "127.0.0.1", 9092};
+    router.set_metrics(metrics);
+
+    const std::vector<std::byte> batch = encode_batch(1);
+    nexus::ProduceRequest req;
+    req.topic = "nope";
+    req.batch = nexus::ByteSpan{batch.data(), batch.size()};
+    const nexus::Buffer body = encode_request(req);
+    nexus::Decoder dec{body.as_span()};
+    nexus::Buffer out;
+    ASSERT_TRUE(run_dispatch(router, nexus::ApiKey::Produce, 0, dec, out).has_value());
+
+    const nexus::Labels api{{"api", "produce"}};
+    EXPECT_EQ(metrics.counter("nexus_broker_requests_total", api).value(), 1U);
+    EXPECT_EQ(metrics.counter("nexus_broker_request_errors_total", api).value(), 1U);
+}
+
+TEST(RequestRouter, Metrics_Fetch_RegistraTraficoYBytesServidos) {
+    TempDir dir{"m_fetch"};
+    nexus::TopicManager topics{dir.path()};
+    ASSERT_TRUE(topics.create_topic("t", 1).has_value());
+    nexus::MetricsRegistry metrics;
+    nexus::RequestRouter router{topics, 0, "127.0.0.1", 9092};
+    router.set_metrics(metrics);
+
+    const std::vector<std::byte> batch = encode_batch(2);
+    nexus::ProduceRequest preq;
+    preq.topic = "t";
+    preq.partition = 0;
+    preq.batch = nexus::ByteSpan{batch.data(), batch.size()};
+    const nexus::Buffer pbody = encode_request(preq);
+    nexus::Decoder pdec{pbody.as_span()};
+    nexus::Buffer pout;
+    ASSERT_TRUE(run_dispatch(router, nexus::ApiKey::Produce, 0, pdec, pout).has_value());
+
+    nexus::FetchRequest freq;
+    freq.topic = "t";
+    freq.partition = 0;
+    freq.fetch_offset = 0;
+    freq.max_bytes = 64 * 1024;
+    const nexus::Buffer fbody = encode_request(freq);
+    nexus::Decoder fdec{fbody.as_span()};
+    nexus::Buffer fout;
+    ASSERT_TRUE(run_dispatch(router, nexus::ApiKey::Fetch, 0, fdec, fout).has_value());
+
+    const nexus::Labels fetch{{"api", "fetch"}};
+    EXPECT_EQ(metrics.counter("nexus_broker_requests_total", fetch).value(), 1U);
+    EXPECT_EQ(metrics.counter("nexus_broker_request_errors_total", fetch).value(), 0U);
+    EXPECT_GT(metrics.counter("nexus_broker_request_bytes_total", fetch).value(), 0U);
 }
 
 }  // namespace

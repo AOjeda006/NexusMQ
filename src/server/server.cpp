@@ -239,6 +239,9 @@ expected<void> Server::bind() {
     listener_ = std::move(*listener);
     router_.emplace(catalog_.manager(0), config_.node_id, config_.advertised_host,
                     listener_->local_port());
+    // Cablea las métricas del plano de datos (produce/fetch) al registro que expone `/metrics`
+    // (ADR-0017). El router sirve en el núcleo 0, así que registra sin contención.
+    router_->set_metrics(metrics_);
 
     if (config_.admin_port) {
         expected<Listener> admin = Listener::bind(config_.host, *config_.admin_port);

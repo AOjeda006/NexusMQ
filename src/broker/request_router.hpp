@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -15,6 +16,7 @@
 #include "common/bytes.hpp"
 #include "common/error.hpp"
 #include "common/task.hpp"
+#include "protocol/error_code.hpp"
 #include "protocol/frame.hpp"
 #include "protocol/versioning.hpp"
 #include "reactor/partition_router.hpp"
@@ -23,6 +25,9 @@ namespace nexus {
 
 class Decoder;
 class Encoder;
+class MetricsRegistry;
+class Counter;
+class Histogram;
 
 /// @brief Traduce una petición (cuerpo ya enmarcado) en su respuesta, sobre la lógica del broker.
 ///   Afinidad: REACTOR-LOCAL.
@@ -66,6 +71,15 @@ public:
         offsets_by_core_ = std::move(offsets_by_core);
     }
 
+    /// @brief Cablea el registro de métricas del plano de datos (las cuatro señales de oro:
+    ///   tráfico/errores/latencia por tipo de petición; ADR-0017). Idempotente-no: llamar una vez,
+    ///   antes de servir.
+    /// @details Resuelve y **cachea** las series de Produce/Fetch (`counter`/`histogram` devuelven
+    ///   referencias estables) para que el *hot path* solo incremente atómicos, sin buscar series
+    ///   ni asignar memoria por petición (normativa de rendimiento/memoria). El registro vive más
+    ///   que el router. Sin cablear, `dispatch` no registra nada (tests unitarios).
+    void set_metrics(MetricsRegistry& metrics);
+
     /// @brief Despacha @p key (cuerpo en @p body) y escribe la respuesta codificada en @p out.
     /// @return Éxito (con @p out relleno) o un error si la `ApiKey` no se soporta o el cuerpo es
     ///   indecodificable de forma irrecuperable (la `Connection` cierra entonces la conexión).
@@ -101,12 +115,40 @@ private:
     /// @details Sin cablear al clúster (`partitions_ == nullptr`, tests unitarios) opera sobre el
     ///   coordinador/almacén local. El cuerpo decodificado se mueve al *frame* de la corrutina, así
     ///   que sobrevive al salto cross-core.
+    /// @brief Despacha Produce/Fetch (plano de datos): decodifica, enruta al reactor dueño de la
+    ///   partición (`partition % N`, ADR-0026) o ejecuta local (sin cablear), codifica la respuesta
+    ///   y **registra las métricas** del plano de datos (tráfico/errores/bytes/latencia).
+    /// @details Extraídos de `dispatch` para acotar su complejidad, igual que las operaciones de
+    ///   grupo. `dispatch_fetch` mantiene vivo el `FetchOutcome` (vista zero-copy) hasta el encode.
+    [[nodiscard]] task<expected<void>> dispatch_produce(Decoder& body, Encoder& enc);
+    [[nodiscard]] task<expected<void>> dispatch_fetch(Decoder& body, Encoder& enc);
+
     [[nodiscard]] task<expected<void>> dispatch_offset_commit(Decoder& body, Encoder& enc);
     [[nodiscard]] task<expected<void>> dispatch_offset_fetch(Decoder& body, Encoder& enc);
     [[nodiscard]] task<expected<void>> dispatch_join_group(Decoder& body, Encoder& enc);
     [[nodiscard]] task<expected<void>> dispatch_sync_group(Decoder& body, Encoder& enc);
     [[nodiscard]] task<expected<void>> dispatch_heartbeat(Decoder& body, Encoder& enc);
     [[nodiscard]] task<expected<void>> dispatch_leave_group(Decoder& body, Encoder& enc);
+
+    /// @brief Series cacheadas de un tipo de petición del plano de datos (las cuatro señales de
+    /// oro).
+    /// @details Punteros a series **estables** del `MetricsRegistry` (no propietarios); `nullptr`
+    ///   hasta `set_metrics`. Cachearlas evita buscar series y asignar `Labels` por petición.
+    struct DataPlaneMetrics {
+        Counter* requests = nullptr;    ///< Tráfico: peticiones servidas.
+        Counter* errors = nullptr;      ///< Errores: peticiones con `WireError != None`.
+        Counter* bytes = nullptr;       ///< Volumen: bytes de payload (batch producido / servido).
+        Histogram* duration = nullptr;  ///< Latencia de servicio (segundos).
+    };
+
+    /// @brief Resuelve y cachea las series `(name, {api})` de un tipo de petición en @p metrics.
+    [[nodiscard]] static DataPlaneMetrics resolve_metrics(MetricsRegistry& metrics,
+                                                          std::string_view api);
+
+    /// @brief Registra una petición servida en @p series: tráfico, bytes, error (si lo hubo) y
+    ///   latencia (`now() - start`). No-op si las métricas no están cableadas (`metrics_ == null`).
+    void record_request(const DataPlaneMetrics& series, WireError error, MonoTime start,
+                        std::uint64_t bytes) const;
 
     TopicManager& topics_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     NodeId node_id_;
@@ -127,6 +169,11 @@ private:
     /// Membresía de grupos (REACTOR-LOCAL); solo se usa **sin cablear** (tests): ver
     /// `GroupCoordinator`.
     GroupCoordinator groups_;
+    /// Registro de métricas (no propietario; cableado por `set_metrics`). `nullptr` = sin registrar
+    /// (tests). Solo lo toca el reactor que sirve las conexiones (núcleo 0): sin contención.
+    MetricsRegistry* metrics_ = nullptr;
+    DataPlaneMetrics produce_metrics_;  ///< Series cacheadas de Produce (válidas si `metrics_`).
+    DataPlaneMetrics fetch_metrics_;    ///< Series cacheadas de Fetch (válidas si `metrics_`).
 };
 
 }  // namespace nexus

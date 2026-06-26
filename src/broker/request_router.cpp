@@ -28,6 +28,7 @@
 #include "protocol/messages.hpp"
 #include "reactor/cross_core_call.hpp"
 #include "reactor/partition_router.hpp"
+#include "telemetry/metrics.hpp"
 
 namespace nexus {
 
@@ -227,6 +228,45 @@ MetadataResponse handle_metadata(TopicManager& topics, NodeId node_id, const std
 
 }  // namespace
 
+RequestRouter::DataPlaneMetrics RequestRouter::resolve_metrics(MetricsRegistry& metrics,
+                                                               std::string_view api) {
+    const Labels labels{{"api", std::string{api}}};
+    return DataPlaneMetrics{
+        .requests = &metrics.counter("nexus_broker_requests_total", labels),
+        .errors = &metrics.counter("nexus_broker_request_errors_total", labels),
+        .bytes = &metrics.counter("nexus_broker_request_bytes_total", labels),
+        .duration = &metrics.histogram("nexus_broker_request_duration_seconds", labels),
+    };
+}
+
+void RequestRouter::set_metrics(MetricsRegistry& metrics) {
+    metrics.describe("nexus_broker_requests_total",
+                     "Peticiones del plano de datos del broker servidas, por tipo (api).");
+    metrics.describe("nexus_broker_request_errors_total",
+                     "Peticiones del plano de datos con error de wire, por tipo (api).");
+    metrics.describe("nexus_broker_request_bytes_total",
+                     "Bytes de payload del plano de datos (producido/servido), por tipo (api).");
+    metrics.describe("nexus_broker_request_duration_seconds",
+                     "Latencia de servicio del plano de datos en segundos, por tipo (api).");
+    produce_metrics_ = resolve_metrics(metrics, "produce");
+    fetch_metrics_ = resolve_metrics(metrics, "fetch");
+    metrics_ = &metrics;
+}
+
+void RequestRouter::record_request(const DataPlaneMetrics& series, WireError error, MonoTime start,
+                                   std::uint64_t bytes) const {
+    if (metrics_ == nullptr) {
+        return;  // sin cablear (tests unitarios): no se registra nada.
+    }
+    series.requests->inc();
+    series.bytes->inc(bytes);
+    if (error != WireError::None) {
+        series.errors->inc();
+    }
+    const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - start;
+    series.duration->observe(elapsed.count());
+}
+
 std::vector<ApiVersionRange> RequestRouter::supported_versions() {
     return {
         ApiVersionRange{.key = ApiKey::ApiVersions, .min = 0, .max = 0},
@@ -286,52 +326,10 @@ task<expected<void>> RequestRouter::dispatch(ApiKey key, std::uint16_t /*api_ver
             resp.encode(enc);
             co_return expected<void>{};
         }
-        case ApiKey::Produce: {
-            const expected<ProduceRequest> req = ProduceRequest::decode(body);
-            ProduceResponse resp;
-            if (!req) {
-                resp.error_code = WireError::InvalidRequest;
-            } else if (partitions_ != nullptr) {
-                // Enruta al reactor dueño de la partición; opera sobre su `TopicManager`.
-                const int owner = partitions_->owner_core(req->partition);
-                resp = co_await partitions_->route(*self_, req->partition, [this, owner, &req] {
-                    return handle_produce(*topics_by_core_[static_cast<std::size_t>(owner)], *req);
-                });
-            } else {
-                resp = handle_produce(topics_, *req);  // sin cablear: local (tests).
-            }
-            resp.encode(enc);
-            co_return expected<void>{};
-        }
-        case ApiKey::Fetch: {
-            const expected<FetchRequest> req = FetchRequest::decode(body);
-            FetchResponse resp;
-            if (!req) {
-                resp.error_code = WireError::InvalidRequest;
-                resp.encode(enc);
-                co_return expected<void>{};
-            }
-            FetchOutcome outcome;
-            if (partitions_ != nullptr) {
-                const int owner = partitions_->owner_core(req->partition);
-                outcome = co_await partitions_->route(*self_, req->partition, [this, owner, &req] {
-                    return handle_fetch(*topics_by_core_[static_cast<std::size_t>(owner)], *req);
-                });
-            } else {
-                outcome = handle_fetch(topics_, *req);  // sin cablear: local (tests).
-            }
-            if (outcome.error != WireError::None) {
-                resp.error_code = outcome.error;
-                resp.encode(enc);
-                co_return expected<void>{};
-            }
-            // `outcome` posee los bytes; se codifican mientras sigue vivo (vista zero-copy).
-            resp.batches = outcome.result.batches.as_span();
-            resp.high_watermark = outcome.high_watermark;
-            resp.log_start_offset = outcome.log_start_offset;
-            resp.encode(enc);
-            co_return expected<void>{};
-        }
+        case ApiKey::Produce:
+            co_return co_await dispatch_produce(body, enc);
+        case ApiKey::Fetch:
+            co_return co_await dispatch_fetch(body, enc);
         case ApiKey::CreateTopic: {
             const expected<CreateTopicRequest> req = CreateTopicRequest::decode(body);
             CreateTopicResponse resp;
@@ -371,6 +369,59 @@ task<expected<void>> RequestRouter::dispatch(ApiKey key, std::uint16_t /*api_ver
             co_return co_await dispatch_leave_group(body, enc);
     }
     co_return make_error(ErrorCode::InvalidArgument, "ApiKey desconocida");
+}
+
+task<expected<void>> RequestRouter::dispatch_produce(Decoder& body, Encoder& enc) {
+    const MonoTime start = std::chrono::steady_clock::now();
+    const expected<ProduceRequest> req = ProduceRequest::decode(body);
+    ProduceResponse resp;
+    std::uint64_t bytes = 0;
+    if (!req) {
+        resp.error_code = WireError::InvalidRequest;
+    } else {
+        bytes = req->batch.size();  // volumen producido (tráfico de entrada).
+        if (partitions_ != nullptr) {
+            // Enruta al reactor dueño de la partición; opera sobre su `TopicManager`.
+            const int owner = partitions_->owner_core(req->partition);
+            resp = co_await partitions_->route(*self_, req->partition, [this, owner, &req] {
+                return handle_produce(*topics_by_core_[static_cast<std::size_t>(owner)], *req);
+            });
+        } else {
+            resp = handle_produce(topics_, *req);  // sin cablear: local (tests).
+        }
+    }
+    resp.encode(enc);
+    record_request(produce_metrics_, resp.error_code, start, bytes);
+    co_return expected<void>{};
+}
+
+task<expected<void>> RequestRouter::dispatch_fetch(Decoder& body, Encoder& enc) {
+    const MonoTime start = std::chrono::steady_clock::now();
+    const expected<FetchRequest> req = FetchRequest::decode(body);
+    FetchResponse resp;
+    FetchOutcome outcome;  // posee los bytes; debe vivir hasta el encode (vista zero-copy).
+    std::uint64_t bytes = 0;
+    if (!req) {
+        resp.error_code = WireError::InvalidRequest;
+    } else if (partitions_ != nullptr) {
+        const int owner = partitions_->owner_core(req->partition);
+        outcome = co_await partitions_->route(*self_, req->partition, [this, owner, &req] {
+            return handle_fetch(*topics_by_core_[static_cast<std::size_t>(owner)], *req);
+        });
+    } else {
+        outcome = handle_fetch(topics_, *req);  // sin cablear: local (tests).
+    }
+    if (req && outcome.error == WireError::None) {
+        resp.batches = outcome.result.batches.as_span();
+        resp.high_watermark = outcome.high_watermark;
+        resp.log_start_offset = outcome.log_start_offset;
+        bytes = resp.batches.size();  // volumen servido (tráfico de salida).
+    } else if (req) {
+        resp.error_code = outcome.error;
+    }
+    resp.encode(enc);
+    record_request(fetch_metrics_, resp.error_code, start, bytes);
+    co_return expected<void>{};
 }
 
 task<expected<void>> RequestRouter::dispatch_offset_commit(Decoder& body, Encoder& enc) {

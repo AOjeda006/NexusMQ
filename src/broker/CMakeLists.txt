@@ -21,4 +21,5 @@ target_link_libraries(nexus-broker PUBLIC
   nexus::protocol
   nexus::consensus
   nexus::reactor
+  nexus::telemetry
   nexus_options)
