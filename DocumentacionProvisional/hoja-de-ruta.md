@@ -1199,10 +1199,19 @@ Harness de benchmark vacío y CI:
     `nexus::telemetry` (capa baja sin ciclos; ajuste del desglose §4.6, anotado). Tests unitarios (líder único:
     rol/término/commit; réplica a quórum: mensajes y entradas). 735/735 GCC/Clang/ASan/TSan; format + tidy
     limpios.
-  - [ ] **D5-3** **Métricas finas de replicación** (requieren ganchos en `RaftNode`, fuera del portador):
-    **latencia de quórum** (sellar el `propose` y medir cuándo `commit_index` lo alcanza) y ***lag* de
-    seguidores** (`match_index` por peer, hoy privado del `RaftNode`). Descolgadas de D5-2 porque el portador
-    no observa esos internos sin nueva API; se abordarán al exponerlos.
+  - [x] **D5-3** ***Lag* de seguidores y backlog** en el portador (`consensus/raft_carrier.{hpp,cpp}` +
+    accesores nuevos en `RaftNode`). `RaftNode` expone `last_log_index()`, `peers()` y `match_index(peer)`
+    (solo lectura, para observabilidad). El portador publica, sin reloj, tres gauges más: `nexus_raft_log_last_index`
+    (entradas escritas), `nexus_raft_uncommitted_entries` (`last_log_index − commit_index`: backlog a la espera
+    de quórum, señal de saturación) y `nexus_raft_follower_lag{peer}` (líder: `last_log_index − match_index`;
+    0 si no es líder). El conjunto de peers es fijo → el gauge por peer se resuelve y cachea en `set_metrics`
+    (un `Labels` con `peer`), manteniendo el *hot path* sin búsquedas. Tests: invariantes en régimen estacionario
+    (líder único: log == commit, backlog 0; clúster: lag 0 por peer, backlog 0). 735/735 GCC/Clang/ASan/TSan;
+    format + tidy limpios.
+  - [ ] **D5-4** **Latencia de quórum (reloj de pared)**: sellar el `propose` con un instante y medir cuándo
+    `commit_index` lo alcanza (histograma). Necesita plomería de un *timestamp* entre el sitio de `propose`
+    (camino produce: `RequestRouter`→`ReplicatedPartition`) y la observación del commit en el portador —un
+    registro de propuestas pendientes por índice—; es un cambio entre componentes, fuera del alcance de D5-3.
 
 ### Bloque L — Benchmarks de producción (punto 2)
 - [ ] **L1** Generador de carga **open-loop** sobre la red (tasa fija, anti *coordinated omission*;
