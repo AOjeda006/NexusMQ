@@ -1221,8 +1221,28 @@ Harness de benchmark vacío y CI:
     limpios.
 
 ### Bloque L — Benchmarks de producción (punto 2)
-- [ ] **L1** Generador de carga **open-loop** sobre la red (tasa fija, anti *coordinated omission*;
-  `fundamentos/rendimiento/`): cliente de carga que produce/consume contra `nexusd` real.
+- [x] **L1** Generador de carga **open-loop** sobre la red (`tools/loadgen/`, ejecutable `nexus-loadgen`).
+  - **`OpenLoopSchedule`** (header-only, puro): instante **previsto** de cada petición a tasa fija
+    (`epoch + i/tasa`); `tasa <= 0` desactiva el ritmo (closed-loop a máximo throughput). Es el corazón
+    anti–*coordinated omission* (Gregg/Tene): la latencia se mide contra el instante previsto, no el de
+    envío, así el retraso bajo saturación entra en la cola medida.
+  - **`LoadGenerator`** (motor, lib `nexus::loadgen`): reparte `op_count` (+ calentamiento) entre
+    `connections` hilos, **uno por conexión** (shared-nothing: cada hilo su `Client`, su socket y su
+    `LatencyHistogram`); cada hilo espera hasta el instante previsto antes de disparar (open-loop) y
+    registra `recv − previsto`. Al final fusiona histogramas y calcula p50/p99/p999/max + throughput
+    real (comparar con el objetivo es la comprobación de saturación del método USE). El `RunnerFactory`
+    inyectado (DIP) abstrae el transporte: tests con runner falso, producción con `ProduceRunner`.
+  - **`ProduceRunner`**: publica un payload fijo (reservado una vez, sin asignar en el bucle caliente)
+    por el `Client` nativo; reutiliza el **`LatencyHistogram`** de `tools/bench` (DRY).
+  - **Ajuste de diseño (M6b → L1):** el generador open-loop diferido en M6b se materializa aquí, ya con
+    red (`Client`/`nexusd`). `nexus-loadgen` es **tool/bench** → exento de clang-tidy como `nexus-bench`
+    (regla del CLAUDE); aun así la **librería** (`load_generator.cpp`/`produce_runner.cpp`) pasa tidy.
+    `std::jthread` y `from_chars` de `double` no están en libc++ 18 → `std::thread`+join y `strtod`
+    (precedente del repo). Tests: `OpenLoopSchedule` (instantes/ritmo, puro determinista) + motor con
+    runner falso a tasa 0 (recuento, descarte de calentamiento, conteo de errores, reparto multi-hilo,
+    fallo de fábrica, config inválida) + **e2e** contra `Server` real (la campaña completa sin errores y
+    el high-watermark avanza al total publicado). 746/746 GCC/Clang/ASan/**TSan** (+10); format + tidy
+    (lib) limpios.
 - [ ] **L2** **Campaña de latencia** end-to-end con `LatencyHistogram` (p50/p99/p999/max) bajo carga
   representativa + **publicar las cifras** (entrada a la documentación final). Es uno de los entregables
   declarados del proyecto (motor de log con cifras de rendimiento, ahora end-to-end con red).
