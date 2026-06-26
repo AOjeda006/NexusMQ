@@ -1172,8 +1172,8 @@ Harness de benchmark vacío y CI:
       **Fix (cazado por el e2e):** se activa `TCP_NODELAY` en el plano de datos (relevo proxy y `accept_loop`)
       para evitar el interbloqueo **Nagle/delayed-ACK** que el doble salto del proxy hace patente (normativa
       de redes: minimizar el RTT). 730/730 GCC/Clang/ASan/TSan; format + tidy limpios.
-- [~] **D5** **Poblar las métricas del broker** en el hot-path (la telemetría existe, ADR-0017; faltan los
-  contadores/histogramas en produce/fetch/replicación).
+- [x] **D5** **Poblar las métricas del broker** en el hot-path (la telemetría existe, ADR-0017): cubiertos
+  produce/fetch (D5-1) y replicación —estado, tráfico, *lag*/backlog y latencia de quórum— (D5-2/3/4).
   - [x] **D5-1** **Métricas del plano de datos** (produce/fetch) en `RequestRouter` (`broker/request_router.
     {hpp,cpp}`). `set_metrics()` cablea el `MetricsRegistry` y **cachea** las series por tipo (las
     referencias del registro son estables), de modo que el *hot path* solo incrementa atómicos —sin buscar
@@ -1208,10 +1208,17 @@ Harness de benchmark vacío y CI:
     (un `Labels` con `peer`), manteniendo el *hot path* sin búsquedas. Tests: invariantes en régimen estacionario
     (líder único: log == commit, backlog 0; clúster: lag 0 por peer, backlog 0). 735/735 GCC/Clang/ASan/TSan;
     format + tidy limpios.
-  - [ ] **D5-4** **Latencia de quórum (reloj de pared)**: sellar el `propose` con un instante y medir cuándo
-    `commit_index` lo alcanza (histograma). Necesita plomería de un *timestamp* entre el sitio de `propose`
-    (camino produce: `RequestRouter`→`ReplicatedPartition`) y la observación del commit en el portador —un
-    registro de propuestas pendientes por índice—; es un cambio entre componentes, fuera del alcance de D5-3.
+  - [x] **D5-4** **Latencia de confirmación a quórum** (`consensus/raft_carrier.{hpp,cpp}` + cableado en
+    `broker/request_router.cpp`). Histograma `nexus_raft_commit_latency_seconds` por réplica: el camino de
+    produce sella el `propose` (`RaftCarrier::note_proposed`, que registra `(last_log_index, instante)` como
+    pendiente) y el portador **observa la latencia al alcanzar el `commit_index`** la entrada, en
+    `on_tick`/`on_message` (`observe_commits`). Pendientes ordenadas por índice (se drena el prefijo
+    confirmado); si la réplica deja de ser líder se descartan (no atribuibles). Cableado sin penalizar el
+    camino mono-nodo: `PartitionBase::is_replicated()` (virtual, por defecto `false`; lo sobreescribe
+    `ReplicatedPartition`) evita el registro y la búsqueda del portador salvo en réplicas Raft; `note_proposed`
+    corre en el hilo del reactor dueño (REACTOR-LOCAL, sin sincronización). Test determinista (votante único:
+    sella en T y confirma en T+50 ms → 1 observación de 0,05 s). 736/736 GCC/Clang/ASan/TSan; format + tidy
+    limpios.
 
 ### Bloque L — Benchmarks de producción (punto 2)
 - [ ] **L1** Generador de carga **open-loop** sobre la red (tasa fija, anti *coordinated omission*;
