@@ -1172,8 +1172,21 @@ Harness de benchmark vacío y CI:
       **Fix (cazado por el e2e):** se activa `TCP_NODELAY` en el plano de datos (relevo proxy y `accept_loop`)
       para evitar el interbloqueo **Nagle/delayed-ACK** que el doble salto del proxy hace patente (normativa
       de redes: minimizar el RTT). 730/730 GCC/Clang/ASan/TSan; format + tidy limpios.
-- [ ] **D5** **Poblar las métricas del broker** en el hot-path (la telemetría existe, ADR-0017; faltan los
+- [~] **D5** **Poblar las métricas del broker** en el hot-path (la telemetría existe, ADR-0017; faltan los
   contadores/histogramas en produce/fetch/replicación).
+  - [x] **D5-1** **Métricas del plano de datos** (produce/fetch) en `RequestRouter` (`broker/request_router.
+    {hpp,cpp}`). `set_metrics()` cablea el `MetricsRegistry` y **cachea** las series por tipo (las
+    referencias del registro son estables), de modo que el *hot path* solo incrementa atómicos —sin buscar
+    series ni asignar `Labels` por petición (rendimiento/memoria)—. Cada Produce/Fetch registra las **cuatro
+    señales de oro**: `nexus_broker_requests_total`, `..._request_errors_total` (WireError≠None),
+    `..._request_bytes_total` (volumen producido/servido) y `..._request_duration_seconds` (histograma de
+    latencia), etiquetadas por `api`. `dispatch` extrae `dispatch_produce`/`dispatch_fetch` (acota la
+    complejidad, como las ops de grupo). El router sirve en el núcleo 0 → registra sin contención;
+    `Server::bind()` lo cablea al registro que expone `/metrics`. `nexus-broker` pasa a enlazar
+    `nexus::telemetry`. Tests unitarios (produce con éxito/ error; fetch con bytes). 733/733
+    GCC/Clang/ASan/TSan; format + tidy limpios.
+  - [ ] **D5-2** **Métricas de replicación** (Raft): `commit_index`/`high_watermark` (gauge), entradas
+    replicadas/append, latencia de quórum y *lag* de seguidores en el portador (`RaftCarrier`).
 
 ### Bloque L — Benchmarks de producción (punto 2)
 - [ ] **L1** Generador de carga **open-loop** sobre la red (tasa fija, anti *coordinated omission*;
