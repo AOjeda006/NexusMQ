@@ -49,6 +49,11 @@ public:
     /// @brief Época de liderazgo vigente (metadata / cierre de productores).
     [[nodiscard]] virtual Epoch leader_epoch() const noexcept = 0;
 
+    /// @brief ¿Está respaldada por Raft (`ReplicatedPartition`)? Por defecto no (`Partition`).
+    /// @details Lo usa el camino de produce para decidir si registrar la latencia de confirmación a
+    ///   quórum (solo aplica a réplicas); evita el coste de ese registro en particiones mono-nodo.
+    [[nodiscard]] virtual bool is_replicated() const noexcept { return false; }
+
     /// @brief Acceso de solo lectura al log subyacente (offsets de inicio/fin, lecturas).
     [[nodiscard]] virtual const PartitionLog& log() const noexcept = 0;
 

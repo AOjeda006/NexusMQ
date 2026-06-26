@@ -382,6 +382,34 @@ TEST(RaftCarrier, Metrics_LiderUnico_PublicaRolTerminoYCommit) {
     EXPECT_EQ(reg.gauge("nexus_raft_uncommitted_entries", kReplicaLabels).value(), 0);
 }
 
+TEST(RaftCarrier, Metrics_LatenciaDeCommit_SeObservaAlConfirmar) {
+    TempDir dir{"metrics_lat"};
+    auto plog = nexus::PartitionLog::open(dir.path(), nexus::LogConfig{});
+    ASSERT_TRUE(plog.has_value());
+    nexus::RaftConfig cfg;
+    cfg.random_seed = 7;
+    auto part = nexus::ReplicatedPartition::create(1, {}, std::move(*plog), cfg);
+    ASSERT_TRUE(part.has_value());
+
+    DiscardSink sink;
+    nexus::RaftCarrier carrier{"orders", 0, part->raft(), sink};
+    nexus::MetricsRegistry reg;
+    carrier.set_metrics(reg);
+
+    nexus::MonoTime now = drive_to_leader(carrier, *part);
+    ASSERT_TRUE(part->is_leader());
+    ASSERT_TRUE(
+        part->produce(make_batch(1)).has_value());  // índice 1 (votante único: confirma ya).
+    carrier.note_proposed(now);                     // sella el propose en `now`.
+    now += 50ms;
+    carrier.on_tick(now);  // al ver commit >= 1, observa la latencia (50 ms).
+
+    const nexus::Histogram& hist =
+        reg.histogram("nexus_raft_commit_latency_seconds", kReplicaLabels);
+    EXPECT_EQ(hist.count(), 1U);
+    EXPECT_NEAR(hist.sum(), 0.05, 1e-6);
+}
+
 TEST(RaftCarrier, Metrics_ReplicacionAQuorum_CuentaMensajesYEntradas) {
     CarrierCluster cluster({1, 2, 3}, 7);
     nexus::MetricsRegistry r1;

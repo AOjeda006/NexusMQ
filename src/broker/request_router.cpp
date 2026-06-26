@@ -82,6 +82,14 @@ ProduceResponse handle_produce(TopicManager& topics, const ProduceRequest& req) 
         resp.error_code = from_error(last.error());
         return resp;
     }
+    // Réplica Raft: sella el instante del propose para medir la latencia de confirmación a quórum
+    // (ADR-0017). El portador la observa al alcanzar el commit; corre en el hilo del reactor dueño.
+    if (part->is_replicated()) {
+        if (RaftCarrier* carrier = topics.carrier_for(req.topic, req.partition);
+            carrier != nullptr) {
+            carrier->note_proposed(std::chrono::steady_clock::now());
+        }
+    }
     resp.base_offset = *last - batch->header().record_count + 1;
     return resp;
 }

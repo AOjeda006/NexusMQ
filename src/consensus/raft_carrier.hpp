@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -20,6 +21,7 @@ class RaftLog;
 class MetricsRegistry;
 class Counter;
 class Gauge;
+class Histogram;
 
 /// @brief Política de compactación del log de Raft del portador (ADR-0024/0025). Afinidad:
 ///   INMUTABLE.
@@ -99,6 +101,17 @@ public:
     /// portador.
     void set_metrics(MetricsRegistry& metrics);
 
+    /// @brief Sella el instante en que se **propuso** una entrada (camino produce del líder) para
+    ///   medir la **latencia de confirmación a quórum** (ADR-0017): el histograma se observa cuando
+    ///   el `commit_index` alcanza la entrada (en `on_tick`/`on_message`).
+    /// @details Registra `(last_log_index, proposed_at)` como propuesta pendiente; el portador la
+    ///   observa al confirmarse. No-op si las métricas no están cableadas o el nodo no es líder
+    ///   (una propuesta solo la acepta el líder). Lo llama el camino de produce justo tras un
+    ///   `propose` con éxito, **en el hilo del reactor dueño** (igual que `on_tick`/`on_message`):
+    ///   el registro de pendientes es REACTOR-LOCAL, sin sincronización.
+    /// @param proposed_at Instante del `propose` (reloj monótono).
+    void note_proposed(MonoTime proposed_at);
+
     /// @brief Siembra el estado persistente leído de disco al arrancar (D1).
     /// @details Carga el `RaftStateStore` y lo restaura en el `RaftNode` antes de cualquier `tick`.
     ///   No-op (éxito) si no hay almacén. Llamar **una vez**, tras construir.
@@ -134,6 +147,10 @@ private:
     ///   (high-watermark), término actual y rol (1 = líder, 0 = seguidor/candidato). No-op si las
     ///   métricas no están cableadas. Se llama tras avanzar la FSM (`on_tick`/`on_message`).
     void publish_state();
+    /// @brief Observa la latencia de confirmación de las propuestas pendientes ya alcanzadas por el
+    ///   `commit_index` (en @p now) y las retira. Si el nodo dejó de ser líder, descarta las
+    ///   pendientes (no se le pueden atribuir). No-op si las métricas no están cableadas.
+    void observe_commits(MonoTime now);
 
     /// @brief Series cacheadas del plano de replicación de esta réplica (ADR-0017).
     /// @details Punteros a series **estables** del `MetricsRegistry` (no propietarios); `nullptr`
@@ -147,6 +164,7 @@ private:
         Counter* messages_sent = nullptr;       ///< Tráfico saliente: `RaftMessage` transportados.
         Counter* messages_received = nullptr;   ///< Tráfico entrante: RPC entregados a la FSM.
         Counter* entries_replicated = nullptr;  ///< Entradas enviadas en `AppendEntries` (líder).
+        Histogram* commit_latency = nullptr;    ///< Latencia propose→commit a quórum (segundos).
     };
 
     /// @brief Gauge de *lag* de un seguidor (`last_log_index − match_index`), cacheado por peer.
@@ -166,6 +184,9 @@ private:
     CompactionPolicy compaction_;  ///< Política de compactación automática del log de Raft.
     ReplicationMetrics metrics_;  ///< Series cacheadas (válidas tras `set_metrics`; null = sin él).
     std::vector<FollowerLagGauge> follower_lag_;  ///< Gauge de *lag* por peer (cacheado por peer).
+    /// Propuestas pendientes de confirmar (índice → instante del `propose`), ordenadas por índice
+    /// para drenar el prefijo confirmado. Solo la toca el hilo del reactor dueño (REACTOR-LOCAL).
+    std::map<Index, MonoTime> pending_commits_;
 };
 
 }  // namespace nexus

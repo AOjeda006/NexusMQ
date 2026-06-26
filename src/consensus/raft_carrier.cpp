@@ -4,6 +4,7 @@
 
 #include "consensus/raft_carrier.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -44,6 +45,8 @@ void RaftCarrier::set_metrics(MetricsRegistry& metrics) {
                      "RPC de Raft entregados a la FSM de la réplica.");
     metrics.describe("nexus_raft_entries_replicated_total",
                      "Entradas enviadas en AppendEntries por el líder.");
+    metrics.describe("nexus_raft_commit_latency_seconds",
+                     "Latencia de confirmación a quórum de una entrada (propose -> commit).");
 
     const Labels labels{{"topic", topic_}, {"partition", std::to_string(partition_)}};
     metrics_.commit_index = &metrics.gauge("nexus_raft_commit_index", labels);
@@ -54,6 +57,7 @@ void RaftCarrier::set_metrics(MetricsRegistry& metrics) {
     metrics_.messages_sent = &metrics.counter("nexus_raft_messages_sent_total", labels);
     metrics_.messages_received = &metrics.counter("nexus_raft_messages_received_total", labels);
     metrics_.entries_replicated = &metrics.counter("nexus_raft_entries_replicated_total", labels);
+    metrics_.commit_latency = &metrics.histogram("nexus_raft_commit_latency_seconds", labels);
 
     // Un gauge de *lag* por peer (conjunto fijo): se etiqueta además con el peer.
     follower_lag_.clear();
@@ -80,11 +84,19 @@ expected<void> RaftCarrier::recover() {
     return {};
 }
 
+void RaftCarrier::note_proposed(MonoTime proposed_at) {
+    if (metrics_.commit_latency == nullptr || !node_.is_leader()) {
+        return;
+    }
+    pending_commits_[node_.last_log_index()] = proposed_at;
+}
+
 void RaftCarrier::on_tick(MonoTime now) {
     node_.tick(now);
     flush_outbox();
     maybe_compact();
     publish_state();
+    observe_commits(now);
 }
 
 void RaftCarrier::on_message(MonoTime now, const RaftMessage& message) {
@@ -113,6 +125,7 @@ void RaftCarrier::on_message(MonoTime now, const RaftMessage& message) {
     flush_outbox();
     maybe_compact();
     publish_state();
+    observe_commits(now);
 }
 
 void RaftCarrier::flush_outbox() {
@@ -170,6 +183,22 @@ void RaftCarrier::publish_state() {
     for (const FollowerLagGauge& follower : follower_lag_) {
         const Index matched = leader ? node_.match_index(follower.peer) : last;
         follower.lag->set(static_cast<std::int64_t>(last >= matched ? last - matched : 0));
+    }
+}
+
+void RaftCarrier::observe_commits(MonoTime now) {
+    if (metrics_.commit_latency == nullptr) {
+        return;
+    }
+    if (!node_.is_leader()) {
+        pending_commits_.clear();  // ya no lidera: esas propuestas no se le pueden atribuir.
+        return;
+    }
+    const Index commit = node_.commit_index();
+    while (!pending_commits_.empty() && pending_commits_.begin()->first <= commit) {
+        const std::chrono::duration<double> elapsed = now - pending_commits_.begin()->second;
+        metrics_.commit_latency->observe(elapsed.count());
+        pending_commits_.erase(pending_commits_.begin());
     }
 }
 

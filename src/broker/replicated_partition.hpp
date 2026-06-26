@@ -65,6 +65,7 @@ public:
     [[nodiscard]] Offset high_watermark() const override;
 
     [[nodiscard]] Index commit_index() const noexcept { return raft_->commit_index(); }
+    [[nodiscard]] bool is_replicated() const noexcept override { return true; }
     [[nodiscard]] bool is_leader() const noexcept override { return raft_->is_leader(); }
     [[nodiscard]] Epoch leader_epoch() const noexcept override { return raft_->leader_epoch(); }
 
