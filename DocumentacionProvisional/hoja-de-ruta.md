@@ -1185,8 +1185,24 @@ Harness de benchmark vacío y CI:
     `Server::bind()` lo cablea al registro que expone `/metrics`. `nexus-broker` pasa a enlazar
     `nexus::telemetry`. Tests unitarios (produce con éxito/ error; fetch con bytes). 733/733
     GCC/Clang/ASan/TSan; format + tidy limpios.
-  - [ ] **D5-2** **Métricas de replicación** (Raft): `commit_index`/`high_watermark` (gauge), entradas
-    replicadas/append, latencia de quórum y *lag* de seguidores en el portador (`RaftCarrier`).
+  - [x] **D5-2** **Métricas de replicación** (Raft) en el portador (`consensus/raft_carrier.{hpp,cpp}`).
+    `set_metrics()` resuelve y **cachea** las series de la réplica (etiquetadas por `(topic, partition)`),
+    de modo que el *hot path* (`on_tick`/`on_message`/`emit`, REACTOR-LOCAL) solo hace `store`/`fetch_add`
+    atómicos. Gauges de **estado**: `nexus_raft_commit_index` (high-watermark = entradas del log aplicadas),
+    `nexus_raft_term`, `nexus_raft_leader` (1=líder). Contadores de **tráfico**:
+    `nexus_raft_messages_sent_total`/`..._received_total` y `nexus_raft_entries_replicated_total` (entradas
+    enviadas en `AppendEntries` por el líder). `publish_state()` refresca los gauges tras avanzar la FSM.
+    Cada réplica vive en su reactor dueño; el `MetricsRegistry` es THREAD-SAFE y las particiones no colisionan
+    de etiqueta (cada `(topic, partition)` la sirve un solo núcleo). Cableado vivo: `TopicManager::set_metrics`
+    guarda el registro y cablea los portadores —los creados en runtime se autocablean en su hilo dueño—;
+    `Server::bind()` lo invoca por núcleo (pre-run, monohilo). `nexus-consensus` pasa a enlazar
+    `nexus::telemetry` (capa baja sin ciclos; ajuste del desglose §4.6, anotado). Tests unitarios (líder único:
+    rol/término/commit; réplica a quórum: mensajes y entradas). 735/735 GCC/Clang/ASan/TSan; format + tidy
+    limpios.
+  - [ ] **D5-3** **Métricas finas de replicación** (requieren ganchos en `RaftNode`, fuera del portador):
+    **latencia de quórum** (sellar el `propose` y medir cuándo `commit_index` lo alcanza) y ***lag* de
+    seguidores** (`match_index` por peer, hoy privado del `RaftNode`). Descolgadas de D5-2 porque el portador
+    no observa esos internos sin nueva API; se abordarán al exponerlos.
 
 ### Bloque L — Benchmarks de producción (punto 2)
 - [ ] **L1** Generador de carga **open-loop** sobre la red (tasa fija, anti *coordinated omission*;
