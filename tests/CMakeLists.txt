@@ -31,6 +31,8 @@ add_executable(nexus-tests
   unit/storage/partition_log_test.cpp
   unit/storage/log_compactor_test.cpp
   unit/bench/latency_histogram_test.cpp
+  unit/loadgen/load_schedule_test.cpp
+  unit/loadgen/load_generator_test.cpp
   unit/protocol/codec_test.cpp
   unit/protocol/error_code_test.cpp
   unit/protocol/frame_test.cpp
@@ -106,6 +108,7 @@ add_executable(nexus-tests
   unit/kafka/gateway_test.cpp
   unit/ffi/ffi_test.cpp
   e2e/client_e2e_test.cpp
+  e2e/loadgen_e2e_test.cpp
   e2e/admin_http_e2e_test.cpp
   e2e/cli_admin_e2e_test.cpp
   e2e/cluster_e2e_test.cpp
@@ -118,6 +121,7 @@ add_executable(nexus-tests
 # tests/ se añade al include-path para los dobles de test compartidos (support/).
 target_include_directories(nexus-tests PRIVATE
   ${PROJECT_SOURCE_DIR}/tools/bench
+  ${PROJECT_SOURCE_DIR}/tools/loadgen
   ${PROJECT_SOURCE_DIR}/tests)
 
 # nexus::common aporta C++20, los avisos-como-errores (vía nexus_options, PUBLIC)
@@ -136,6 +140,7 @@ target_link_libraries(nexus-tests PRIVATE
   nexus::ingress
   nexus::telemetry
   nexus::client
+  nexus::loadgen
   nexus::kafka
   nexus::ffi
   nexus::server

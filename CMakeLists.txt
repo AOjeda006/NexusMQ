@@ -76,7 +76,7 @@ option(NEXUS_BUILD_TESTS "Compila la suite de tests y los benchmarks (GoogleTest
 # tests y benchmarks solo con NEXUS_BUILD_TESTS.
 set(_nexus_subdirs src tools/cli tools/wincheck)
 if(NEXUS_BUILD_TESTS)
-  list(APPEND _nexus_subdirs tools/bench tests)
+  list(APPEND _nexus_subdirs tools/bench tools/loadgen tests)
 endif()
 foreach(_dir IN LISTS _nexus_subdirs)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_dir}/CMakeLists.txt")
