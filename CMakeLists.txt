@@ -72,11 +72,12 @@ option(NEXUS_BUILD_TESTS "Compila la suite de tests y los benchmarks (GoogleTest
 
 # Los subdirectorios se incorporan a medida que existen: el árbol crece por hito
 # (M1 cimientos → M2 common/storage → … ). Mientras una carpeta no tenga su
-# CMakeLists, se omite sin romper la configuración. La biblioteca (src) y el CLI van siempre;
-# tests y benchmarks solo con NEXUS_BUILD_TESTS.
-set(_nexus_subdirs src tools/cli tools/wincheck)
+# CMakeLists, se omite sin romper la configuración. La biblioteca (src), el CLI y el generador de
+# carga (nexus-loadgen) van siempre: son herramientas de entrega que solo dependen del núcleo (sin
+# FetchContent). Tests y benchmarks (GoogleTest/Benchmark) solo con NEXUS_BUILD_TESTS.
+set(_nexus_subdirs src tools/cli tools/wincheck tools/loadgen)
 if(NEXUS_BUILD_TESTS)
-  list(APPEND _nexus_subdirs tools/bench tools/loadgen tests)
+  list(APPEND _nexus_subdirs tools/bench tests)
 endif()
 foreach(_dir IN LISTS _nexus_subdirs)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_dir}/CMakeLists.txt")

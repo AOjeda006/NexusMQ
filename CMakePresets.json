@@ -31,6 +31,15 @@
       }
     },
     {
+      "name": "linux-gcc-release",
+      "inherits": "linux-gcc",
+      "displayName": "Linux GCC (C++23, Release — para benchmarks)",
+      "cacheVariables": {
+        "_comment_release": "Build optimizada (-O3, NDEBUG) para las campañas de latencia (Bloque L). Las cifras de rendimiento solo son representativas con optimización; los presets Debug son para desarrollo y tests.",
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
       "name": "linux-gcc-asan",
       "inherits": "linux-gcc",
       "displayName": "Linux GCC + sanitizers (ASan/UBSan)",
@@ -61,6 +70,7 @@
   ],
   "buildPresets": [
     { "name": "linux-gcc", "configurePreset": "linux-gcc" },
+    { "name": "linux-gcc-release", "configurePreset": "linux-gcc-release" },
     { "name": "linux-clang", "configurePreset": "linux-clang" },
     { "name": "linux-gcc-asan", "configurePreset": "linux-gcc-asan" },
     { "name": "linux-gcc-tsan", "configurePreset": "linux-gcc-tsan" }
