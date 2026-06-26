@@ -377,6 +377,9 @@ TEST(RaftCarrier, Metrics_LiderUnico_PublicaRolTerminoYCommit) {
     EXPECT_GE(reg.gauge("nexus_raft_term", kReplicaLabels).value(),
               1);  // ganó al menos un término.
     EXPECT_EQ(reg.gauge("nexus_raft_commit_index", kReplicaLabels).value(), 3);  // high-watermark.
+    // Votante único: confirma de inmediato, así que el log va a la par del commit y sin backlog.
+    EXPECT_EQ(reg.gauge("nexus_raft_log_last_index", kReplicaLabels).value(), 3);
+    EXPECT_EQ(reg.gauge("nexus_raft_uncommitted_entries", kReplicaLabels).value(), 0);
 }
 
 TEST(RaftCarrier, Metrics_ReplicacionAQuorum_CuentaMensajesYEntradas) {
@@ -409,6 +412,21 @@ TEST(RaftCarrier, Metrics_ReplicacionAQuorum_CuentaMensajesYEntradas) {
     EXPECT_GT(follower_reg.counter("nexus_raft_messages_received_total", kReplicaLabels).value(),
               0U);
     EXPECT_GT(follower_reg.counter("nexus_raft_messages_sent_total", kReplicaLabels).value(), 0U);
+
+    // En régimen estacionario (todo replicado a quórum): el log del líder iguala su commit_index,
+    // no queda backlog y cada seguidor está al día (lag 0).
+    EXPECT_EQ(leader_reg.gauge("nexus_raft_log_last_index", kReplicaLabels).value(),
+              leader_reg.gauge("nexus_raft_commit_index", kReplicaLabels).value());
+    EXPECT_EQ(leader_reg.gauge("nexus_raft_uncommitted_entries", kReplicaLabels).value(), 0);
+    for (const nexus::NodeId peer : {nexus::NodeId{1}, nexus::NodeId{2}, nexus::NodeId{3}}) {
+        if (peer == leader) {
+            continue;
+        }
+        const nexus::Labels peer_labels{
+            {"topic", "orders"}, {"partition", "0"}, {"peer", std::to_string(peer)}};
+        EXPECT_EQ(leader_reg.gauge("nexus_raft_follower_lag", peer_labels).value(), 0)
+            << "peer " << peer;
+    }
 }
 
 }  // namespace

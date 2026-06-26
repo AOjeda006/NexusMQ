@@ -109,6 +109,14 @@ public:
     [[nodiscard]] bool is_leader() const noexcept { return role_ == RaftRole::Leader; }
     [[nodiscard]] Term current_term() const noexcept { return persistent_.current_term(); }
     [[nodiscard]] Index commit_index() const noexcept { return volatile_.commit_index(); }
+    /// Último índice del log local (= nº de entradas sobre el snapshot). Para observabilidad.
+    [[nodiscard]] Index last_log_index() const noexcept { return log_.last_index(); }
+    /// Los demás miembros del grupo Raft (para publicar el progreso de replicación por peer).
+    [[nodiscard]] const std::vector<NodeId>& peers() const noexcept { return peers_; }
+    /// @brief Mayor índice que @p peer ha confirmado replicado (solo significativo siendo líder).
+    /// @return `match_index` del peer, o 0 si no consta (seguidores no lo siguen). Para
+    /// observabilidad.
+    [[nodiscard]] Index match_index(NodeId peer) const { return volatile_.match_index(peer); }
     [[nodiscard]] Epoch leader_epoch() const noexcept { return leader_epoch_; }
     [[nodiscard]] std::optional<NodeId> leader_hint() const noexcept { return leader_id_; }
     [[nodiscard]] NodeId id() const noexcept { return self_; }

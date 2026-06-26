@@ -33,6 +33,11 @@ void RaftCarrier::set_metrics(MetricsRegistry& metrics) {
                      "High-watermark de la réplica de Raft (entradas aplicadas).");
     metrics.describe("nexus_raft_term", "Término actual de la réplica de Raft.");
     metrics.describe("nexus_raft_leader", "Rol de la réplica: 1 si es líder, 0 en otro caso.");
+    metrics.describe("nexus_raft_log_last_index", "Último índice del log local de la réplica.");
+    metrics.describe("nexus_raft_uncommitted_entries",
+                     "Entradas escritas aún no confirmadas a quórum (last_log_index - commit).");
+    metrics.describe("nexus_raft_follower_lag",
+                     "Retraso de un seguidor: last_log_index - match_index (visto por el líder).");
     metrics.describe("nexus_raft_messages_sent_total",
                      "Mensajes de Raft transportados por la réplica.");
     metrics.describe("nexus_raft_messages_received_total",
@@ -44,9 +49,22 @@ void RaftCarrier::set_metrics(MetricsRegistry& metrics) {
     metrics_.commit_index = &metrics.gauge("nexus_raft_commit_index", labels);
     metrics_.term = &metrics.gauge("nexus_raft_term", labels);
     metrics_.leader = &metrics.gauge("nexus_raft_leader", labels);
+    metrics_.log_last_index = &metrics.gauge("nexus_raft_log_last_index", labels);
+    metrics_.uncommitted_entries = &metrics.gauge("nexus_raft_uncommitted_entries", labels);
     metrics_.messages_sent = &metrics.counter("nexus_raft_messages_sent_total", labels);
     metrics_.messages_received = &metrics.counter("nexus_raft_messages_received_total", labels);
     metrics_.entries_replicated = &metrics.counter("nexus_raft_entries_replicated_total", labels);
+
+    // Un gauge de *lag* por peer (conjunto fijo): se etiqueta además con el peer.
+    follower_lag_.clear();
+    follower_lag_.reserve(node_.peers().size());
+    for (const NodeId peer : node_.peers()) {
+        Labels peer_labels = labels;
+        peer_labels.emplace_back("peer", std::to_string(peer));
+        follower_lag_.push_back(
+            {.peer = peer,
+             .lag = &metrics.gauge("nexus_raft_follower_lag", std::move(peer_labels))});
+    }
     publish_state();
 }
 
@@ -138,9 +156,21 @@ void RaftCarrier::publish_state() {
     if (metrics_.commit_index == nullptr) {
         return;
     }
-    metrics_.commit_index->set(static_cast<std::int64_t>(node_.commit_index()));
+    const Index commit = node_.commit_index();
+    const Index last = node_.last_log_index();
+    metrics_.commit_index->set(static_cast<std::int64_t>(commit));
     metrics_.term->set(static_cast<std::int64_t>(node_.current_term()));
     metrics_.leader->set(node_.is_leader() ? 1 : 0);
+    metrics_.log_last_index->set(static_cast<std::int64_t>(last));
+    metrics_.uncommitted_entries->set(
+        static_cast<std::int64_t>(last >= commit ? last - commit : 0));
+
+    // Solo el líder sigue el progreso de los seguidores (`match_index`); un seguidor no lo conoce.
+    const bool leader = node_.is_leader();
+    for (const FollowerLagGauge& follower : follower_lag_) {
+        const Index matched = leader ? node_.match_index(follower.peer) : last;
+        follower.lag->set(static_cast<std::int64_t>(last >= matched ? last - matched : 0));
+    }
 }
 
 }  // namespace nexus

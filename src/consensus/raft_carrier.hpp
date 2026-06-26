@@ -5,6 +5,8 @@
 #pragma once
 
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "common/types.hpp"
 #include "consensus/raft_rpc.hpp"
@@ -137,12 +139,22 @@ private:
     /// @details Punteros a series **estables** del `MetricsRegistry` (no propietarios); `nullptr`
     ///   hasta `set_metrics`. Cachearlas evita buscar series y asignar `Labels` en el *hot path*.
     struct ReplicationMetrics {
-        Gauge* commit_index = nullptr;     ///< High-watermark de la réplica (entradas aplicadas).
-        Gauge* term = nullptr;             ///< Término actual (sube en cada elección).
-        Gauge* leader = nullptr;           ///< Rol: 1 si es líder, 0 en otro caso.
-        Counter* messages_sent = nullptr;  ///< Tráfico saliente: `RaftMessage` transportados.
+        Gauge* commit_index = nullptr;    ///< High-watermark de la réplica (entradas aplicadas).
+        Gauge* term = nullptr;            ///< Término actual (sube en cada elección).
+        Gauge* leader = nullptr;          ///< Rol: 1 si es líder, 0 en otro caso.
+        Gauge* log_last_index = nullptr;  ///< Último índice del log local (entradas escritas).
+        Gauge* uncommitted_entries = nullptr;   ///< Backlog: `last_log_index − commit_index`.
+        Counter* messages_sent = nullptr;       ///< Tráfico saliente: `RaftMessage` transportados.
         Counter* messages_received = nullptr;   ///< Tráfico entrante: RPC entregados a la FSM.
         Counter* entries_replicated = nullptr;  ///< Entradas enviadas en `AppendEntries` (líder).
+    };
+
+    /// @brief Gauge de *lag* de un seguidor (`last_log_index − match_index`), cacheado por peer.
+    /// @details El conjunto de peers es fijo (se resuelve en `set_metrics`); el portador (líder)
+    ///   publica el retraso de cada uno. Vacío si no hay métricas o el grupo no tiene peers.
+    struct FollowerLagGauge {
+        NodeId peer = 0;
+        Gauge* lag = nullptr;
     };
 
     std::string topic_;
@@ -153,6 +165,7 @@ private:
     RaftLog* log_;           ///< Log de Raft para la compactación (no propietario; opcional).
     CompactionPolicy compaction_;  ///< Política de compactación automática del log de Raft.
     ReplicationMetrics metrics_;  ///< Series cacheadas (válidas tras `set_metrics`; null = sin él).
+    std::vector<FollowerLagGauge> follower_lag_;  ///< Gauge de *lag* por peer (cacheado por peer).
 };
 
 }  // namespace nexus
