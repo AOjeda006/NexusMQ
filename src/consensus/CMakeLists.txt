@@ -12,4 +12,4 @@ add_library(nexus::consensus ALIAS nexus-consensus)
 
 target_include_directories(nexus-consensus PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(nexus-consensus
-  PUBLIC nexus::common nexus::io nexus::storage nexus::protocol nexus_options)
+  PUBLIC nexus::common nexus::io nexus::storage nexus::protocol nexus::telemetry nexus_options)

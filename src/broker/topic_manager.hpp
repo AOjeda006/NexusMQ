@@ -26,6 +26,7 @@ namespace nexus {
 
 class RaftCarrier;
 class RaftMessageSink;
+class MetricsRegistry;
 
 /// @brief Estado por réplica de una partición replicada (Raft): su portador, almacén durable y
 ///   sumidero. Definido en el `.cpp` (la cabecera solo lo declara). Afinidad: REACTOR-LOCAL.
@@ -124,6 +125,15 @@ public:
     ///   transporte. Solo desde el hilo del reactor (el sumidero diferido es reactor-local).
     void set_message_sink(RaftMessageSink* sink) noexcept { raft_sink_.set_target(sink); }
 
+    /// @brief Cablea el registro de métricas (ADR-0017) a los portadores de este núcleo: las series
+    ///   de replicación de cada réplica (`commit_index`/término/rol y tráfico de Raft). Guarda el
+    ///   registro y lo aplica a los portadores ya creados; los que se creen después se autocablean.
+    /// @details Lo llama el *composition root* al arrancar. Las réplicas de un núcleo solo se
+    ///   construyen/tocan en su propio hilo, así que llamar a esto pre-run (monohilo) o desde el
+    ///   hilo del reactor dueño es seguro; el `MetricsRegistry` es THREAD-SAFE.
+    /// @param[in,out] metrics Registro de métricas; vive más que este `TopicManager`.
+    void set_metrics(MetricsRegistry& metrics);
+
 private:
     std::filesystem::path data_dir_;
     int num_cores_;           ///< Núcleos del nodo (>= 1).
@@ -138,6 +148,9 @@ private:
     /// instalado al arrancar). Declarado **antes** que `replicas_` para que se destruya **después**
     /// (los portadores lo referencian).
     DeferredMessageSink raft_sink_;
+    /// Registro de métricas (no propietario; cableado por `set_metrics`). `nullptr` = sin métricas;
+    /// si no lo es, cada portador nuevo se cablea al crearse. Solo lo toca el hilo de este núcleo.
+    MetricsRegistry* metrics_ = nullptr;
     /// Portadores/almacén de las particiones replicadas. Declarado **tras** `topics_` y
     /// `raft_sink_` para destruirse **antes** (un portador referencia el `RaftNode` de su partición
     /// en `topics_` y el `raft_sink_`).

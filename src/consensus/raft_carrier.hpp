@@ -15,6 +15,9 @@ namespace nexus {
 class RaftNode;
 class RaftStateStore;
 class RaftLog;
+class MetricsRegistry;
+class Counter;
+class Gauge;
 
 /// @brief Política de compactación del log de Raft del portador (ADR-0024/0025). Afinidad:
 ///   INMUTABLE.
@@ -80,6 +83,20 @@ public:
     RaftCarrier& operator=(RaftCarrier&&) = delete;
     ~RaftCarrier() = default;
 
+    /// @brief Cablea el registro de métricas del plano de replicación (ADR-0017): estado de la
+    ///   réplica (`commit_index`/término/rol) y tráfico de Raft (mensajes enviados/recibidos y
+    ///   entradas replicadas), etiquetado por `(topic, partition)`. Llamar una vez, antes de
+    ///   servir.
+    /// @details Resuelve y **cachea** los gauges/contadores de esta réplica (las series del
+    /// registro
+    ///   son estables) para que el *hot path* (`on_tick`/`on_message`/`emit`, REACTOR-LOCAL) solo
+    ///   haga `store`/`fetch_add` atómicos, sin buscar series ni asignar memoria (normativa de
+    ///   rendimiento/memoria). Cada réplica vive en su reactor dueño; el registro es THREAD-SAFE.
+    ///   Sin cablear, el portador no registra nada (tests). Publica el estado inicial al cablear.
+    /// @param[in,out] metrics Registro donde se crean/recuperan las series; vive más que el
+    /// portador.
+    void set_metrics(MetricsRegistry& metrics);
+
     /// @brief Siembra el estado persistente leído de disco al arrancar (D1).
     /// @details Carga el `RaftStateStore` y lo restaura en el `RaftNode` antes de cualquier `tick`.
     ///   No-op (éxito) si no hay almacén. Llamar **una vez**, tras construir.
@@ -111,6 +128,22 @@ private:
     ///   rompe el consenso). Compacta exactamente en `commit_index` (precondición de `compact_to`:
     ///   solo lo replicado en mayoría y aplicado).
     void maybe_compact();
+    /// @brief Publica el estado observable de la réplica en sus gauges: `commit_index`
+    ///   (high-watermark), término actual y rol (1 = líder, 0 = seguidor/candidato). No-op si las
+    ///   métricas no están cableadas. Se llama tras avanzar la FSM (`on_tick`/`on_message`).
+    void publish_state();
+
+    /// @brief Series cacheadas del plano de replicación de esta réplica (ADR-0017).
+    /// @details Punteros a series **estables** del `MetricsRegistry` (no propietarios); `nullptr`
+    ///   hasta `set_metrics`. Cachearlas evita buscar series y asignar `Labels` en el *hot path*.
+    struct ReplicationMetrics {
+        Gauge* commit_index = nullptr;     ///< High-watermark de la réplica (entradas aplicadas).
+        Gauge* term = nullptr;             ///< Término actual (sube en cada elección).
+        Gauge* leader = nullptr;           ///< Rol: 1 si es líder, 0 en otro caso.
+        Counter* messages_sent = nullptr;  ///< Tráfico saliente: `RaftMessage` transportados.
+        Counter* messages_received = nullptr;   ///< Tráfico entrante: RPC entregados a la FSM.
+        Counter* entries_replicated = nullptr;  ///< Entradas enviadas en `AppendEntries` (líder).
+    };
 
     std::string topic_;
     PartitionId partition_;
@@ -119,6 +152,7 @@ private:
     RaftStateStore* store_;  ///< Almacén durable del estado persistente (no propietario; opcional).
     RaftLog* log_;           ///< Log de Raft para la compactación (no propietario; opcional).
     CompactionPolicy compaction_;  ///< Política de compactación automática del log de Raft.
+    ReplicationMetrics metrics_;  ///< Series cacheadas (válidas tras `set_metrics`; null = sin él).
 };
 
 }  // namespace nexus

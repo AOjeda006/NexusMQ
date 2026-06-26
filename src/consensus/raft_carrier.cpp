@@ -4,6 +4,8 @@
 
 #include "consensus/raft_carrier.hpp"
 
+#include <cstdint>
+#include <string>
 #include <utility>
 #include <variant>
 
@@ -11,6 +13,7 @@
 #include "consensus/raft_node.hpp"
 #include "consensus/raft_state.hpp"
 #include "consensus/raft_state_store.hpp"
+#include "telemetry/metrics.hpp"
 
 namespace nexus {
 
@@ -24,6 +27,28 @@ RaftCarrier::RaftCarrier(std::string topic, PartitionId partition, RaftNode& nod
       store_(store),
       log_(log),
       compaction_(compaction) {}
+
+void RaftCarrier::set_metrics(MetricsRegistry& metrics) {
+    metrics.describe("nexus_raft_commit_index",
+                     "High-watermark de la réplica de Raft (entradas aplicadas).");
+    metrics.describe("nexus_raft_term", "Término actual de la réplica de Raft.");
+    metrics.describe("nexus_raft_leader", "Rol de la réplica: 1 si es líder, 0 en otro caso.");
+    metrics.describe("nexus_raft_messages_sent_total",
+                     "Mensajes de Raft transportados por la réplica.");
+    metrics.describe("nexus_raft_messages_received_total",
+                     "RPC de Raft entregados a la FSM de la réplica.");
+    metrics.describe("nexus_raft_entries_replicated_total",
+                     "Entradas enviadas en AppendEntries por el líder.");
+
+    const Labels labels{{"topic", topic_}, {"partition", std::to_string(partition_)}};
+    metrics_.commit_index = &metrics.gauge("nexus_raft_commit_index", labels);
+    metrics_.term = &metrics.gauge("nexus_raft_term", labels);
+    metrics_.leader = &metrics.gauge("nexus_raft_leader", labels);
+    metrics_.messages_sent = &metrics.counter("nexus_raft_messages_sent_total", labels);
+    metrics_.messages_received = &metrics.counter("nexus_raft_messages_received_total", labels);
+    metrics_.entries_replicated = &metrics.counter("nexus_raft_entries_replicated_total", labels);
+    publish_state();
+}
 
 expected<void> RaftCarrier::recover() {
     if (store_ == nullptr) {
@@ -41,9 +66,13 @@ void RaftCarrier::on_tick(MonoTime now) {
     node_.tick(now);
     flush_outbox();
     maybe_compact();
+    publish_state();
 }
 
 void RaftCarrier::on_message(MonoTime now, const RaftMessage& message) {
+    if (metrics_.messages_received != nullptr) {
+        metrics_.messages_received->inc();
+    }
     const NodeId from = message.from;
     if (const auto* args = std::get_if<RequestVoteArgs>(&message.payload)) {
         emit(RaftMessage{
@@ -65,6 +94,7 @@ void RaftCarrier::on_message(MonoTime now, const RaftMessage& message) {
     }
     flush_outbox();
     maybe_compact();
+    publish_state();
 }
 
 void RaftCarrier::flush_outbox() {
@@ -95,7 +125,22 @@ void RaftCarrier::maybe_compact() {
 }
 
 void RaftCarrier::emit(const RaftMessage& message) {
+    if (metrics_.messages_sent != nullptr) {
+        metrics_.messages_sent->inc();
+        if (const auto* args = std::get_if<AppendEntriesArgs>(&message.payload)) {
+            metrics_.entries_replicated->inc(args->entries.size());
+        }
+    }
     sink_.send(RaftEnvelope{.topic = topic_, .partition = partition_, .message = message});
+}
+
+void RaftCarrier::publish_state() {
+    if (metrics_.commit_index == nullptr) {
+        return;
+    }
+    metrics_.commit_index->set(static_cast<std::int64_t>(node_.commit_index()));
+    metrics_.term->set(static_cast<std::int64_t>(node_.current_term()));
+    metrics_.leader->set(node_.is_leader() ? 1 : 0);
 }
 
 }  // namespace nexus

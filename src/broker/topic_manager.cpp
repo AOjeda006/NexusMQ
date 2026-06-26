@@ -16,6 +16,7 @@
 #include "consensus/raft_state_store.hpp"
 #include "storage/log_config.hpp"
 #include "storage/partition_log.hpp"
+#include "telemetry/metrics.hpp"
 
 namespace nexus {
 
@@ -115,6 +116,9 @@ expected<TopicMetadata> TopicManager::create_topic(std::string name, std::int32_
         if (const expected<void> recovered = ctx->carrier->recover(); !recovered) {
             return std::unexpected(recovered.error());
         }
+        if (metrics_ != nullptr) {
+            ctx->carrier->set_metrics(*metrics_);  // observabilidad de replicación (ADR-0017).
+        }
         new_replicas.push_back(std::move(ctx));
     }
 
@@ -123,6 +127,14 @@ expected<TopicMetadata> TopicManager::create_topic(std::string name, std::int32_
         replicas_.push_back(std::move(ctx));
     }
     return meta;
+}
+
+void TopicManager::set_metrics(MetricsRegistry& metrics) {
+    const std::scoped_lock lock{mutex_};
+    metrics_ = &metrics;
+    for (const std::unique_ptr<ReplicaContext>& ctx : replicas_) {
+        ctx->carrier->set_metrics(metrics);  // cablea los portadores ya creados.
+    }
 }
 
 std::vector<RaftCarrier*> TopicManager::carriers() const {

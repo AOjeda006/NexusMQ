@@ -29,6 +29,7 @@
 #include "protocol/codec.hpp"
 #include "storage/log_config.hpp"
 #include "storage/partition_log.hpp"
+#include "telemetry/metrics.hpp"
 
 namespace {
 
@@ -104,6 +105,11 @@ public:
     }
 
     [[nodiscard]] nexus::ReplicatedPartition& part(nexus::NodeId id) { return nodes_.at(id).part; }
+
+    /// Cablea @p reg al portador de @p id (las series quedan etiquetadas por su réplica).
+    void enable_metrics(nexus::NodeId id, nexus::MetricsRegistry& reg) {
+        nodes_.at(id).carrier->set_metrics(reg);
+    }
 
     [[nodiscard]] std::optional<nexus::NodeId> leader() const {
         std::optional<nexus::NodeId> found;
@@ -340,6 +346,69 @@ TEST(RaftCarrier, NoCompacta_PoliticaDesactivadaPorDefecto) {
     now += 10ms;
     carrier.on_tick(now);
     EXPECT_EQ(part->raft_log().snapshot_index(), 0);  // política desactivada: nunca compacta.
+}
+
+// Etiquetas de la réplica `(orders, 0)` que usa el portador para sus series.
+const nexus::Labels kReplicaLabels{{"topic", "orders"}, {"partition", "0"}};
+
+TEST(RaftCarrier, Metrics_LiderUnico_PublicaRolTerminoYCommit) {
+    TempDir dir{"metrics_1"};
+    auto plog = nexus::PartitionLog::open(dir.path(), nexus::LogConfig{});
+    ASSERT_TRUE(plog.has_value());
+    nexus::RaftConfig cfg;
+    cfg.random_seed = 7;
+    auto part = nexus::ReplicatedPartition::create(1, {}, std::move(*plog), cfg);
+    ASSERT_TRUE(part.has_value());
+
+    DiscardSink sink;
+    nexus::RaftCarrier carrier{"orders", 0, part->raft(), sink};
+    nexus::MetricsRegistry reg;
+    carrier.set_metrics(reg);
+
+    nexus::MonoTime now = drive_to_leader(carrier, *part);
+    ASSERT_TRUE(part->is_leader());
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_TRUE(part->produce(make_batch(1)).has_value());
+    }
+    now += 10ms;
+    carrier.on_tick(now);  // publica el estado tras avanzar la FSM.
+
+    EXPECT_EQ(reg.gauge("nexus_raft_leader", kReplicaLabels).value(), 1);  // es líder.
+    EXPECT_GE(reg.gauge("nexus_raft_term", kReplicaLabels).value(),
+              1);  // ganó al menos un término.
+    EXPECT_EQ(reg.gauge("nexus_raft_commit_index", kReplicaLabels).value(), 3);  // high-watermark.
+}
+
+TEST(RaftCarrier, Metrics_ReplicacionAQuorum_CuentaMensajesYEntradas) {
+    CarrierCluster cluster({1, 2, 3}, 7);
+    nexus::MetricsRegistry r1;
+    nexus::MetricsRegistry r2;
+    nexus::MetricsRegistry r3;
+    cluster.enable_metrics(1, r1);
+    cluster.enable_metrics(2, r2);
+    cluster.enable_metrics(3, r3);
+
+    ASSERT_TRUE(cluster.run_until([&] { return cluster.leader().has_value(); }, 5000ms));
+    const nexus::NodeId leader = *cluster.leader();
+    ASSERT_TRUE(cluster.part(leader).produce(make_batch(3)).has_value());
+    ASSERT_TRUE(
+        cluster.run_until([&] { return cluster.part(leader).high_watermark() == 3; }, 3000ms));
+
+    nexus::MetricsRegistry& leader_reg = leader == 1 ? r1 : (leader == 2 ? r2 : r3);
+    nexus::MetricsRegistry& follower_reg = leader == 1 ? r2 : r1;
+
+    // El líder replicó entradas a los seguidores y publicó su commit_index (entradas del log de
+    // Raft, no registros: un batch es una entrada).
+    EXPECT_GT(leader_reg.counter("nexus_raft_entries_replicated_total", kReplicaLabels).value(),
+              0U);
+    EXPECT_GT(leader_reg.counter("nexus_raft_messages_sent_total", kReplicaLabels).value(), 0U);
+    EXPECT_GT(cluster.part(leader).commit_index(), 0U);
+    EXPECT_EQ(leader_reg.gauge("nexus_raft_commit_index", kReplicaLabels).value(),
+              static_cast<std::int64_t>(cluster.part(leader).commit_index()));
+    // Un seguidor recibió mensajes del líder (AppendEntries) y respondió.
+    EXPECT_GT(follower_reg.counter("nexus_raft_messages_received_total", kReplicaLabels).value(),
+              0U);
+    EXPECT_GT(follower_reg.counter("nexus_raft_messages_sent_total", kReplicaLabels).value(), 0U);
 }
 
 }  // namespace

@@ -242,6 +242,12 @@ expected<void> Server::bind() {
     // Cablea las métricas del plano de datos (produce/fetch) al registro que expone `/metrics`
     // (ADR-0017). El router sirve en el núcleo 0, así que registra sin contención.
     router_->set_metrics(metrics_);
+    // Cablea las métricas del plano de replicación (Raft) a los portadores de cada núcleo. Pre-run
+    // (monohilo): los portadores creados al arrancar se cablean ya; los creados en runtime se
+    // autocablean en su hilo dueño (guardamos el registro en cada TopicManager).
+    for (int core = 0; core < config_.num_reactors; ++core) {
+        catalog_.manager(core).set_metrics(metrics_);
+    }
 
     if (config_.admin_port) {
         expected<Listener> admin = Listener::bind(config_.host, *config_.admin_port);
