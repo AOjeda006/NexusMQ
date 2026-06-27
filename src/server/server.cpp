@@ -17,7 +17,11 @@
 #include "broker/group_coordinator.hpp"
 #include "cluster/raft_receiver.hpp"
 #include "consensus/raft_carrier.hpp"
+#if defined(_WIN32)
+#include "io/iocp_backend.hpp"  // factoría de proactor en Windows (ADR-0023/0028)
+#else
 #include "io/io_uring_backend.hpp"
+#endif
 #include "reactor/cross_core_call.hpp"
 #include "server/admin_http.hpp"
 #include "server/connection.hpp"
@@ -38,9 +42,15 @@ constexpr unsigned int kRingDepth = 256;
 /// `AppendEntries`/`InstallSnapshot` con lotes grandes).
 constexpr std::size_t kMaxRaftMessage = std::size_t{16} * 1024 * 1024;
 
-/// Factoría por defecto del `Proactor` de cada reactor: io_uring (plano de control).
-std::unique_ptr<Proactor> make_io_uring_proactor(int /*core_id*/) {
+/// Factoría por defecto del `Proactor` de cada reactor (plano de control): io_uring en Linux, IOCP
+/// en Windows. Ambos son proactores sobre el mismo puerto `Proactor` (ADR-0023), así que el bucle
+/// del reactor no cambia; la elección es en compilación (ADR-0028).
+std::unique_ptr<Proactor> make_default_proactor(int /*core_id*/) {
+#if defined(_WIN32)
+    return std::make_unique<IocpBackend>(kRingDepth);
+#else
     return std::make_unique<IoUringBackend>(kRingDepth);
+#endif
 }
 
 /// @brief Resuelve `num_reactors`: `<= 0` significa **auto** (todos los núcleos disponibles).
@@ -157,7 +167,7 @@ Server::Server(Config config, ReactorPool::ProactorFactory proactor_factory)
       catalog_(config_.data_dir, config_.num_reactors, config_.node_id, config_.raft_config,
                peers_.node_ids(), config_.compaction),
       group_catalog_(config_.num_reactors),
-      proactor_factory_(proactor_factory ? std::move(proactor_factory) : make_io_uring_proactor) {
+      proactor_factory_(proactor_factory ? std::move(proactor_factory) : make_default_proactor) {
     // Valida el plano de control en construcción: si io_uring no está disponible, la factoría por
     // defecto lanza aquí (no en el hilo del reactor), preservando el contrato de fallo previo.
     static_cast<void>(proactor_factory_(0));

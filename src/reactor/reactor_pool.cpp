@@ -4,8 +4,18 @@
 
 #include "reactor/reactor_pool.hpp"
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX  // evita los macros min/max de <windows.h>, que chocan con std::max
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>  // SetThreadAffinityMask, DWORD_PTR
+#else
 #include <pthread.h>
 #include <sched.h>
+#endif
 
 #include <algorithm>
 #include <cstddef>
@@ -19,12 +29,24 @@ namespace {
 
 // Fija @p thread al núcleo @p core (módulo nº de CPUs). Mejor esfuerzo: si el entorno restringe la
 // afinidad (sandbox de CI…), se ignora el fallo —no es crítico para la corrección, solo locality—.
+// El handle nativo y la API de afinidad son específicos de plataforma; el reparto (core % cpus) es
+// común (ADR-0028): pthread_setaffinity_np/cpu_set_t en POSIX, SetThreadAffinityMask en Win32.
 void pin_thread_to_core(std::thread& thread, int core) {
     const unsigned cpus = std::max(1U, std::thread::hardware_concurrency());
+    const unsigned target = static_cast<unsigned>(core) % cpus;
+#if defined(_WIN32)
+    // La máscara de afinidad de Win32 cubre hasta 64 CPUs (un grupo de procesadores); en máquinas
+    // mayores el pin es aproximado —igual que el «mejor esfuerzo» de POSIX—. El módulo evita un
+    // desplazamiento >= 64 (comportamiento indefinido).
+    constexpr unsigned kAffinityBits = sizeof(DWORD_PTR) * 8;
+    const DWORD_PTR mask = static_cast<DWORD_PTR>(1) << (target % kAffinityBits);
+    static_cast<void>(::SetThreadAffinityMask(thread.native_handle(), mask));
+#else
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
-    CPU_SET(static_cast<unsigned>(core) % cpus, &cpuset);
+    CPU_SET(target, &cpuset);
     static_cast<void>(pthread_setaffinity_np(thread.native_handle(), sizeof(cpuset), &cpuset));
+#endif
 }
 
 }  // namespace
