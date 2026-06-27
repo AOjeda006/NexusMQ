@@ -34,13 +34,15 @@ public:
     IoUringBackend(IoUringBackend&&) = delete;
     IoUringBackend& operator=(IoUringBackend&&) = delete;
 
-    void submit_read(int fd, MutByteSpan buffer, std::uint64_t offset, Completion on_done) override;
-    void submit_write(int fd, ByteSpan data, std::uint64_t offset, Completion on_done) override;
-    void submit_fsync(int fd, bool datasync, Completion on_done) override;
-    void submit_accept(int listen_fd, Completion on_done) override;
-    void submit_connect(int fd, ByteSpan addr, Completion on_done) override;
-    void submit_recv(int fd, MutByteSpan buffer, Completion on_done) override;
-    void submit_send(int fd, ByteSpan data, Completion on_done) override;
+    void submit_read(NativeHandle fd, MutByteSpan buffer, std::uint64_t offset,
+                     Completion on_done) override;
+    void submit_write(NativeHandle fd, ByteSpan data, std::uint64_t offset,
+                      Completion on_done) override;
+    void submit_fsync(NativeHandle fd, bool datasync, Completion on_done) override;
+    void submit_accept(NativeHandle listen_fd, Completion on_done) override;
+    void submit_connect(NativeHandle fd, ByteSpan addr, Completion on_done) override;
+    void submit_recv(NativeHandle fd, MutByteSpan buffer, Completion on_done) override;
+    void submit_send(NativeHandle fd, ByteSpan data, Completion on_done) override;
     void submit_timer(MonoTime deadline, Completion on_done) override;
     int run_completions(int max) override;
     int wait_completions(int max, MonoTime deadline) override;

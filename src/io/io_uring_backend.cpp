@@ -270,27 +270,28 @@ IoUringBackend::Ring::Ring(unsigned requested) {
 IoUringBackend::IoUringBackend(unsigned entries) : ring_(std::make_unique<Ring>(entries)) {}
 IoUringBackend::~IoUringBackend() = default;
 
-void IoUringBackend::submit_read(int fd, MutByteSpan buffer, std::uint64_t offset,
+void IoUringBackend::submit_read(NativeHandle fd, MutByteSpan buffer, std::uint64_t offset,
                                  Completion on_done) {
     ring_->submit_op(IORING_OP_READ, fd, address_of(buffer.data()),
                      static_cast<std::uint32_t>(buffer.size()), offset, 0, std::move(on_done));
 }
 
-void IoUringBackend::submit_write(int fd, ByteSpan data, std::uint64_t offset, Completion on_done) {
+void IoUringBackend::submit_write(NativeHandle fd, ByteSpan data, std::uint64_t offset,
+                                  Completion on_done) {
     ring_->submit_op(IORING_OP_WRITE, fd, address_of(data.data()),
                      static_cast<std::uint32_t>(data.size()), offset, 0, std::move(on_done));
 }
 
-void IoUringBackend::submit_fsync(int fd, bool datasync, Completion on_done) {
+void IoUringBackend::submit_fsync(NativeHandle fd, bool datasync, Completion on_done) {
     const std::uint32_t flags = datasync ? IORING_FSYNC_DATASYNC : 0U;
     ring_->submit_op(IORING_OP_FSYNC, fd, 0, 0, 0, flags, std::move(on_done));
 }
 
-void IoUringBackend::submit_accept(int listen_fd, Completion on_done) {
+void IoUringBackend::submit_accept(NativeHandle listen_fd, Completion on_done) {
     ring_->submit_op(IORING_OP_ACCEPT, listen_fd, 0, 0, 0, 0, std::move(on_done));
 }
 
-void IoUringBackend::submit_connect(int fd, ByteSpan addr, Completion on_done) {
+void IoUringBackend::submit_connect(NativeHandle fd, ByteSpan addr, Completion on_done) {
     // IORING_OP_CONNECT: el puntero al `sockaddr` va en `addr` y su longitud en `off` (como
     // io_uring_prep_connect). El kernel lee el `sockaddr` de forma asíncrona: el llamante garantiza
     // que vive hasta la completion (vía el frame de su corrutina).
@@ -298,12 +299,12 @@ void IoUringBackend::submit_connect(int fd, ByteSpan addr, Completion on_done) {
                      static_cast<std::uint64_t>(addr.size()), 0, std::move(on_done));
 }
 
-void IoUringBackend::submit_recv(int fd, MutByteSpan buffer, Completion on_done) {
+void IoUringBackend::submit_recv(NativeHandle fd, MutByteSpan buffer, Completion on_done) {
     ring_->submit_op(IORING_OP_RECV, fd, address_of(buffer.data()),
                      static_cast<std::uint32_t>(buffer.size()), 0, 0, std::move(on_done));
 }
 
-void IoUringBackend::submit_send(int fd, ByteSpan data, Completion on_done) {
+void IoUringBackend::submit_send(NativeHandle fd, ByteSpan data, Completion on_done) {
     ring_->submit_op(IORING_OP_SEND, fd, address_of(data.data()),
                      static_cast<std::uint32_t>(data.size()), 0, 0, std::move(on_done));
 }

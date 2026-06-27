@@ -30,7 +30,7 @@ public:
     /// Operación registrada y pendiente de completar.
     struct Op {
         OpKind kind = OpKind::Read;
-        int fd = -1;
+        NativeHandle fd = kInvalidHandle;
         MutByteSpan read_buffer{};
         ByteSpan write_buffer{};
         std::uint64_t offset = 0;
@@ -39,7 +39,7 @@ public:
         Completion on_done{};
     };
 
-    void submit_read(int fd, MutByteSpan buffer, std::uint64_t offset,
+    void submit_read(NativeHandle fd, MutByteSpan buffer, std::uint64_t offset,
                      Completion on_done) override {
         pending_.push_back(Op{.kind = OpKind::Read,
                               .fd = fd,
@@ -47,32 +47,33 @@ public:
                               .offset = offset,
                               .on_done = std::move(on_done)});
     }
-    void submit_write(int fd, ByteSpan data, std::uint64_t offset, Completion on_done) override {
+    void submit_write(NativeHandle fd, ByteSpan data, std::uint64_t offset,
+                      Completion on_done) override {
         pending_.push_back(Op{.kind = OpKind::Write,
                               .fd = fd,
                               .write_buffer = data,
                               .offset = offset,
                               .on_done = std::move(on_done)});
     }
-    void submit_fsync(int fd, bool datasync, Completion on_done) override {
+    void submit_fsync(NativeHandle fd, bool datasync, Completion on_done) override {
         pending_.push_back(Op{
             .kind = OpKind::Fsync, .fd = fd, .datasync = datasync, .on_done = std::move(on_done)});
     }
-    void submit_accept(int listen_fd, Completion on_done) override {
+    void submit_accept(NativeHandle listen_fd, Completion on_done) override {
         pending_.push_back(
             Op{.kind = OpKind::Accept, .fd = listen_fd, .on_done = std::move(on_done)});
     }
-    void submit_connect(int fd, ByteSpan addr, Completion on_done) override {
+    void submit_connect(NativeHandle fd, ByteSpan addr, Completion on_done) override {
         pending_.push_back(Op{.kind = OpKind::Connect,
                               .fd = fd,
                               .write_buffer = addr,
                               .on_done = std::move(on_done)});
     }
-    void submit_recv(int fd, MutByteSpan buffer, Completion on_done) override {
+    void submit_recv(NativeHandle fd, MutByteSpan buffer, Completion on_done) override {
         pending_.push_back(Op{
             .kind = OpKind::Recv, .fd = fd, .read_buffer = buffer, .on_done = std::move(on_done)});
     }
-    void submit_send(int fd, ByteSpan data, Completion on_done) override {
+    void submit_send(NativeHandle fd, ByteSpan data, Completion on_done) override {
         pending_.push_back(Op{
             .kind = OpKind::Send, .fd = fd, .write_buffer = data, .on_done = std::move(on_done)});
     }

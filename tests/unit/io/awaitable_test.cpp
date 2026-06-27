@@ -43,7 +43,7 @@ nexus::task<nexus::expected<void>> do_fsync(nexus::FakeProactor& proactor) {
     co_return co_await nexus::async_fsync(proactor, 9, true);
 }
 
-nexus::task<nexus::expected<int>> do_accept(nexus::FakeProactor& proactor) {
+nexus::task<nexus::expected<nexus::NativeHandle>> do_accept(nexus::FakeProactor& proactor) {
     co_return co_await nexus::async_accept(proactor, 3);
 }
 
@@ -93,7 +93,7 @@ TEST(Awaitable, Accept_ResultadoPositivo_DevuelveDescriptor) {
     nexus::FakeProactor proactor;
     auto result = drive(proactor, do_accept(proactor), 42);
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result.value(), 42);
+    EXPECT_EQ(result.value(), nexus::NativeHandle{42});
 }
 
 }  // namespace

@@ -12,20 +12,20 @@ namespace {
 TEST(FakeProactor, SubmitRead_RegistraOperacionPendiente) {
     nexus::FakeProactor proactor;
     std::array<std::byte, 8> buffer{};
-    proactor.submit_read(7, buffer, 42, [](std::int32_t) {});
+    proactor.submit_read(7, buffer, 42, [](nexus::Proactor::IoResult) {});
 
     ASSERT_EQ(proactor.pending(), 1U);
     const auto& op = proactor.peek(0);
     EXPECT_EQ(op.kind, nexus::FakeProactor::OpKind::Read);
-    EXPECT_EQ(op.fd, 7);
+    EXPECT_EQ(op.fd, nexus::NativeHandle{7});
     EXPECT_EQ(op.offset, 42U);
     EXPECT_EQ(op.read_buffer.size(), buffer.size());
 }
 
 TEST(FakeProactor, CompleteFront_InvocaLaCompletionConElResultado) {
     nexus::FakeProactor proactor;
-    std::int32_t got = 0;
-    proactor.submit_fsync(3, false, [&](std::int32_t result) { got = result; });
+    nexus::Proactor::IoResult got = 0;
+    proactor.submit_fsync(3, false, [&](nexus::Proactor::IoResult result) { got = result; });
 
     proactor.complete_front(0);
     EXPECT_EQ(got, 0);
@@ -35,9 +35,9 @@ TEST(FakeProactor, CompleteFront_InvocaLaCompletionConElResultado) {
 TEST(FakeProactor, RunCompletions_DrenaArmadasEnFIFOhastaMax) {
     nexus::FakeProactor proactor;
     std::vector<int> order;
-    proactor.submit_send(1, {}, [&](std::int32_t) { order.push_back(1); });
-    proactor.submit_send(2, {}, [&](std::int32_t) { order.push_back(2); });
-    proactor.submit_send(3, {}, [&](std::int32_t) { order.push_back(3); });
+    proactor.submit_send(1, {}, [&](nexus::Proactor::IoResult) { order.push_back(1); });
+    proactor.submit_send(2, {}, [&](nexus::Proactor::IoResult) { order.push_back(2); });
+    proactor.submit_send(3, {}, [&](nexus::Proactor::IoResult) { order.push_back(3); });
 
     proactor.arm_front(0);  // op 1
     proactor.arm_front(0);  // op 2
@@ -61,7 +61,7 @@ TEST(FakeProactor, Wake_IncrementaContador) {
 TEST(FakeProactor, WaitCompletions_NoBloquea_DrenaLoArmado) {
     nexus::FakeProactor proactor;
     int ran = 0;
-    proactor.submit_send(1, {}, [&](std::int32_t) { ++ran; });
+    proactor.submit_send(1, {}, [&](nexus::Proactor::IoResult) { ++ran; });
     proactor.arm_front(0);
 
     // El doble no bloquea: ignora el deadline y drena como run_completions.
