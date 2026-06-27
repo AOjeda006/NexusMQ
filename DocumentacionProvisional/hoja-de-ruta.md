@@ -843,11 +843,16 @@ Harness de benchmark vacío y CI:
   intrínsecos SSE4.2 incondicionales tras `#if defined(_MSC_VER)`; el camino GCC/Clang queda idéntico).
   **Revalidado en Linux** (GCC + Clang/libc++ + ASan, 599/599; format/tidy limpios): el cambio es inerte
   fuera de MSVC. Cierra la deuda de runtime de F10.
-- [ ] **W2** `clang-cl` como **segundo compilador Windows** — **bloqueado al entorno Windows**: requiere
-  instalar el componente *C++ Clang tools for Windows* de Visual Studio (MSVC ABI + Windows SDK); **no se
-  puede ejecutar desde Linux** (ni MinGW ni el contenedor lo cubren). Tarea para una sesión en la máquina
-  Windows: configurar el preset `windows-msvc` con `clang-cl` y recompilar `nexus-io`. Bajo riesgo,
-  valor de robustez (un tercer toolchain).
+- [x] **W2** `clang-cl` como **segundo compilador Windows** (rama `windows-port`). Instalado el componente
+  *C++ Clang tools for Windows* (clang-cl 22.1.3, ABI MSVC + Windows SDK) y añadido el preset
+  **`windows-clang-cl`** (Ninja; CMake ve clang-cl como MSVC, así que aplica `/W4 /WX /permissive-` de
+  `nexus_options`). clang-cl —un tercer toolchain tras GCC/libstdc++ y Clang/libc++ en Linux— **destapó dos
+  problemas que MSVC no avisa**, ya corregidos de forma **inerte en Linux**: (1) `crc32c.cpp` tomaba el
+  marcador `NEXUS_TARGET_SSE42` vacío bajo `_MSC_VER`, pero clang **exige** la *target feature* para emitir
+  `_mm_crc32_*` → se enruta clang-cl (`__clang__`) al mismo `[[gnu::target("sse4.2")]]` que GCC/Clang-POSIX;
+  (2) `compression.cpp` dejaba `body` sin usar sin códecs nativos → `[[maybe_unused]]`. Verificado en la
+  máquina Windows: `nexus-io` + `tools/wincheck` compilan con MSVC **y** clang-cl, arnés **4/4**.
+  Revalidación del gate Linux + merge a `main`: pendiente (sesión Linux del autor).
 - [ ] **W3** Port **completo de `nexusd` a Windows** (no solo `nexus-io`) — **grande y opcional**. Hoy son
   Linux-nativos: el *pinning* del `ReactorPool` (`pthread_setaffinity_np`/`cpu_set_t` →
   `SetThreadAffinityMask` en Win32), la **factoría de proactor** del server (crea `IoUringBackend` → debe
