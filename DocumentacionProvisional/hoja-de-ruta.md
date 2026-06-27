@@ -914,7 +914,7 @@ Harness de benchmark vacío y CI:
     si `persistent_state_dirty()` (regla §5; si el `save` falla, no transporta y reintenta). Almacén
     inyectado como puntero opcional (DIP). 2 tests (estado en disco antes de transportar; `recover`
     sobrevive a un "reinicio"). *(Reordenado: el transporte TCP real pasa a D3.5; la lógica va primero.)*
-  - [ ] **D3.4** `Server` sobre `ReactorPool` (uno por núcleo) y `RequestRouter` **asíncrono** que enruta
+  - [x] **D3.4** `Server` sobre `ReactorPool` (uno por núcleo) y `RequestRouter` **asíncrono** que enruta
     por reactor dueño (`call_on`); `ReplicatedPartition` cuando `replication_factor > 1`. Por sub-pasos:
     - [x] **D3.4a** `RequestRouter::dispatch` ahora es una **corrutina** `task<expected<void>>` (firma
       asíncrona, base del enrutado cross-core). Hoy completa sin suspenderse (un reactor); `serve_connection`
