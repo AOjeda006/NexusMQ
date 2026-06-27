@@ -41,7 +41,16 @@ add_library(nexus::options ALIAS nexus_options)
 target_compile_features(nexus_options INTERFACE cxx_std_23)
 
 if(MSVC)
-  target_compile_options(nexus_options INTERFACE /W4 /WX /permissive-)
+  # /W4 /WX es la puerta en MSVC/clang-cl (Windows). Dos avisos de /W4 NO los exige la puerta
+  # canónica de Linux (-Wall -Wextra -Wpedantic) y marcan código intencional/idiomático, así que se
+  # desactivan aquí (decisión de proyecto, espejo de los checks apagados en .clang-tidy):
+  #   C4324: «struct rellenada por el especificador de alineación». El `alignas(kCacheLineSize)` de
+  #          las colas SPSC/MPMC es DELIBERADO (evita false sharing productor/consumidor); el padding
+  #          es el objetivo, no un defecto.
+  #   C4456: «la declaración oculta una local anterior». Salta en cadenas if/else-if con variables de
+  #          condición reutilizadas (p. ej. `args`/`reply` en raft_carrier); cada `else if` anida su
+  #          ámbito. Es idiomático y Linux no lo exige (-Wshadow no está en -Wall/-Wextra).
+  target_compile_options(nexus_options INTERFACE /W4 /WX /permissive- /wd4324 /wd4456)
 else()
   target_compile_options(nexus_options INTERFACE -Wall -Wextra -Wpedantic -Werror)
 endif()
