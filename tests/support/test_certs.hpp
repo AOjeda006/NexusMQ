@@ -5,12 +5,12 @@
 #ifdef NEXUS_HAVE_OPENSSL
 
 #include <openssl/asn1.h>
+#include <openssl/bio.h>
 #include <openssl/evp.h>
 #include <openssl/objects.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 
-#include <cstdio>
 #include <filesystem>
 #include <string>
 
@@ -41,21 +41,26 @@ inline bool write_self_signed(const std::filesystem::path& cert_path,
         X509_set_issuer_name(x509, name);  // autofirmado: emisor == sujeto
         ok = (X509_sign(x509, pkey, EVP_sha256()) > 0);
     }
+    // Escribimos vía BIO_new_file (no `std::fopen` + `FILE*`): OpenSSL abre el fichero con SU
+    // propio runtime, así que no cruzamos un `FILE*` entre el CRT de la app y el de OpenSSL. En
+    // Windows eso evita el fallo «no OPENSSL_Applink» (que exige enlazar applink.c al pasar un
+    // FILE* ajeno) y de paso resuelve la ruta narrow sin tocar `path::c_str()` (wchar_t en
+    // Windows). (W3-B, ADR-0028)
     if (ok) {
-        FILE* key_file = std::fopen(key_path.c_str(), "wb");
-        ok = (key_file != nullptr);
-        if (key_file != nullptr) {
-            ok = ok &&
-                 (PEM_write_PrivateKey(key_file, pkey, nullptr, nullptr, 0, nullptr, nullptr) == 1);
-            std::fclose(key_file);
+        BIO* key_bio = BIO_new_file(key_path.string().c_str(), "wb");
+        ok = (key_bio != nullptr);
+        if (key_bio != nullptr) {
+            ok = ok && (PEM_write_bio_PrivateKey(key_bio, pkey, nullptr, nullptr, 0, nullptr,
+                                                 nullptr) == 1);
+            BIO_free(key_bio);
         }
     }
     if (ok) {
-        FILE* cert_file = std::fopen(cert_path.c_str(), "wb");
-        ok = (cert_file != nullptr);
-        if (cert_file != nullptr) {
-            ok = ok && (PEM_write_X509(cert_file, x509) == 1);
-            std::fclose(cert_file);
+        BIO* cert_bio = BIO_new_file(cert_path.string().c_str(), "wb");
+        ok = (cert_bio != nullptr);
+        if (cert_bio != nullptr) {
+            ok = ok && (PEM_write_bio_X509(cert_bio, x509) == 1);
+            BIO_free(cert_bio);
         }
     }
     X509_free(x509);

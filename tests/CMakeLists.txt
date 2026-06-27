@@ -22,7 +22,6 @@ add_executable(nexus-tests
   unit/io/file_test.cpp
   unit/io/aligned_buffer_test.cpp
   unit/io/block_reader_test.cpp
-  unit/io/socket_test.cpp
   unit/io/fake_proactor_test.cpp
   unit/io/awaitable_test.cpp
   unit/io/io_uring_backend_test.cpp
@@ -48,7 +47,6 @@ add_executable(nexus-tests
   unit/reactor/mpmc_queue_test.cpp
   unit/reactor/cross_core_call_test.cpp
   unit/reactor/partition_router_test.cpp
-  unit/wire/frame_io_test.cpp
   unit/broker/producer_session_test.cpp
   unit/broker/partition_test.cpp
   unit/broker/replicated_partition_test.cpp
@@ -94,12 +92,9 @@ add_executable(nexus-tests
   unit/consensus/raft_state_store_test.cpp
   unit/consensus/raft_node_test.cpp
   unit/cluster/peer_directory_test.cpp
-  unit/cluster/raft_link_test.cpp
-  unit/cluster/raft_receiver_test.cpp
   unit/cluster/raft_transport_test.cpp
   unit/cluster/raft_transport_loopback_test.cpp
   sim/raft_sim_test.cpp
-  e2e/broker_e2e_test.cpp
   unit/client/dead_letter_test.cpp
   unit/kafka/codec_test.cpp
   unit/kafka/messages_test.cpp
@@ -109,13 +104,28 @@ add_executable(nexus-tests
   unit/ffi/ffi_test.cpp
   e2e/client_e2e_test.cpp
   e2e/loadgen_e2e_test.cpp
-  e2e/admin_http_e2e_test.cpp
   e2e/cli_admin_e2e_test.cpp
-  e2e/cluster_e2e_test.cpp
   e2e/tls_e2e_test.cpp
   e2e/tls_server_e2e_test.cpp
-  e2e/proxy_server_e2e_test.cpp
-  crash/partition_crash_test.cpp)
+  e2e/proxy_server_e2e_test.cpp)
+
+# Tests con arnés POSIX-only: sockets BSD crudos (`::socket(AF_INET, ...)`, `sockaddr_in`, `htons`)
+# o `fork()` para inyección de crash. NO portados a Winsock/CreateProcess: se EXCLUYEN en Windows
+# (W3-B, ADR-0028). La funcionalidad portable que cubren se valida en Windows por `tools/wincheck`
+# (runtime IOCP: File/Socket/Listener/timer) y el smoke de `nexusd` (produce/fetch por IOCP); en
+# Linux corren en la puerta canónica. (`io_uring_backend_test.cpp` NO va aquí: ya se autoexcluye por
+# `#ifdef NEXUS_HAVE_IOURING`.)
+if(NOT WIN32)
+  target_sources(nexus-tests PRIVATE
+    unit/io/socket_test.cpp
+    unit/wire/frame_io_test.cpp
+    unit/cluster/raft_link_test.cpp
+    unit/cluster/raft_receiver_test.cpp
+    e2e/broker_e2e_test.cpp
+    e2e/admin_http_e2e_test.cpp
+    e2e/cluster_e2e_test.cpp
+    crash/partition_crash_test.cpp)
+endif()
 
 # LatencyHistogram es header-only en tools/bench; el test lo incluye directamente.
 # tests/ se añade al include-path para los dobles de test compartidos (support/).
@@ -145,6 +155,27 @@ target_link_libraries(nexus-tests PRIVATE
   nexus::ffi
   nexus::server
   nexus::cli)
+
+if(MSVC)
+  # std::fopen y otras funciones estándar de la CRT disparan C4996 ("inseguras", sugiere las *_s) en
+  # MSVC; son C++ estándar y la puerta canónica (Linux) no las marca. Se silencian SOLO en el target
+  # de tests (W3-B, ADR-0028), que además usa utilidades de la CRT en sus arneses (p. ej. los certs
+  # de prueba con std::fopen). El árbol de producción no usa estas funciones (E/S vía nexus-io).
+  target_compile_definitions(nexus-tests PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+
+# En Windows, las DLL dependientes deben estar junto al .exe para cargarse en runtime. La suite
+# enlaza `nexus::ffi`, que es una librería COMPARTIDA (nexus-ffi.dll); sin esto, ejecutar el binario
+# —incluido el paso de descubrimiento de gtest— falla con 0xC0000135 (STATUS_DLL_NOT_FOUND). Copiamos
+# todas las DLL de las que depende el target junto a él (patrón canónico de CMake para Windows);
+# debe ir ANTES de gtest_discover_tests para que su POST_BUILD se ejecute primero. Inerte en Linux
+# (W3-B, ADR-0028): en ELF las .so se resuelven por rpath/SONAME y el bloque está guardado por WIN32.
+if(WIN32)
+  add_custom_command(TARGET nexus-tests POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_RUNTIME_DLLS:nexus-tests> $<TARGET_FILE_DIR:nexus-tests>
+    COMMAND_EXPAND_LISTS)
+endif()
 
 # Registra cada TEST(...) como un test de CTest (los descubre del binario).
 gtest_discover_tests(nexus-tests)
