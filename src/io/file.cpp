@@ -83,7 +83,13 @@ void File::close_fd() noexcept {
 expected<File> File::open(const std::string& path, Mode mode) {
     const bool read_only = (mode == Mode::ReadOnly);
     const DWORD access = read_only ? GENERIC_READ : (GENERIC_READ | GENERIC_WRITE);
-    const DWORD share = FILE_SHARE_READ | FILE_SHARE_WRITE;
+    // FILE_SHARE_DELETE da semántica POSIX: permite borrar/renombrar el fichero mientras sigue
+    // abierto (en POSIX `unlink` de un fichero abierto quita la entrada y el inodo persiste hasta
+    // el último `close`). Sin él, Windows rechaza `DeleteFile`/`std::filesystem::remove` con «el
+    // proceso no puede acceder al archivo porque está siendo utilizado» mientras viva el handle. El
+    // núcleo y los tests cuentan con esa semántica (rotación de segmentos, limpieza de temporales).
+    // (ADR-0028)
+    const DWORD share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
     const DWORD disposition =
         read_only ? OPEN_EXISTING : OPEN_ALWAYS;  // OPEN_ALWAYS = crea si falta
     DWORD flags = FILE_ATTRIBUTE_NORMAL;
