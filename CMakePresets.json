@@ -66,6 +66,19 @@
         "CMAKE_CXX_STANDARD": "23",
         "CMAKE_BUILD_TYPE": "Debug"
       }
+    },
+    {
+      "name": "windows-clang-cl",
+      "displayName": "Windows clang-cl (IOCP) [segundo compilador Windows, W2 — ver ADR-0023]",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": {
+        "_comment_w2": "Segundo toolchain Windows (W2): clang-cl (LLVM con ABI MSVC + Windows SDK), un tercer compilador tras GCC/libstdc++ y Clang/libc++ en Linux y MSVC en Windows. Endurece la portabilidad: clang-cl mapea /W4 a su propio juego de avisos y puede delatar lo que MSVC no ve. CMake detecta clang-cl como MSVC (MSVC=TRUE, CMAKE_CXX_SIMULATE_ID=MSVC), de modo que se aplican /W4 /WX /permissive- de nexus_options sin cambios. El proyecto es CXX-only (LANGUAGES CXX), así que NO se fija CMAKE_C_COMPILER (quedaría sin usar). Requiere el dev environment de VS cargado (INCLUDE/LIB/PATH con la STL de MSVC y el Windows SDK): ejecutar desde un 'x64 Native Tools Command Prompt' o tras Enter-VsDevShell -arch=x64. Oculto fuera de Windows por 'condition'.",
+        "CMAKE_CXX_COMPILER": "clang-cl",
+        "CMAKE_CXX_STANDARD": "23",
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
     }
   ],
   "buildPresets": [
