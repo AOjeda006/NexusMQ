@@ -124,7 +124,9 @@ expected<std::vector<std::byte>> decompress(Codec codec, ByteSpan input, std::si
     if (original_size > max_output) {
         return make_error(ErrorCode::Corrupt, "tamaño descomprimido excede el límite");
     }
-    const ByteSpan body = input.subspan(kSizePrefix);
+    // `body` solo se consume en las ramas de códec compiladas (LZ4/Zstd). En una build sin ningún
+    // códec nativo (p. ej. Windows sin LZ4/Zstd) queda sin usar: lo marcamos para no avisar.
+    [[maybe_unused]] const ByteSpan body = input.subspan(kSizePrefix);
     std::vector<std::byte> out(original_size);
 
     switch (codec) {

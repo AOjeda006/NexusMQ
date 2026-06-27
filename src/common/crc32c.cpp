@@ -12,9 +12,14 @@
 #endif
 
 // GCC/Clang necesitan [[gnu::target("sse4.2")]] para emitir SSE4.2 en una sola función sin exigir
-// -msse4.2 a todo el binario. MSVC no admite el atributo (avisa C5030) y habilita los intrínsecos
-// SSE4.2 de forma incondicional, así que ahí el marcador queda vacío.
-#if defined(_MSC_VER)
+// -msse4.2 a todo el binario. clang-cl define _MSC_VER pero, a diferencia de cl real, EXIGE la
+// target feature para emitir los intrínsecos `_mm_crc32_*` (los rechaza en una función compilada
+// sin ella); se distingue por __clang__, que cl real no define, y se enruta al mismo atributo que
+// GCC/Clang-POSIX. MSVC real no admite el atributo (avisa C5030) y habilita SSE4.2 de forma
+// incondicional, así que solo ahí el marcador queda vacío.
+#if defined(__clang__)
+#define NEXUS_TARGET_SSE42 [[gnu::target("sse4.2")]]
+#elif defined(_MSC_VER)
 #define NEXUS_TARGET_SSE42
 #else
 #define NEXUS_TARGET_SSE42 [[gnu::target("sse4.2")]]
