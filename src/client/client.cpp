@@ -4,7 +4,11 @@
 
 #include "client/client.hpp"
 
+#if defined(_WIN32)
+#include <winsock2.h>  // ::send/::recv sobre SOCKET (Winsock); WSAStartup lo hace Socket::connect
+#else
 #include <sys/socket.h>
+#endif
 
 #include <cstddef>
 #include <utility>
@@ -17,12 +21,19 @@ namespace nexus {
 
 namespace {
 
+// El handle nativo es `int` (fd POSIX) o `SOCKET` (Winsock); las llamadas y el tipo de retorno de
+// ::send/::recv difieren por plataforma. Windows no tiene SIGPIPE (no hace falta MSG_NOSIGNAL).
+
 /// Envía todos los bytes de @p data por @p fd (bloqueante); `false` si el par cerró o hubo error.
-bool send_all(int fd, ByteSpan data) {
+bool send_all(NativeHandle fd, ByteSpan data) {
     const auto* ptr = reinterpret_cast<const char*>(data.data());  // NOLINT(*-reinterpret-cast)
     std::size_t left = data.size();
     while (left > 0) {
+#if defined(_WIN32)
+        const int sent = ::send(static_cast<SOCKET>(fd), ptr, static_cast<int>(left), 0);
+#else
         const ssize_t sent = ::send(fd, ptr, left, MSG_NOSIGNAL);
+#endif
         if (sent <= 0) {
             return false;
         }
@@ -33,11 +44,15 @@ bool send_all(int fd, ByteSpan data) {
 }
 
 /// Lee exactamente @p buf.size() bytes de @p fd (bloqueante); `false` si el par cerró antes.
-bool recv_exact(int fd, MutByteSpan buf) {
+bool recv_exact(NativeHandle fd, MutByteSpan buf) {
     auto* ptr = reinterpret_cast<char*>(buf.data());  // NOLINT(*-reinterpret-cast)
     std::size_t left = buf.size();
     while (left > 0) {
+#if defined(_WIN32)
+        const int got = ::recv(static_cast<SOCKET>(fd), ptr, static_cast<int>(left), 0);
+#else
         const ssize_t got = ::recv(fd, ptr, left, 0);
+#endif
         if (got <= 0) {
             return false;
         }
@@ -48,7 +63,7 @@ bool recv_exact(int fd, MutByteSpan buf) {
 }
 
 /// Recibe una trama completa en @p rx (cabecera incluida): lee `length:u32` y luego `length` bytes.
-expected<void> recv_frame_into(int fd, Buffer& rx) {
+expected<void> recv_frame_into(NativeHandle fd, Buffer& rx) {
     rx.clear();
     const MutByteSpan len_bytes = rx.extend(sizeof(std::uint32_t));
     if (!recv_exact(fd, len_bytes)) {

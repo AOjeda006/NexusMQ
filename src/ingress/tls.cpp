@@ -60,13 +60,27 @@ expected<CtxGuard> make_ctx(const SSL_METHOD* method, std::string_view role) {
     return ctx;
 }
 
+// OpenSSL recibe rutas como `const char*`. `std::filesystem::path::c_str()` ya es `const char*` en
+// POSIX, pero `const wchar_t*` en Windows; ahí materializamos la ruta narrow del SO en una
+// std::string cuyo `c_str()` sobrevive a la llamada. En POSIX devuelve una referencia a la propia
+// ruta: `native_path(p).c_str()` queda byte-idéntico a `p.c_str()` (cero copia).
+#if defined(_WIN32)
+[[nodiscard]] std::string native_path(const std::filesystem::path& path) {
+    return path.string();
+}
+#else
+[[nodiscard]] const std::filesystem::path& native_path(const std::filesystem::path& path) {
+    return path;
+}
+#endif
+
 /// Carga el par certificado/clave PEM en @p ctx y comprueba que casan.
 expected<void> load_keypair(SSL_CTX* ctx, const std::filesystem::path& cert,
                             const std::filesystem::path& key) {
-    if (SSL_CTX_use_certificate_chain_file(ctx, cert.c_str()) != 1) {
+    if (SSL_CTX_use_certificate_chain_file(ctx, native_path(cert).c_str()) != 1) {
         return make_error(ErrorCode::InvalidArgument, tls_error("cargar certificado"));
     }
-    if (SSL_CTX_use_PrivateKey_file(ctx, key.c_str(), SSL_FILETYPE_PEM) != 1) {
+    if (SSL_CTX_use_PrivateKey_file(ctx, native_path(key).c_str(), SSL_FILETYPE_PEM) != 1) {
         return make_error(ErrorCode::InvalidArgument, tls_error("cargar clave privada"));
     }
     if (SSL_CTX_check_private_key(ctx) != 1) {
@@ -112,7 +126,8 @@ expected<TlsContext> TlsContext::server(const std::filesystem::path& cert_chain,
     }
     bool require_client_cert = false;
     if (!client_ca.empty()) {
-        if (SSL_CTX_load_verify_locations(ctx->get(), client_ca.c_str(), nullptr) != 1) {
+        if (SSL_CTX_load_verify_locations(ctx->get(), native_path(client_ca).c_str(), nullptr) !=
+            1) {
             return make_error(ErrorCode::InvalidArgument, tls_error("cargar CA de cliente"));
         }
         SSL_CTX_set_verify(ctx->get(), SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, nullptr);
@@ -129,7 +144,8 @@ expected<TlsContext> TlsContext::client(const std::filesystem::path& ca_to_verif
         return std::unexpected(ctx.error());
     }
     if (!ca_to_verify.empty()) {
-        if (SSL_CTX_load_verify_locations(ctx->get(), ca_to_verify.c_str(), nullptr) != 1) {
+        if (SSL_CTX_load_verify_locations(ctx->get(), native_path(ca_to_verify).c_str(), nullptr) !=
+            1) {
             return make_error(ErrorCode::InvalidArgument, tls_error("cargar CA del servidor"));
         }
         SSL_CTX_set_verify(ctx->get(), SSL_VERIFY_PEER, nullptr);
