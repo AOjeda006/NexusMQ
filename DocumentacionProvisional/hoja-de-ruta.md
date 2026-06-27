@@ -765,8 +765,18 @@ Harness de benchmark vacío y CI:
     el servidor). Opera sobre el cuerpo del frame (el prefijo `Size` lo añade el transporte). Tests:
     despacho de las 4 APIs con un `FakeBroker` (eco de `correlation_id`, delegación correcta,
     `api_key` no soportada → error). Verde en GCC/Clang/ASan.
-  - [ ] **Nota:** la interoperación **en vivo con `kcat`** no se verifica en este entorno (no está
-    instalado); se cubre con tests de round-trip/bytes y queda como verificación manual (como F10).
+  - [ ] **F7f** **Enchufar el subset Kafka al broker vivo + interop real con `kcat`.** F7a–F7e
+    entregan el subset como **librería de protocolo** (`src/kafka/`: codec, mensajes, `KafkaGateway`
+    con el puerto `KafkaBroker`), pero **no está cableado al servidor**: hoy `nexusd` no escucha
+    Kafka por ningún socket (no hay adaptador `KafkaBroker` real ni *listener* en `src/server/`).
+    Pendiente: (1) un adaptador `KafkaBroker` sobre el broker real (`TopicCatalog`/`RequestRouter`);
+    (2) un *listener* Kafka en **puerto propio** (`--kafka-port`, separado del 9092 nativo) que
+    alimente bytes a `KafkaGateway::handle_request` con el framing `Size:INT32`; (3) **verificación
+    en vivo con `kcat`** (`-L`/`-P`/`-C`) — `kcat` es instalable en este entorno, así que la interop
+    deja de ser solo manual. Cierra el objetivo declarado "habla con `kcat`" de F7. **Se hace ANTES
+    de la documentación final** (decisión del autor). *(Sustituye la nota previa de que la interop
+    con kcat quedaba sin verificar y corrige el supuesto de F7e de que el adaptador "vive en el
+    servidor": ese cableado estaba en realidad pendiente.)*
 - [x] **F8** Tracing distribuido (propagación de contexto de traza) — `telemetry/tracing.{hpp,cpp}`.
   Tipos de valor `TraceId` (128 bits) / `SpanId` (64 bits) / `SpanContext` (con *trace-flags* y
   *sampled*); codec **W3C Trace Context** (`format_traceparent`/`parse_traceparent`, versión `00`,
