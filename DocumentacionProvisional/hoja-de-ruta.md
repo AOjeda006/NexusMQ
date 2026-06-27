@@ -26,7 +26,9 @@ eco IOCP por loopback y temporizador — los 4 casos PASAN). **GitHub Actions de
 temporalmente** por cuota (se reactivan al publicar); la puerta de calidad se mantiene en local.
 Con las series M/R/C/I/F cerradas, **las Fases 1→4 están implementadas**; lo pendiente es trabajo de
 cierre, no de fase, agrupado en la **Fase 4b** (ver más abajo): bloque **W** (verificar/endurecer
-Windows — W1 cerrado), bloque **D** (cerrar la deuda diferida por *fasing*: persistencia de Raft,
+Windows — W1–W3 hechos en la máquina Windows: `nexusd` completo, `ctest` 698/698 con MSVC y clang-cl,
+smoke produce/fetch por IOCP; revalidación del gate Linux + merge pendientes), bloque **D** (cerrar la
+deuda diferida por *fasing*: persistencia de Raft,
 snapshots, swap-in en caliente, TLS/proxy y métricas) y bloque **L** (benchmarks de producción). La
 documentación final y la reactivación del CI (+ publicación) van **al final**, tras W/D/L.
 
@@ -853,16 +855,37 @@ Harness de benchmark vacío y CI:
   (2) `compression.cpp` dejaba `body` sin usar sin códecs nativos → `[[maybe_unused]]`. Verificado en la
   máquina Windows: `nexus-io` + `tools/wincheck` compilan con MSVC **y** clang-cl, arnés **4/4**.
   Revalidación del gate Linux + merge a `main`: pendiente (sesión Linux del autor).
-- [ ] **W3** Port **completo de `nexusd` a Windows** (no solo `nexus-io`) — **grande y opcional**. Hoy son
-  Linux-nativos: el *pinning* del `ReactorPool` (`pthread_setaffinity_np`/`cpu_set_t` →
-  `SetThreadAffinityMask` en Win32), la **factoría de proactor** del server (crea `IoUringBackend` → debe
-  elegir `IocpBackend` en Windows; la pieza ya existe y está runtime-verificada), las **señales** de
-  `nexusd` (`std::signal` es portable, pero el despertar por `eventfd` no → `SetConsoleCtrlHandler` +
-  despertar por `PostQueuedCompletionStatus`) y cualquier fuga POSIX en broker/consensus/ingress (p. ej.
-  OpenSSL). **Solo compile-verificable aquí (MinGW), no runtime**; además exige que **todo el árbol**
-  compile en Windows (no solo `nexus-io`). Es un hito en sí mismo: se aborda como **W3** dedicado y su
-  runtime se delega a la máquina Windows (mismo patrón que W1). Prioridad **baja** frente a D/L (el valor
-  de portabilidad —el puerto `Proactor`— ya está demostrado por `nexus-io`).
+- [x] **W3** Port **completo de `nexusd` a Windows** (no solo `nexus-io`), rama `windows-port`, **ADR-0028**.
+  Llevado en tres etapas, **inerte en Linux** (todo cambio va tras guarda de plataforma o usa tipos
+  idénticos: `NativeHandle` es `int` en POSIX):
+  - **Etapa A — todo el árbol compila (MSVC + clang-cl).** Portados los POSIX-ismos tras la abstracción
+    `Proactor` + `#if defined(_WIN32)`: *pinning* del `ReactorPool` (`SetThreadAffinityMask`), factoría de
+    proactor del server (`make_default_proactor` → `IocpBackend` en Windows), señales de `nexusd`
+    (`SetConsoleCtrlHandler` + despertar por `PostQueuedCompletionStatus`), sockets del `Client` y del
+    `HttpAdminClient` (Winsock), rutas OpenSSL (`ingress/tls.cpp`) y `gmtime_s`/`gmtime_r` en telemetría.
+  - **Etapa B — `ctest` completo VERDE en Windows: `698/698` con MSVC *y* `698/698` con clang-cl.** Se
+    excluyen en Windows (`if(NOT WIN32)`, documentado) 8 tests de arnés **POSIX-only** (sockets BSD crudos /
+    `fork`); su funcionalidad portable la cubren `tools/wincheck` y el smoke de Etapa C, y en Linux corren
+    en la puerta canónica. El triaje destapó **tres bugs reales** (no de andamiaje), ya corregidos:
+    1. **Cuelgue por reutilización de handles en IOCP** (el grave): el caché de asociación
+       (`std::unordered_set<HANDLE>`) saltaba `CreateIoCompletionPort` para un valor de SOCKET ya visto,
+       pero Windows **reutiliza** los valores al cerrarlos → un socket nuevo con valor reusado quedaba sin
+       asociar y su completion no llegaba nunca (cuelgue dependiente de *timing*; lo disparaban las
+       conexiones cortas `Connection: close` del admin REST). Arreglo: asociar **siempre** e ignorar el
+       `ERROR_INVALID_PARAMETER` benigno (un caché por valor es intrínsecamente inseguro ante reúso).
+    2. **`FILE_SHARE_DELETE`** en `File::open` (Windows): da semántica POSIX de borrar-mientras-abierto
+       (rotación de segmentos, limpieza de temporales); sin él Windows rechaza `remove` con el handle vivo.
+    3. **OpenSSL `applink`** en los certs de prueba: `test_certs.hpp` pasaba un `FILE*` del CRT de la app a
+       `PEM_write_*` → se reescribe con `BIO_new_file` (OpenSSL abre el fichero con su runtime; portable).
+    Más dos arreglos de build Windows: `nexus-ffi` con `WINDOWS_EXPORT_ALL_SYMBOLS` (genera la *import
+    library*; antes la DLL sin exportar no producía `.lib`) y copia de DLLs dependientes junto a
+    `nexus-tests.exe` (`TARGET_RUNTIME_DLLS`; evita `STATUS_DLL_NOT_FOUND` en el descubrimiento de gtest).
+  - **Etapa C — smoke de `nexusd.exe` real por IOCP.** Lanzado el binario (puerto datos + admin), un arnés
+    nativo (`Client`) hizo un **round-trip produce/fetch de 5 records por IOCP** (offsets 0-4, valores
+    verificados) y `nexus-cli topic list` resolvió el plano de operación (REST→IOCP) — la misma ruta que
+    sufría el cuelgue del bug nº1. Parada limpia.
+  Revalidación del gate canónico Linux (GCC/libstdc++ + Clang/libc++ + ASan + TSan) y merge a `main`:
+  **pendiente** (sesión Linux del autor; no se fusiona a `main` desde Windows).
 
 ### Bloque D — Cerrar la deuda diferida por *fasing* (punto 1)
 - [x] **D1** **Persistencia en disco del estado persistente de Raft** (`current_term`/`voted_for`). La FSM
