@@ -32,7 +32,6 @@
 #include <memory>
 #include <system_error>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -84,7 +83,6 @@ struct IocpBackend::Port {
     HANDLE iocp = nullptr;
     LPFN_ACCEPTEX accept_ex = nullptr;
     LPFN_CONNECTEX connect_ex = nullptr;
-    std::unordered_set<HANDLE> associated;
     std::unordered_map<OVERLAPPED*, std::unique_ptr<Op>> inflight;
     std::multimap<MonoTime, Proactor::Completion> timers;
 
@@ -115,11 +113,19 @@ struct IocpBackend::Port {
     Port(Port&&) = delete;
     Port& operator=(Port&&) = delete;
 
-    /// Asocia un handle/socket al puerto antes de su primera operación (idempotente).
+    /// Asocia un handle/socket al puerto antes de cada operación (idempotente).
+    /// @details **No** se cachea por valor de handle: Windows **reutiliza** los valores numéricos
+    /// de
+    ///   SOCKET/HANDLE en cuanto se cierran, así que un caché por valor asociaría de menos un
+    ///   socket nuevo que reusa un valor ya visto —su completion nunca llegaría al puerto y la
+    ///   operación colgaría para siempre—. Por eso asociamos **siempre**: si el handle ya estaba
+    ///   asociado a este puerto, `CreateIoCompletionPort` falla con `ERROR_INVALID_PARAMETER`, que
+    ///   es benigno y se ignora (la asociación previa sigue válida). Un fallo real se manifiesta
+    ///   luego en la propia operación de E/S (que hace `post_forced` del error), no aquí. El coste
+    ///   es una llamada redundante por op; aceptable (Windows no es la plataforma primaria;
+    ///   ADR-0028).
     void associate(HANDLE handle) {
-        if (associated.insert(handle).second) {
-            ::CreateIoCompletionPort(handle, iocp, 0, 0);
-        }
+        static_cast<void>(::CreateIoCompletionPort(handle, iocp, 0, 0));
     }
 
     /// Registra una operación (el mapa la posee hasta su completion) y devuelve un puntero estable.
