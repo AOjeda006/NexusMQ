@@ -68,10 +68,16 @@ struct FetchResponse {
     std::vector<FetchTopicResponse> topics;
 };
 
-/// @brief Decodifica el **cuerpo** de una petición Fetch v12 desde @p dec (tras la cabecera).
-[[nodiscard]] expected<FetchRequest> decode_fetch_request(Decoder& dec);
+/// @brief Decodifica el **cuerpo** de una petición Fetch desde @p dec (tras la cabecera).
+/// @param api_version Versión negociada: < 12 usa el formato **clásico** (longitudes
+/// `INT16`/`INT32`,
+///   sin *tagged fields*); >= 12, el **flexible** (compacto + tagged). Gobierna además qué campos
+///   están presentes (p. ej. `current_leader_epoch` desde v9, `last_fetched_epoch` desde v12).
+[[nodiscard]] expected<FetchRequest> decode_fetch_request(Decoder& dec, std::int16_t api_version);
 
-/// @brief Serializa el **cuerpo** de una respuesta Fetch v12 (flexible) en @p enc.
-void encode_fetch_response(Encoder& enc, const FetchResponse& resp);
+/// @brief Serializa el **cuerpo** de una respuesta Fetch en @p enc según @p api_version (clásica o
+///   flexible; gates de `throttle`/`error`/`last_stable_offset`/`log_start_offset`/réplica
+///   preferida).
+void encode_fetch_response(Encoder& enc, const FetchResponse& resp, std::int16_t api_version);
 
 }  // namespace nexus::kafka

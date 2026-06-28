@@ -12,8 +12,10 @@
 
 #include "common/bytes.hpp"
 #include "common/error.hpp"
+#include "common/task.hpp"
 #include "kafka/codec.hpp"
 #include "kafka/fetch.hpp"
+#include "kafka/list_offsets.hpp"
 #include "kafka/messages.hpp"
 #include "kafka/metadata.hpp"
 #include "kafka/produce.hpp"
@@ -22,18 +24,21 @@ namespace {
 
 using nexus::Buffer;
 using nexus::ByteSpan;
+using nexus::sync_wait;
 using nexus::kafka::ApiKey;
 using nexus::kafka::Decoder;
 using nexus::kafka::Encoder;
 
 /// Doble de test del puerto al broker: registra la última petición y devuelve respuestas fijas.
+/// Los métodos completan inline (la `task` no se suspende), como haría el adaptador en N=1.
 class FakeBroker : public nexus::kafka::KafkaBroker {
 public:
     nexus::kafka::MetadataRequest last_metadata;
     nexus::kafka::ProduceRequest last_produce;
     nexus::kafka::FetchRequest last_fetch;
 
-    nexus::kafka::MetadataResponse metadata(const nexus::kafka::MetadataRequest& req) override {
+    nexus::task<nexus::kafka::MetadataResponse> metadata(
+        const nexus::kafka::MetadataRequest& req) override {
         last_metadata = req;
         nexus::kafka::MetadataResponse resp;
         resp.controller_id = 1;
@@ -45,10 +50,11 @@ public:
         nexus::kafka::MetadataTopic topic;
         topic.name = "orders";
         resp.topics.push_back(topic);
-        return resp;
+        co_return resp;
     }
 
-    nexus::kafka::ProduceResponse produce(const nexus::kafka::ProduceRequest& req) override {
+    nexus::task<nexus::kafka::ProduceResponse> produce(
+        const nexus::kafka::ProduceRequest& req) override {
         last_produce = req;
         nexus::kafka::ProduceResponse resp;
         nexus::kafka::ProduceTopicResponse topic;
@@ -57,14 +63,29 @@ public:
         part.base_offset = 99;
         topic.partitions.push_back(part);
         resp.topics.push_back(topic);
-        return resp;
+        co_return resp;
     }
 
-    nexus::kafka::FetchResponse fetch(const nexus::kafka::FetchRequest& req) override {
+    nexus::task<nexus::kafka::FetchResponse> fetch(const nexus::kafka::FetchRequest& req) override {
         last_fetch = req;
         nexus::kafka::FetchResponse resp;
         resp.session_id = 5;
-        return resp;
+        co_return resp;
+    }
+
+    nexus::kafka::ListOffsetsRequest last_list_offsets;
+
+    nexus::task<nexus::kafka::ListOffsetsResponse> list_offsets(
+        const nexus::kafka::ListOffsetsRequest& req) override {
+        last_list_offsets = req;
+        nexus::kafka::ListOffsetsResponse resp;
+        nexus::kafka::ListOffsetTopicResponse topic;
+        topic.name = "orders";
+        nexus::kafka::ListOffsetPartitionResponse part;
+        part.offset = 123;
+        topic.partitions.push_back(part);
+        resp.topics.push_back(topic);
+        co_return resp;
     }
 };
 
@@ -92,7 +113,7 @@ TEST(KafkaGateway, ApiVersions_EchoesCorrelationAndListsApis) {
     put_request_header(enc, ApiKey::ApiVersions, 3, 777);
     // El cuerpo de la petición ApiVersions no lo interpreta el gateway.
 
-    const auto resp = gateway.handle_request(req.as_span());
+    const auto resp = sync_wait(gateway.handle_request(req.as_span()));
     ASSERT_TRUE(resp.has_value());
 
     Decoder dec{resp->as_span()};
@@ -116,7 +137,7 @@ TEST(KafkaGateway, Metadata_DelegatesToBrokerAndEncodes) {
     enc.put_bool(false);            // include_topic_authorized_operations
     enc.put_empty_tagged_fields();  // body tags
 
-    const auto resp = gateway.handle_request(req.as_span());
+    const auto resp = sync_wait(gateway.handle_request(req.as_span()));
     ASSERT_TRUE(resp.has_value());
 
     ASSERT_TRUE(broker.last_metadata.topics.has_value());
@@ -150,7 +171,7 @@ TEST(KafkaGateway, Produce_PassesRecordsToBroker) {
     enc.put_empty_tagged_fields();  // topic tags
     enc.put_empty_tagged_fields();  // body tags
 
-    const auto resp = gateway.handle_request(req.as_span());
+    const auto resp = sync_wait(gateway.handle_request(req.as_span()));
     ASSERT_TRUE(resp.has_value());
 
     ASSERT_EQ(broker.last_produce.topics.size(), 1U);
@@ -192,7 +213,7 @@ TEST(KafkaGateway, Fetch_DelegatesToBroker) {
     enc.put_compact_string("");     // rack_id
     enc.put_empty_tagged_fields();  // body tags
 
-    const auto resp = gateway.handle_request(req.as_span());
+    const auto resp = sync_wait(gateway.handle_request(req.as_span()));
     ASSERT_TRUE(resp.has_value());
 
     ASSERT_EQ(broker.last_fetch.topics.size(), 1U);
@@ -207,6 +228,40 @@ TEST(KafkaGateway, Fetch_DelegatesToBroker) {
     EXPECT_EQ(dec.get_i32().value_or(-1), 0);           // throttle_time_ms
 }
 
+TEST(KafkaGateway, ListOffsets_DelegatesToBroker) {
+    FakeBroker broker;
+    nexus::kafka::KafkaGateway gateway{broker};
+
+    Buffer req;
+    Encoder enc{req};
+    put_request_header(enc, ApiKey::ListOffsets, 7, 55);
+    enc.put_i32(-1);  // replica_id
+    enc.put_i8(0);    // isolation_level
+    enc.put_compact_array_len(1);
+    enc.put_compact_string("orders");
+    enc.put_compact_array_len(1);
+    enc.put_i32(0);                 // partition_index
+    enc.put_i32(-1);                // current_leader_epoch
+    enc.put_i64(-2);                // timestamp (earliest)
+    enc.put_empty_tagged_fields();  // partition tags
+    enc.put_empty_tagged_fields();  // topic tags
+    enc.put_empty_tagged_fields();  // body tags
+
+    const auto resp = sync_wait(gateway.handle_request(req.as_span()));
+    ASSERT_TRUE(resp.has_value());
+
+    ASSERT_EQ(broker.last_list_offsets.topics.size(), 1U);
+    EXPECT_EQ(broker.last_list_offsets.topics[0].name, "orders");
+    ASSERT_EQ(broker.last_list_offsets.topics[0].partitions.size(), 1U);
+    EXPECT_EQ(broker.last_list_offsets.topics[0].partitions[0].timestamp, -2);
+
+    Decoder dec{resp->as_span()};
+    EXPECT_EQ(dec.get_i32().value_or(-1), 55);               // correlation_id
+    ASSERT_TRUE(dec.skip_tagged_fields().has_value());       // cabecera flexible
+    EXPECT_EQ(dec.get_i32().value_or(-1), 0);                // throttle_time_ms
+    EXPECT_EQ(dec.get_compact_array_len().value_or(-1), 1);  // topics
+}
+
 TEST(KafkaGateway, UnsupportedApiKey_ReturnsError) {
     FakeBroker broker;
     nexus::kafka::KafkaGateway gateway{broker};
@@ -219,7 +274,7 @@ TEST(KafkaGateway, UnsupportedApiKey_ReturnsError) {
     enc.put_i32(1);
     enc.put_nullable_string(std::optional<std::string_view>{"kcat"});
 
-    const auto resp = gateway.handle_request(req.as_span());
+    const auto resp = sync_wait(gateway.handle_request(req.as_span()));
     ASSERT_FALSE(resp.has_value());
     EXPECT_EQ(resp.error().code(), nexus::ErrorCode::Unsupported);
 }

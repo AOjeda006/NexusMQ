@@ -6,6 +6,8 @@ add_library(nexus-kafka
   metadata.cpp
   produce.cpp
   fetch.cpp
+  list_offsets.cpp
+  record_batch.cpp
   gateway.cpp)
 add_library(nexus::kafka ALIAS nexus-kafka)
 

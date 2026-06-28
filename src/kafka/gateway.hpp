@@ -6,7 +6,9 @@
 
 #include "common/bytes.hpp"
 #include "common/error.hpp"
+#include "common/task.hpp"
 #include "kafka/fetch.hpp"
+#include "kafka/list_offsets.hpp"
 #include "kafka/metadata.hpp"
 #include "kafka/produce.hpp"
 
@@ -20,6 +22,11 @@ namespace nexus::kafka {
 ///   dependencias). Las respuestas llevan los `error_code` de Kafka en su propio cuerpo, así que
 ///   los métodos devuelven la respuesta por valor (no `expected`): un fallo de negocio es un código
 ///   de error en la respuesta, no un fallo de transporte.
+/// @note Métodos **asíncronos** (`task<...>`): el adaptador real reparte cada partición a su
+///   reactor dueño por paso de mensajes (`PartitionRouter`/`call_on`, ADR-0026), como el camino
+///   nativo (`RequestRouter`). Un doble de test puede devolver el valor con una `task` que completa
+///   inline (sin suspenderse). Los métodos no son `[[nodiscard]]` aquí porque la `task` perezosa ya
+///   lo es al construirse.
 class KafkaBroker {
 public:
     KafkaBroker() = default;
@@ -30,11 +37,14 @@ public:
     virtual ~KafkaBroker() = default;
 
     /// Describe el clúster y los topics pedidos (`nullopt` = todos) para una respuesta Metadata.
-    [[nodiscard]] virtual MetadataResponse metadata(const MetadataRequest& req) = 0;
+    virtual task<MetadataResponse> metadata(const MetadataRequest& req) = 0;
     /// Anexa los records de la petición a las particiones correspondientes.
-    [[nodiscard]] virtual ProduceResponse produce(const ProduceRequest& req) = 0;
+    virtual task<ProduceResponse> produce(const ProduceRequest& req) = 0;
     /// Lee records desde las particiones/offsets pedidos.
-    [[nodiscard]] virtual FetchResponse fetch(const FetchRequest& req) = 0;
+    virtual task<FetchResponse> fetch(const FetchRequest& req) = 0;
+    /// Resuelve el offset de inicio/fin de las particiones pedidas (para el arranque del
+    /// consumidor).
+    virtual task<ListOffsetsResponse> list_offsets(const ListOffsetsRequest& req) = 0;
 };
 
 /// @brief Enrutador de peticiones Kafka: cabecera → API → respuesta serializada. Afinidad:
@@ -52,7 +62,9 @@ public:
     ///   serializada (también sin `Size`).
     /// @return La respuesta, o un error si la petición está malformada o la `api_key` no se
     /// soporta.
-    [[nodiscard]] expected<Buffer> handle_request(ByteSpan request);
+    /// @pre @p request debe seguir vivo hasta que la `task` complete (la petición se decodifica
+    ///   sobre esa vista; el transporte la mantiene en el *frame* de la conexión).
+    [[nodiscard]] task<expected<Buffer>> handle_request(ByteSpan request);
 
 private:
     KafkaBroker& broker_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)

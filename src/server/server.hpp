@@ -33,11 +33,13 @@
 #include "ingress/tls.hpp"  // TlsContext: terminación TLS del plano de datos (ADR-0019)
 #endif
 #include "io/socket.hpp"
+#include "kafka/gateway.hpp"
 #include "reactor/partition_router.hpp"
 #include "reactor/reactor.hpp"
 #include "reactor/reactor_pool.hpp"
 #include "server/admin_api.hpp"
 #include "server/admin_router.hpp"
+#include "server/kafka_adapter.hpp"
 #include "telemetry/metrics.hpp"
 
 namespace nexus {
@@ -70,6 +72,11 @@ public:
         /// Puerto del **plano de operación** (REST admin + /metrics + health). `nullopt` lo
         /// desactiva; `0` = efímero.
         std::optional<std::uint16_t> admin_port;
+        /// Puerto del **listener compatible con Kafka** (subconjunto F7, separado del nativo).
+        /// `nullopt` lo desactiva; `0` = efímero (útil en tests). Habla el wire de Kafka
+        /// (`Size:INT32` + APIs ApiVersions/Metadata/ListOffsets/Produce/Fetch) con
+        /// `kcat`/librdkafka.
+        std::optional<std::uint16_t> kafka_port;
         /// Secreto HMAC del JWT que protege el REST admin. Vacío = sin autenticación.
         std::string jwt_secret;
         /// Mínimo de espacio libre en disco (bytes) para `/readyz`. `0` = sin chequeo de disco.
@@ -162,6 +169,9 @@ public:
     /// Puerto del plano de operación realmente enlazado; `0` si está desactivado o sin `bind`.
     [[nodiscard]] std::uint16_t admin_port() const noexcept;
 
+    /// Puerto del listener Kafka realmente enlazado; `0` si está desactivado o sin `bind`.
+    [[nodiscard]] std::uint16_t kafka_port() const noexcept;
+
     /// Puerto del plano inter-nodo realmente enlazado; `0` si está desactivado o sin `bind`.
     [[nodiscard]] std::uint16_t cluster_port() const noexcept;
 
@@ -246,6 +256,13 @@ private:
     std::optional<UpstreamPool>
         upstream_pool_;           ///< Pool de conexiones aguas arriba (sobre el dir).
     std::optional<Proxy> proxy_;  ///< Enrutado + relevo de tramas (sobre el balanc.).
+    /// Adaptador del puerto Kafka sobre el broker real (F7f) y su dispatcher, poblados en `run` si
+    /// hay `kafka_port`. REACTOR-LOCAL: el núcleo 0 acepta y sirve las conexiones Kafka. Declarados
+    /// **antes** que `pool_` para destruirse **después** (las corrutinas de servicio del pool
+    /// referencian el gateway). El orden interno importa: el gateway referencia al broker, así que
+    /// el broker va **antes** que el gateway.
+    std::optional<KafkaServerBroker> kafka_broker_;
+    std::optional<kafka::KafkaGateway> kafka_gateway_;
     ReactorPool pool_;
     ReactorPool::ProactorFactory proactor_factory_;
     /// Núcleo 0 (lo corre `run` inline), publicado para que `stop` lo despierte desde otro hilo /
@@ -261,6 +278,7 @@ private:
     std::optional<Listener> listener_;
     std::optional<Listener> admin_listener_;
     std::optional<Listener> cluster_listener_;
+    std::optional<Listener> kafka_listener_;
     std::optional<RequestRouter> router_;
     /// Enruta las operaciones de partición a su reactor dueño (se puebla en `run`, tras el pool).
     std::optional<PartitionRouter> partition_router_;

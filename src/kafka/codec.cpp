@@ -177,6 +177,14 @@ expected<ByteSpan> Decoder::take(std::size_t n) {
     return span;
 }
 
+expected<void> Decoder::skip(std::size_t n) {
+    const expected<ByteSpan> span = take(n);
+    if (!span) {
+        return std::unexpected(span.error());
+    }
+    return {};
+}
+
 expected<std::int8_t> Decoder::get_i8() {
     const expected<ByteSpan> span = take(1);
     if (!span) {

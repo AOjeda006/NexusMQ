@@ -61,6 +61,7 @@ add_executable(nexus-tests
   unit/broker/request_router_test.cpp
   unit/server/admin_api_test.cpp
   unit/server/admin_router_test.cpp
+  unit/server/kafka_adapter_test.cpp
   unit/consensus/raft_state_test.cpp
   unit/ingress/rate_limiter_test.cpp
   unit/ingress/circuit_breaker_test.cpp
@@ -100,6 +101,7 @@ add_executable(nexus-tests
   unit/kafka/messages_test.cpp
   unit/kafka/metadata_test.cpp
   unit/kafka/produce_fetch_test.cpp
+  unit/kafka/record_batch_test.cpp
   unit/kafka/gateway_test.cpp
   unit/ffi/ffi_test.cpp
   e2e/client_e2e_test.cpp

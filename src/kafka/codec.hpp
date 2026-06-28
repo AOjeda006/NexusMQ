@@ -113,6 +113,10 @@ public:
     /// Salta la sección de *tagged fields* (cuenta + cada tag/longitud/datos) sin interpretarla.
     [[nodiscard]] expected<void> skip_tagged_fields();
 
+    /// @brief Avanza @p n bytes sin interpretarlos (campos que el lector no necesita).
+    /// @return Éxito, o `InvalidArgument` si no quedan @p n bytes en la entrada.
+    [[nodiscard]] expected<void> skip(std::size_t n);
+
     [[nodiscard]] std::size_t remaining() const noexcept { return in_.size() - pos_; }
     [[nodiscard]] bool empty() const noexcept { return pos_ >= in_.size(); }
 

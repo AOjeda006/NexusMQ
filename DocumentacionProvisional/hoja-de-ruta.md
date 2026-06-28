@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** **FASE 4 (Stretch, serie F) COMPLETADA** — **F1** (productor *effectively-once* + *fencing* por época), **F2** (codec por record + migración del cliente), **F3** (compactación por clave), **F4** (DLQ), **F5** (compresión LZ4/Zstd por batch), **F6** (E/S directa `O_DIRECT` + lector con readahead), **F7** (subconjunto Kafka-compatible: codec big-endian, cabeceras + `ApiVersions`, `Metadata`, `Produce`/`Fetch` y *dispatcher* `KafkaGateway`), **F8** (tracing distribuido: contexto W3C + spans), **F9** (*binding* Python vía ABI C `nexus-ffi` + `ctypes`, ADR-0020) y **F10** (backend IOCP Windows: **implementado y verificado en runtime sobre Windows con MSVC** (VS 2026, MSVC 19.51, `/W4 /WX`; arnés `tools/wincheck`), ADR-0023 —reemplaza ADR-0022, que a su vez reemplazó ADR-0021—). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
+**Estado actual:** **FASE 4 (Stretch, serie F) COMPLETADA** — **F1** (productor *effectively-once* + *fencing* por época), **F2** (codec por record + migración del cliente), **F3** (compactación por clave), **F4** (DLQ), **F5** (compresión LZ4/Zstd por batch), **F6** (E/S directa `O_DIRECT` + lector con readahead), **F7** (subconjunto Kafka-compatible: codec big-endian por versión —clásico/flexible—, cabeceras + `ApiVersions`/`Metadata`/`ListOffsets`/`Produce`/`Fetch`, *dispatcher* `KafkaGateway` y **adaptador asíncrono cross-core sobre el broker vivo en `--kafka-port`, con interop `kcat` verificada en vivo**, ADR-0029), **F8** (tracing distribuido: contexto W3C + spans), **F9** (*binding* Python vía ABI C `nexus-ffi` + `ctypes`, ADR-0020) y **F10** (backend IOCP Windows: **implementado y verificado en runtime sobre Windows con MSVC** (VS 2026, MSVC 19.51, `/W4 /WX`; arnés `tools/wincheck`), ADR-0023 —reemplaza ADR-0022, que a su vez reemplazó ADR-0021—). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
 añade el **consenso Raft por partición** (`nexus-consensus`: estado/log/RPC, `RaftNode` como máquina de
 estados síncrona sin E/S con pre-vote, replicación, *high-watermark* por mayoría, transferencia de
 liderazgo y learners; ADR-0014/0015), la **integración en el broker** (`ReplicatedPartition`, ADR-0016),
@@ -767,18 +767,26 @@ Harness de benchmark vacío y CI:
     el servidor). Opera sobre el cuerpo del frame (el prefijo `Size` lo añade el transporte). Tests:
     despacho de las 4 APIs con un `FakeBroker` (eco de `correlation_id`, delegación correcta,
     `api_key` no soportada → error). Verde en GCC/Clang/ASan.
-  - [ ] **F7f** **Enchufar el subset Kafka al broker vivo + interop real con `kcat`.** F7a–F7e
-    entregan el subset como **librería de protocolo** (`src/kafka/`: codec, mensajes, `KafkaGateway`
-    con el puerto `KafkaBroker`), pero **no está cableado al servidor**: hoy `nexusd` no escucha
-    Kafka por ningún socket (no hay adaptador `KafkaBroker` real ni *listener* en `src/server/`).
-    Pendiente: (1) un adaptador `KafkaBroker` sobre el broker real (`TopicCatalog`/`RequestRouter`);
-    (2) un *listener* Kafka en **puerto propio** (`--kafka-port`, separado del 9092 nativo) que
-    alimente bytes a `KafkaGateway::handle_request` con el framing `Size:INT32`; (3) **verificación
-    en vivo con `kcat`** (`-L`/`-P`/`-C`) — `kcat` es instalable en este entorno, así que la interop
-    deja de ser solo manual. Cierra el objetivo declarado "habla con `kcat`" de F7. **Se hace ANTES
-    de la documentación final** (decisión del autor). *(Sustituye la nota previa de que la interop
-    con kcat quedaba sin verificar y corrige el supuesto de F7e de que el adaptador "vive en el
-    servidor": ese cableado estaba en realidad pendiente.)*
+  - [x] **F7f** **Enchufar el subset Kafka al broker vivo + interop real con `kcat`** (**ADR-0029**).
+    (1) **Adaptador** `KafkaServerBroker` (`src/server/kafka_adapter.{hpp,cpp}`) que implementa el
+    puerto `KafkaBroker` como **corrutinas `task<...>`** y enruta cada partición a su **núcleo dueño**
+    vía `PartitionRouter::route` (ADR-0026); `bind_cluster` le inyecta el router y los `TopicManager`
+    por núcleo (en *unbound* opera local, para tests). Guarda el `RecordBatch` v2 de Kafka **opaco**
+    (solo `record_count` gobierna offsets) y en `Fetch` lo reconstruye **reescribiendo el `baseOffset`**
+    (el CRC de Kafka cubre desde `attributes`, no se invalida). (2) ***Listener*** Kafka en
+    **puerto propio** (`--kafka-port`): `Server` lo enlaza y `serve_kafka_connection`
+    (`src/server/kafka_connection.hpp`) sirve cada conexión con el framing `Size:INT32` →
+    `KafkaGateway::handle_request`. El puerto/gateway se construyen en el *composition root* del
+    servidor. (3) **Codec por versión** (`is_flexible(api_key, version)`): `Produce`/`Fetch`
+    decodifican/codifican **clásico vs flexible** con *gates* de campo por versión — corrige el supuesto
+    de F7d/F7e de que librdkafka usaría v9/v12; en realidad negocia **Produce v7 / Fetch v11
+    clásicas** (más `Metadata v9` / `ListOffsets v7` / `ApiVersions v3` flexibles). Se añadió
+    `ListOffsets` (v7) para el arranque del consumidor. Un `Fetch` sin datos devuelve un MessageSet
+    **vacío** (no `null`: librdkafka rechaza `MessageSetSize` -1). (4) **Interop en vivo con `kcat`
+    verificada**: `-L` (metadata), `-P` (produce) y `-C` (consume) limpios, incl. **multi-partición
+    cross-core**. Tests: round-trip clásico v7/v11 y flexible, `MessageSet` vacío-no-nulo, despacho
+    `ListOffsets`, adaptador `produce→fetch` con rebase de offset. Verde en GCC/Clang/ASan/TSan +
+    clang-format/clang-tidy. *(Cierra el objetivo "habla con `kcat`" de F7.)*
 - [x] **F8** Tracing distribuido (propagación de contexto de traza) — `telemetry/tracing.{hpp,cpp}`.
   Tipos de valor `TraceId` (128 bits) / `SpanId` (64 bits) / `SpanContext` (con *trace-flags* y
   *sampled*); codec **W3C Trace Context** (`format_traceparent`/`parse_traceparent`, versión `00`,

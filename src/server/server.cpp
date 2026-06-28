@@ -25,6 +25,7 @@
 #include "reactor/cross_core_call.hpp"
 #include "server/admin_http.hpp"
 #include "server/connection.hpp"
+#include "server/kafka_connection.hpp"
 
 namespace nexus {
 
@@ -159,6 +160,18 @@ task<void> admin_accept_loop(Reactor& reactor, Listener& listener, const AdminRo
     }
 }
 
+/// Bucle de aceptación del listener Kafka: una corrutina de servicio por conexión (F7f).
+task<void> kafka_accept_loop(Reactor& reactor, Listener& listener, kafka::KafkaGateway& gateway) {
+    while (true) {
+        expected<Socket> client = co_await listener.async_accept(reactor.proactor());
+        if (!client) {
+            co_return;  // listener cerrado o error: dejamos de aceptar.
+        }
+        client->set_nodelay(true);  // petición/respuesta de baja latencia: sin Nagle.
+        reactor.spawn(serve_kafka_connection(reactor.proactor(), std::move(*client), gateway));
+    }
+}
+
 }  // namespace
 
 Server::Server(Config config, ReactorPool::ProactorFactory proactor_factory)
@@ -273,6 +286,13 @@ expected<void> Server::bind() {
         }
         cluster_listener_ = std::move(*cluster);
     }
+    if (config_.kafka_port) {
+        expected<Listener> kafka = Listener::bind(config_.host, *config_.kafka_port);
+        if (!kafka) {
+            return std::unexpected(kafka.error());
+        }
+        kafka_listener_ = std::move(*kafka);
+    }
 #ifdef NEXUS_HAVE_OPENSSL
     // Termina el plano de datos con TLS si hay certificado/clave (y mTLS si hay CA de cliente). Se
     // valida en el borde (carga de PEM) antes de servir: un cert/clave inválido falla aquí.
@@ -310,6 +330,10 @@ std::uint16_t Server::admin_port() const noexcept {
 
 std::uint16_t Server::cluster_port() const noexcept {
     return cluster_listener_ ? cluster_listener_->local_port() : 0;
+}
+
+std::uint16_t Server::kafka_port() const noexcept {
+    return kafka_listener_ ? kafka_listener_->local_port() : 0;
 }
 
 void Server::start_raft_ticks(Reactor& main) {
@@ -450,6 +474,17 @@ void Server::run() {
     }
     if (cluster_listener_) {
         main.spawn(cluster_accept_loop(main, *cluster_listener_));
+    }
+    if (kafka_listener_) {
+        // Adaptador Kafka sobre el broker real (F7f): opera sobre el `TopicManager` del núcleo 0 y
+        // reparte cada partición a su reactor dueño (ADR-0026), igual que el router nativo. Anuncia
+        // en Metadata el host configurado y el puerto Kafka realmente enlazado (los clientes se
+        // reconectan ahí para produce/fetch).
+        kafka_broker_.emplace(catalog_.manager(0), config_.node_id, config_.advertised_host,
+                              kafka_listener_->local_port());
+        kafka_broker_->bind_cluster(main, *partition_router_, catalog_.managers());
+        kafka_gateway_.emplace(*kafka_broker_);
+        main.spawn(kafka_accept_loop(main, *kafka_listener_, *kafka_gateway_));
     }
     health_.set_started(true);  // ya servimos: `/readyz` puede dar 200.
     main.run();                 // bloquea el hilo llamante hasta `stop()`.

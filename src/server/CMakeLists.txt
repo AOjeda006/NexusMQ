@@ -3,6 +3,7 @@
 # `nexusd` solo añade el main (parseo de args + señales).
 add_library(nexus-server
   server.cpp
+  kafka_adapter.cpp
   admin_api.cpp
   admin_router.cpp
   admin_http.cpp)
@@ -19,6 +20,7 @@ target_link_libraries(nexus-server PUBLIC
   nexus::broker
   nexus::cluster
   nexus::ingress
+  nexus::kafka
   nexus::telemetry
   nexus_options)
 

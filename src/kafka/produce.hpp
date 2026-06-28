@@ -58,10 +58,16 @@ struct ProduceResponse {
     std::int32_t throttle_time_ms = 0;
 };
 
-/// @brief Decodifica el **cuerpo** de una petición Produce v9 desde @p dec (tras la cabecera).
-[[nodiscard]] expected<ProduceRequest> decode_produce_request(Decoder& dec);
+/// @brief Decodifica el **cuerpo** de una petición Produce desde @p dec (tras la cabecera).
+/// @param api_version Versión negociada: < 9 usa el formato **clásico** (longitudes
+/// `INT16`/`INT32`,
+///   sin *tagged fields*); >= 9, el **flexible** (compacto + tagged). Gobierna además qué campos
+///   están presentes (p. ej. `transactional_id` desde v3).
+[[nodiscard]] expected<ProduceRequest> decode_produce_request(Decoder& dec,
+                                                              std::int16_t api_version);
 
-/// @brief Serializa el **cuerpo** de una respuesta Produce v9 (flexible) en @p enc.
-void encode_produce_response(Encoder& enc, const ProduceResponse& resp);
+/// @brief Serializa el **cuerpo** de una respuesta Produce en @p enc según @p api_version (clásica
+///   o flexible; gates de `log_append_time`/`log_start_offset`/`record_errors`/`throttle`).
+void encode_produce_response(Encoder& enc, const ProduceResponse& resp, std::int16_t api_version);
 
 }  // namespace nexus::kafka

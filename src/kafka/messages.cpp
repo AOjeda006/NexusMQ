@@ -14,6 +14,8 @@ namespace {
             return 9;
         case ApiKey::Fetch:
             return 12;
+        case ApiKey::ListOffsets:
+            return 6;
         case ApiKey::Metadata:
             return 9;
         case ApiKey::ApiVersions:
@@ -92,6 +94,9 @@ std::vector<ApiVersionRange> supported_apis() {
         ApiVersionRange{.api_key = static_cast<std::int16_t>(ApiKey::Fetch),
                         .min_version = 0,
                         .max_version = 12},
+        ApiVersionRange{.api_key = static_cast<std::int16_t>(ApiKey::ListOffsets),
+                        .min_version = 0,
+                        .max_version = 7},
         ApiVersionRange{.api_key = static_cast<std::int16_t>(ApiKey::Metadata),
                         .min_version = 0,
                         .max_version = 9},
