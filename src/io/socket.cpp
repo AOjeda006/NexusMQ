@@ -290,8 +290,8 @@ task<expected<Socket>> Socket::async_connect(Proactor& proactor, std::string_vie
     if (::inet_pton(AF_INET, host_z.c_str(), &addr.sin_addr) != 1) {
         co_return make_error(ErrorCode::InvalidArgument, "host IPv4 inválido: " + host_z);
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): bytes del sockaddr para el
-    // puerto.
+    // Bytes del sockaddr para el connect (el kernel lee la dirección de forma asíncrona).
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     const ByteSpan addr_bytes{reinterpret_cast<const std::byte*>(&addr), sizeof(addr)};
     if (const expected<void> connected = co_await ConnectAwaitable{proactor, fd, addr_bytes};
         !connected) {
