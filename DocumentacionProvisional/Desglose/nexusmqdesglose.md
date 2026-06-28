@@ -1,12 +1,14 @@
 ================================================================================
-DESGLOSE DE LA SOLUCIÓN — NexusMQ (C++20)
+DESGLOSE DE LA SOLUCIÓN — NexusMQ (C++23)
 ================================================================================
 **Archivo:** `nexusmq-desglose.md`
-**Versión:** 0.1.0 (esqueleto de diseño derivado del anteproyecto v0.4.0)
-**Fecha:** 2026-06-10
-**Naturaleza:** Proyección de diseño (pre-implementación). Describe la estructura
-**prevista** de la solución —no código ya escrito—. Cada clase/método es una
-intención de diseño coherente con el anteproyecto; se concretará por fases.
+**Versión:** 0.2.0 (reconciliado con el estado as-built; base: esqueleto 0.1.0)
+**Fecha:** 2026-06-28
+**Naturaleza:** Vista de conjunto de la solución. Nació como **proyección de diseño**
+(pre-implementación) y se ha **reconciliado con el estado as-built** (targets, grafo de
+dependencias, árbol y build reflejan el código real). El detalle por clase/método vive en
+`nexusmqdesglosedetallado.md`; los ajustes finos respecto al diseño original se anotan en
+`hoja-de-ruta.md`. Estándar real: **C++23** (`cxx_std_23`, ADR-0011).
 
 ================================================================================
 0. CONVENCIONES DEL DESGLOSE
@@ -34,23 +36,30 @@ intención de diseño coherente con el anteproyecto; se concretará por fases.
 ================================================================================
 1. ESTRUCTURA DE LA SOLUCIÓN (targets y áreas)
 ================================================================================
-1 solución → 4 áreas → ~15 targets:
+1 solución → 4 áreas → **15 librerías `nexus-*`** + ejecutables, *tools* y pruebas:
 
 ÁREA            TARGET (tipo)              FASE   RESPONSABILIDAD
 -------------   ------------------------   ----   ------------------------------------
-Núcleo (libs)   nexus-common      (lib)    1      Tipos, bytes, CRC32C, error, config, log, reloj.
-                nexus-io          (lib)    1/1b   Abstracción proactor (io_uring/IOCP), File, Socket.
-                nexus-reactor     (lib)    1b     Reactor thread-per-core, scheduler de corrutinas, SPSC, allocator.
-                nexus-storage     (lib)    1      Record/Batch, Segment, índice, PartitionLog, retención, recuperación.
-                nexus-protocol    (lib)    1b     Codec, cabecera de trama, mensajes, códigos de error, compresión, créditos (PURO: sin E/S ni async).
-                nexus-wire        (lib)    1b     Framing sobre conexión: FrameReader/FrameWriter (Socket + Proactor). ADR-0013.
-                nexus-consensus   (lib)    2      Raft por partición (estado, RPC, log, elección).
-                nexus-broker      (lib)    1b/2   Topics, particiones, grupos, offsets, idempotencia, backpressure.
-                nexus-ingress     (lib)    3      TLS, rate-limit, circuit-breaker, balanceo, REST gateway.
-Ejecutables     nexus-server      (exe)    1b+    Daemon del broker (orquesta reactores + ingress + admin).
-                nexus-cli         (exe)    3      CLI de administración (nexus-cli).
-                nexus-bench       (exe)    1      Generador de carga open-loop + histograma de latencia.
-Cliente         nexus-client      (lib)    1b     Librería cliente C++ (smart-client). [+ binding Python, stretch]
+Núcleo (libs)   nexus-common      (lib)    1      Tipos, bytes, CRC32C, error, varint, base64, sha256, compresión, record, task.
+                nexus-io          (lib)    1/1b   Abstracción proactor (io_uring/IOCP), File, Socket, Listener, aligned buffer, block reader.
+                nexus-reactor     (lib)    1b     Reactor thread-per-core, scheduler de corrutinas, SPSC/MPMC, allocator, PartitionRouter, cross-core.
+                nexus-storage     (lib)    1      Segment, índice disperso, PartitionLog, retención, compactación por clave.
+                nexus-protocol    (lib)    1b     Codec, cabecera de trama, mensajes, códigos de error, versionado (PURO: sin E/S ni async).
+                nexus-wire        (lib)    1b     Framing sobre conexión: frame_io (Socket + Proactor). ADR-0013. (INTERFACE)
+                nexus-consensus   (lib)    2      Raft por partición (estado, RPC, log, snapshot, RaftNode, carrier, wire). deps: telemetry.
+                nexus-cluster     (lib)    2/4b   Transporte inter-nodo de Raft (RaftTransport/Receiver, PeerDirectory). ADR-0025.
+                nexus-broker      (lib)    1b/2   Topics, particiones, grupos, offsets, idempotencia, créditos, ReplicatedPartition.
+                nexus-kafka       (lib)    4      Subset Kafka: codec por versión, mensajes, gateway/dispatcher. ADR-0029.
+                nexus-ingress     (lib)    3      TLS, rate-limit, circuit-breaker, balanceo, REST gateway, JWT, ProblemDetail, proxy.
+                nexus-telemetry   (lib)    3      Métricas (Prometheus), logging estructurado, tracing W3C. ADR-0017.
+                nexus-server      (lib)    1b+    Cohesión del daemon: Server, admin API/HTTP/router, conexiones, listener Kafka.
+                nexus-client      (lib)    1b     Librería cliente C++ (smart-client): producer, consumer, dead-letter.
+                nexus-ffi         (lib SHARED) 4  ABI C estable (version + traceparent W3C) para el binding Python (ctypes). ADR-0020.
+Ejecutables     nexusd            (exe)    1b+    Daemon del broker (de nexus-server; orquesta reactores + ingress + admin + Kafka).
+                nexus-cli         (exe)    3      CLI de administración (habla REST admin). + lib nexus-cli-core.
+                nexus-bench       (exe)    1      Microbench (Google Benchmark) del motor de log.
+                nexus-loadgen     (exe)    4b/L   Generador de carga open-loop por red + histograma. + lib nexus-loadgen.
+Soporte/tools   nexus-wincheck    (exe)    4b/W   Arnés de runtime Windows (WIN32-only): File, eco IOCP, timer. ADR-0023.
 Pruebas         nexus-tests       (tests)  1+     unit/property/integration/crash/chaos/sim/fuzz.
 
 ================================================================================
@@ -59,59 +68,83 @@ Pruebas         nexus-tests       (tests)  1+     unit/property/integration/cras
 nexus-common                         (sin dependencias internas)
   ├── nexus-io          → common
   ├── nexus-protocol    → common
-  ├── nexus-wire        → common, io, protocol
+  ├── nexus-telemetry   → common
+  ├── nexus-kafka       → common
+  ├── nexus-wire        → common, io, protocol            (INTERFACE)
   ├── nexus-reactor     → common, io
   ├── nexus-storage     → common, io
-  ├── nexus-consensus   → common, storage, protocol
-  ├── nexus-broker      → common, io, reactor, storage, protocol, wire, consensus
-  ├── nexus-ingress     → common, io, protocol, wire
-  ├── nexus-client      → common, io, protocol, wire
-  ├── nexus-server (exe) → common, io, reactor, storage, protocol, wire, consensus, broker, ingress
-  ├── nexus-cli    (exe) → common, protocol, client
-  ├── nexus-bench  (exe) → common, protocol, client
+  ├── nexus-consensus   → common, io, protocol, storage, telemetry
+  ├── nexus-cluster     → common, io, protocol, consensus
+  ├── nexus-broker      → common, protocol, reactor, storage, consensus, telemetry
+  ├── nexus-ingress     → common, io, wire, cluster
+  ├── nexus-client      → common, io, protocol
+  ├── nexus-ffi (SHARED) → common, telemetry
+  ├── nexus-server (lib+nexusd exe) → common, io, reactor, wire, broker, cluster, ingress, kafka, telemetry
+  ├── nexus-cli    (exe) → common, ingress (+ nexus-cli-core)
+  ├── nexus-bench  (exe) → common, storage
+  ├── nexus-loadgen(exe) → common, client (+ nexus-loadgen)
+  ├── nexus-wincheck(exe)→ common, io                     (WIN32-only)
   └── nexus-tests        → (todos)
 
 Regla de capas (forzada en CMake): un target NO puede depender de otro de su
 misma capa o superior. `storage` nunca depende de `ingress`; `protocol` nunca de
-`broker`; etc. La portabilidad Windows vive SOLO en `nexus-io`: backend `IocpBackend` + ramas Win32
-de `File`/`Socket` (`NativeHandle`/`IoResult` portables), implementado y compile-verificado con
-MinGW (ADR-0022). El resto del árbol es agnóstico de plataforma.
+`broker`; etc. La portabilidad Windows vive SOLO en `nexus-io` (backend `IocpBackend` + ramas Win32
+de `File`/`Socket`, `NativeHandle`/`IoResult` portables) y en `nexusd`/`reactor` (afinidad y señales
+por plataforma); **`nexusd` está portado por completo y verificado en runtime con MSVC** (ADR-0023/0028).
+El resto del árbol es agnóstico de plataforma.
 
 ================================================================================
 3. ÁRBOL DE CARPETAS Y ARCHIVOS (alto nivel)
 ================================================================================
 nexusmq/
 ├── CMakeLists.txt                 # raíz: define targets, capas, opciones
-├── CMakePresets.json              # presets: linux-gcc, linux-clang, windows-msvc
+├── CMakePresets.json              # presets: linux-gcc/clang/-asan/-tsan, windows-msvc/clang-cl
 ├── vcpkg.json                     # deps (liburing solo en linux, etc.)
 ├── .clang-format · .clang-tidy · .dockerignore
-├── docs/
-│   ├── anteproyecto.md
-│   ├── protocol.md                # spec del protocolo binario (Anexo A)
+├── DocumentacionProvisional/
+│   ├── anteproyecto.md            # visión, arquitectura, ADR-0001..0029
+│   ├── Desglose/                  # este desglose + el detallado
+│   └── hoja-de-ruta.md            # plan de desarrollo vivo
+├── docs/                          # contratos as-built
+│   ├── protocol.md                # protocolo binario nativo (Anexo A)
+│   ├── kafka.md                   # subset Kafka (--kafka-port, ADR-0029)
 │   ├── openapi.yaml               # contrato del REST admin (RFC 7807)
-│   └── adr/                       # adr-NNNN-*.md (extraídos de §9)
+│   ├── benchmarks.md              # cifras de latencia (Bloque L)
+│   └── adr/                       # adr-NNNN-*.md (pendiente: extraer de §9)
 ├── src/
 │   ├── common/      → nexus-common
 │   ├── io/          → nexus-io
 │   ├── reactor/     → nexus-reactor
 │   ├── storage/     → nexus-storage
 │   ├── protocol/    → nexus-protocol
+│   ├── wire/        → nexus-wire (INTERFACE)
 │   ├── consensus/   → nexus-consensus
+│   ├── cluster/     → nexus-cluster
 │   ├── broker/      → nexus-broker
+│   ├── kafka/       → nexus-kafka
 │   ├── ingress/     → nexus-ingress
-│   └── server/      → nexus-server (exe)
-├── client/cpp/      → nexus-client (+ bindings/python/)
+│   ├── telemetry/   → nexus-telemetry
+│   ├── client/      → nexus-client
+│   ├── ffi/         → nexus-ffi (SHARED; binding Python por ctypes)
+│   └── server/      → nexus-server (lib) + nexusd (exe)
 ├── tools/
-│   ├── cli/         → nexus-cli (exe)
-│   └── bench/       → nexus-bench (exe)
+│   ├── cli/         → nexus-cli (exe) + nexus-cli-core
+│   ├── bench/       → nexus-bench (exe)
+│   ├── loadgen/     → nexus-loadgen (exe) + lib
+│   └── wincheck/    → nexus-wincheck (exe, WIN32-only)
+├── bindings/python/ → wrapper ctypes sobre nexus-ffi
 ├── tests/           → nexus-tests
 └── deploy/
-    ├── docker/      # Dockerfile (multi-stage→distroless), docker-compose.yml
-    └── k8s/         # Deployment, Service, probes
+    ├── Dockerfile · docker-compose.yml · prometheus.yml · grafana/   # cluster 3 nodos + observabilidad
+    └── k8s/         # statefulset.yaml, service.yaml (probes)
 
 ================================================================================
 4. DESGLOSE POR MÓDULO/TARGET
 ================================================================================
+> Resumen de responsabilidad por módulo. Las firmas exactas (clase/campo/método con
+> visibilidad) son **autoridad del detallado** (`nexusmqdesglosedetallado.md`); los ajustes
+> respecto al diseño original se anotan en `hoja-de-ruta.md`. Los targets añadidos durante la
+> implementación (telemetry, cluster, kafka, ffi) se resumen en §4.15.
 
 --------------------------------------------------------------------------------
 4.1 nexus-common  (src/common/)  — Fase 1
@@ -525,7 +558,7 @@ metrics.hpp / .cpp
     en `/metrics` (throughput, lag, estado Raft —term/líder/commitIndex—, latencias).
 
 --------------------------------------------------------------------------------
-4.10 nexus-client  (client/cpp/)  — lib — Fase 1b
+4.10 nexus-client  (src/client/)  — lib — Fase 1b
 --------------------------------------------------------------------------------
 Librería cliente nativa (smart-client). Depende solo de common/io/protocol.
 
@@ -550,8 +583,9 @@ consumer.hpp / .cpp
   **Consumer** — `+ subscribe(topics)`, `+ poll(timeout) -> std::vector<Record>`,
     `+ commit(offsets)`; membresía de grupo (Join/Sync/Heartbeat).
 
-bindings/python/  (stretch)
-  - `module.cpp` (pybind11) expone `Client`/`Producer`/`Consumer`.
+bindings/python/  (as-built: ABI C, no pybind11)
+  - Wrapper **ctypes** sobre `nexus-ffi` (ADR-0020): no requiere `python3-dev` para compilar.
+    Expone la versión y los helpers de traceparent W3C del ABI C estable.
 
 --------------------------------------------------------------------------------
 4.11 nexus-cli  (tools/cli/)  — exe — Fase 3
@@ -599,6 +633,24 @@ tests/
     para cumplir FIRST en pruebas concurrentes/distribuidas.
 
 --------------------------------------------------------------------------------
+4.15 Targets añadidos durante la implementación (as-built)  — firmas en el detallado
+--------------------------------------------------------------------------------
+nexus-telemetry (src/telemetry/) — Fase 3 — deps: common. ADR-0017.
+  Observabilidad bajo el broker: **MetricsRegistry** (Counter/Gauge/Histogram, exposición
+  Prometheus), **Logger** (log estructurado, niveles) y **Tracer** (tracing W3C: TraceId/SpanId/
+  SpanContext/Span, IdGenerator).
+nexus-cluster (src/cluster/) — Fase 2/4b — deps: common, io, protocol, consensus. ADR-0025.
+  Transporte inter-nodo de Raft: **RaftTransport** (RaftMessageSink sobre el Proactor),
+  **RaftReceiver** y **PeerDirectory** (PeerAddress). Plano separado del de cliente.
+nexus-kafka (src/kafka/) — Fase 4 — deps: common. ADR-0029.
+  Subset Kafka PURO (sin E/S): **KafkaGateway** (dispatcher) sobre la interfaz **KafkaBroker**;
+  codec por versión (clásico/flexible), mensajes y codecs de Produce/Fetch/Metadata/ListOffsets/
+  ApiVersions, RecordBatch v2 opaco. El cableado al broker vivo (KafkaServerBroker) vive en server.
+nexus-ffi (src/ffi/) — Fase 4 — lib SHARED — deps: common, telemetry. ADR-0020.
+  ABI **C** estable para el binding Python (ctypes): `nexus_version`,
+  `nexus_traceparent_format`/`nexus_traceparent_parse` (contexto W3C). Wrapper en bindings/python/.
+
+--------------------------------------------------------------------------------
 4.14 deploy/  — Fase 3
 --------------------------------------------------------------------------------
 docker/Dockerfile
@@ -616,25 +668,34 @@ k8s/
 ================================================================================
 CMakeLists.txt (raíz)
   - `cmake_minimum_required(VERSION 3.25)`; `project(NexusMQ CXX)`;
-    `target_compile_features(... cxx_std_20)`.
+    `target_compile_features(nexus_options INTERFACE cxx_std_23)` (ADR-0011).
   - Flags: `-Wall -Wextra -Wpedantic -Werror` (GCC/Clang) / `/W4 /WX` (MSVC);
-    opción `NEXUS_SANITIZERS` (ASan/UBSan/TSan) para la build de pruebas.
-  - `add_subdirectory(src/...)` por target; agrupa en *carpetas* del IDE
-    (`set_target_properties(... FOLDER "nucleo|exe|cliente|pruebas")`).
-  - I/O por plataforma: `if(WIN32) → iocp_backend` `else() → io_uring_backend`.
-CMakePresets.json — `linux-gcc`, `linux-clang`, `windows-msvc`.
-vcpkg.json — deps: `liburing` (`"platform": "linux"`), `openssl`, `lz4`, `zstd`,
-    `fmt`, `gtest`, `benchmark`, `pybind11` (stretch).
+    opción `NEXUS_SANITIZERS` (ASan/UBSan) y `NEXUS_TSAN` para la build de pruebas.
+  - `add_subdirectory(src/...)` por target; un único árbol CMake.
+  - I/O por plataforma: `if(WIN32) → iocp_backend` `else() → io_uring_backend`;
+    `nexusd` añade afinidad y señales por plataforma.
+CMakePresets.json — `linux-gcc`, `linux-clang` (Clang/libc++), `linux-gcc-asan`,
+    `linux-gcc-tsan`, `windows-msvc`, `windows-clang-cl` (estos dos ocultos fuera de Windows).
+vcpkg.json — deps: `fmt`, `gtest`, `benchmark`, `openssl`. `liburing` NO se usa
+    (io_uring directo sobre el uapi, ADR-0012); `lz4`/`zstd` son **opcionales**
+    (la compresión se compila si están presentes; ausentes, el test de compresión se omite).
 
 ================================================================================
 6. MAPA FASE → TARGETS (qué se construye en cada fase)
 ================================================================================
 Fase 1   : nexus-common, nexus-storage (I/O bloqueante), nexus-bench, nexus-tests(unit/property/crash).
-Fase 1b  : nexus-io (proactor), nexus-reactor, nexus-protocol, nexus-broker (mono-nodo),
+Fase 1b  : nexus-io (proactor), nexus-reactor, nexus-protocol, nexus-wire, nexus-broker (mono-nodo),
            nexus-client, nexus-server (mono-nodo). Tests: integration.
-Fase 2   : nexus-consensus (Raft), broker distribuido (grupos, rebalanceo). Tests: sim/chaos.
-Fase 3   : nexus-ingress (TLS, REST admin), nexus-cli, observabilidad, deploy/.
-Fase 4   : direct I/O, subconjunto Kafka, binding Python, backend IOCP (Windows).
+Fase 2   : nexus-consensus (Raft), nexus-cluster (transporte inter-nodo), broker distribuido
+           (grupos, rebalanceo). Tests: sim/chaos.
+Fase 3   : nexus-ingress (TLS, REST admin), nexus-telemetry, nexus-cli, observabilidad, deploy/.
+Fase 4   : direct I/O, nexus-kafka (subset), nexus-ffi (binding Python), backend IOCP (Windows).
+Fase 4b  : cierre — bloque W (Windows: nexusd completo, ADR-0028), bloque D (deuda diferida),
+           bloque L (nexus-loadgen + benchmarks). Estado: Fases 1→4 implementadas.
+
+> Nota as-built: las Fases 1→4 están implementadas (series M/R/C/I/F de la hoja de ruta).
+> El detalle por clase/campo/método —incluidos los targets añadidos durante la implementación
+> (telemetry, cluster, kafka, ffi)— vive en `nexusmqdesglosedetallado.md`.
 
 ================================================================================
 FIN DEL DESGLOSE

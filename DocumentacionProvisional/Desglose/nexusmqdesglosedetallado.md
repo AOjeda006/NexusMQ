@@ -1,11 +1,14 @@
 ================================================================================
-DESGLOSE DETALLADO DE LA SOLUCIÓN — NexusMQ (C++20)
+DESGLOSE DETALLADO DE LA SOLUCIÓN — NexusMQ (C++23)
 ================================================================================
 **Archivo:** `nexusmq-desglose-detallado.md`
-**Versión:** 0.2.0 (amplía `nexusmq-desglose.md` a máximo detalle, módulo a módulo)
-**Fecha:** 2026-06-10
-**Naturaleza:** Proyección de diseño (pre-implementación), derivada del anteproyecto
-v0.4.0. Firmas y miembros son la intención de diseño; se refinan al implementar.
+**Versión:** 0.3.0 (amplía `nexusmq-desglose.md`; reconciliado con el estado as-built)
+**Fecha:** 2026-06-28
+**Naturaleza:** El plano de implementación, módulo a módulo. Nació como proyección de diseño
+(pre-implementación) y se ha **reconciliado con el código real**: §4.15–§4.18 cubren los targets
+añadidos durante la implementación (telemetry, cluster, kafka, ffi) y el estándar es **C++23**
+(`cxx_std_23`, ADR-0011). Las firmas de los módulos originales son la **intención de diseño**;
+los ajustes finos respecto al código se anotan en `hoja-de-ruta.md` ("Ajustes de diseño").
 
 LEYENDA
   Visibilidad:  `+` público · `#` protegido · `-` privado.
@@ -464,7 +467,7 @@ Structs request/response por operación (§7.2.1), cada uno con `encode(Encoder&
   + std::int32_t available() const noexcept;
 
 ================================================================================
-4.6  nexus-consensus   (src/consensus/)   — Fase 2   — deps: common, storage, protocol
+4.6  nexus-consensus   (src/consensus/)   — Fase 2   — deps: common, io, protocol, storage, telemetry
 ================================================================================
 Raft por partición (ADR-0003): un grupo Raft por partición; el log de Raft ES el log.
 
@@ -533,8 +536,8 @@ Raft por partición (ADR-0003): un grupo Raft por partición; el log de Raft ES 
   **Learner** — réplica que replica sin votar hasta ponerse al día.
 
 ================================================================================
-4.7  nexus-broker   (src/broker/)   — Fase 1b–2   — deps: common, io, reactor, storage,
-                                                            protocol, consensus
+4.7  nexus-broker   (src/broker/)   — Fase 1b–2   — deps: common, protocol, reactor, storage,
+                                                            consensus, telemetry
 ================================================================================
 El núcleo del broker: topics, particiones, grupos, offsets, idempotencia, backpressure.
 
@@ -615,7 +618,7 @@ El núcleo del broker: topics, particiones, grupos, offsets, idempotencia, backp
 **DeadLetterQueue**  [REACTOR-LOCAL]  — destino de mensajes no procesables tras N intentos.
 
 ================================================================================
-4.8  nexus-ingress   (src/ingress/)   — Fase 3   — deps: common, io, protocol
+4.8  nexus-ingress   (src/ingress/)   — Fase 3   — deps: common, io, wire, cluster
 ================================================================================
 Ingress en dos modos (ADR-0006) + gateway REST de administración (§7.6).
 
@@ -672,7 +675,7 @@ Ingress en dos modos (ADR-0006) + gateway REST de administración (§7.6).
         credits:CreditWindow, inflight: std::unordered_map<std::uint32_t, ...>`.
 
 ================================================================================
-4.9  nexus-server   (src/server/)   — exe — Fase 1b+   — deps: TODAS las libs
+4.9  nexus-server   (src/server/)   — lib + nexusd (exe) — Fase 1b+   — deps: common, io, reactor, wire, broker, cluster, ingress, kafka, telemetry
 ================================================================================
 Daemon del broker: orquesta reactores, conexiones, admin y observabilidad.
 
@@ -731,7 +734,7 @@ Daemon del broker: orquesta reactores, conexiones, admin y observabilidad.
   // métricas clave: produce/fetch rate, consumer lag, raft term/leader/commit_index, latencias.
 
 ================================================================================
-4.10  nexus-client   (client/cpp/)   — lib — Fase 1b   — deps: common, io, protocol
+4.10  nexus-client   (src/client/)   — lib — Fase 1b   — deps: common, io, protocol
 ================================================================================
 Librería cliente nativa (smart-client). NO depende de broker/consensus.
 
@@ -838,6 +841,63 @@ tests/
     **FakeProactor**   [test]  — completions deterministas para tests del reactor.
 
 ================================================================================
+4.15  nexus-telemetry   (src/telemetry/)   — Fase 3   — deps: common   (ADR-0017)
+================================================================================
+metrics.hpp / .cpp
+  **Counter** — [THREAD-SAFE] `+ inc(n=1)` (atomic relaxed), `+ value()`.
+  **Gauge**   — [THREAD-SAFE] `+ set(v)`, `+ inc(n)`, `+ dec(n)`.
+  **Histogram** — [THREAD-SAFE] `+ observe(double)`; buckets configurables.
+  **MetricsRegistry** — [THREAD-SAFE] registro de series; `+ describe(name, help)`,
+    factorías de Counter/Gauge/Histogram, `+ render_prometheus() -> std::string` (texto 0.0.4).
+logging.hpp / .cpp
+  **LogLevel** `{Trace,Debug,Info,Warn,Error}`; **Field** (clave/valor estructurado).
+  **Logger** — [THREAD-SAFE] log estructurado; `+ set_min_level`, `+ enabled(level)`,
+    `+ add_context(Field)`, `+ log(level, msg, fields)` + helpers `trace/debug/info/warn/error`.
+tracing.hpp / .cpp
+  **TraceId/SpanId/SpanContext** (W3C; `valid()`, `sampled()`), **SpanData**.
+  **IdGenerator** (interfaz) / **RandomIdGenerator**; **Span** (`set_attribute`, `sampled`);
+  **Tracer** — `+ start_root(name, sampled)`, `+ start_child(parent, name)`,
+    `+ start_from_remote(remote, name)` (contexto recibido de otro proceso).
+
+================================================================================
+4.16  nexus-cluster   (src/cluster/)   — Fase 2/4b   — deps: common, io, protocol, consensus   (ADR-0025)
+================================================================================
+Transporte inter-nodo de Raft: plano separado del de cliente.
+peer_directory.hpp / .cpp
+  **PeerAddress** (`node`, host, puerto). **PeerDirectory** — `+ contains(node)`, `+ empty()`,
+    resolución `NodeId → PeerAddress`.
+raft_transport.hpp / .cpp
+  **RaftTransport : RaftMessageSink** — [REACTOR-LOCAL] envía `RaftEnvelope` por conexión saliente
+    (un **PeerLink** por par); `+ send(const RaftEnvelope&) override`; `Spawner`/`Config` inyectados.
+raft_receiver.hpp / .cpp
+  - `+ serve_raft_connection(Proactor&, Socket, RaftEnvelopeHandler) -> task<void>`: lee sobres
+    longitud-prefijo y los entrega al handler (rutea por `(topic, partition)`).
+
+================================================================================
+4.17  nexus-kafka   (src/kafka/)   — Fase 4   — deps: common   (ADR-0029)
+================================================================================
+Subset Kafka **puro** (sin E/S ni broker): codec big-endian por versión.
+gateway.hpp / .cpp
+  **KafkaBroker** — interfaz: `+ metadata/produce/fetch/list_offsets(req) -> task<...>` (virtual).
+  **KafkaGateway** — `explicit KafkaGateway(KafkaBroker&)`; `+ handle_request(ByteSpan) ->
+    task<expected<Buffer>>` (decodifica cabecera, despacha por ApiKey/versión, codifica respuesta).
+messages.hpp / .cpp
+  **ApiKey** `{Produce=0,Fetch=1,ListOffsets=2,Metadata=3,ApiVersions=18}`; cabeceras de
+    petición/respuesta por versión; `is_flexible(api_key, version)`, `supported_apis()`.
+codec.hpp / .cpp · produce.* · fetch.* · metadata.* · list_offsets.* · record_batch.* · error_code.hpp
+  - Codecs por API con variante **clásica/flexible**; `Decoder::skip`; **RecordBatch v2** opaco
+    (`peek_record_batch`/`set_base_offset`); `KafkaError:i16`. Contrato en `docs/kafka.md`.
+
+================================================================================
+4.18  nexus-ffi   (src/ffi/)   — Fase 4   — lib SHARED — deps: common, telemetry   (ADR-0020)
+================================================================================
+nexus_ffi.cpp  (extern "C": ABI estable para el binding Python por ctypes)
+  - `const char* nexus_version()`.
+  - `int nexus_traceparent_format(trace_hi, trace_lo, span_id, flags, char* out, ...)`.
+  - `int nexus_traceparent_parse(const char* header, uint64_t* trace_hi, ...)` (W3C traceparent).
+  Wrapper Python en `bindings/python/` (no requiere `python3-dev` para compilar el core).
+
+================================================================================
 4.14  deploy/   — Fase 3
 ================================================================================
 deploy/docker/Dockerfile
@@ -858,8 +918,8 @@ deploy/k8s/
 ================================================================================
 CMakeLists.txt (raíz)
   - cmake_minimum_required(VERSION 3.25); project(NexusMQ CXX);
-  - set(CMAKE_CXX_STANDARD 20) / target_compile_features(... cxx_std_20)
-  - option(NEXUS_SANITIZERS "ASan/UBSan/TSan en pruebas" OFF)
+  - target_compile_features(nexus_options INTERFACE cxx_std_23)   # ADR-0011
+  - option(NEXUS_SANITIZERS "ASan/UBSan en pruebas" OFF) / option(NEXUS_TSAN ... OFF)
   - add_compile_options(-Wall -Wextra -Wpedantic -Werror)   # /W4 /WX en MSVC
   - I/O por plataforma:  if(WIN32) target_sources(nexus-io PRIVATE io/iocp_backend.cpp)
                          else()    target_sources(nexus-io PRIVATE io/io_uring_backend.cpp)
@@ -874,11 +934,14 @@ vcpkg.json          — dependencies: liburing ("platform":"linux"), openssl, lz
 6.  MAPA FASE → TARGETS
 ================================================================================
 Fase 1  : nexus-common, nexus-storage (I/O bloqueante), nexus-bench, nexus-tests(unit/property/crash).
-Fase 1b : nexus-io (proactor), nexus-reactor, nexus-protocol, nexus-broker (mono-nodo),
+Fase 1b : nexus-io (proactor), nexus-reactor, nexus-protocol, nexus-wire, nexus-broker (mono-nodo),
           nexus-client, nexus-server (mono-nodo). Tests: integration.
-Fase 2  : nexus-consensus (Raft), broker distribuido (grupos, rebalanceo). Tests: sim/chaos.
-Fase 3  : nexus-ingress (TLS, REST admin), nexus-cli, observabilidad, deploy/.
-Fase 4  : direct I/O, subconjunto Kafka, binding Python, backend IOCP (Windows).
+Fase 2  : nexus-consensus (Raft), nexus-cluster (transporte inter-nodo), broker distribuido
+          (grupos, rebalanceo). Tests: sim/chaos.
+Fase 3  : nexus-ingress (TLS, REST admin), nexus-telemetry, nexus-cli, observabilidad, deploy/.
+Fase 4  : direct I/O, nexus-kafka (subset, §4.17), nexus-ffi (binding Python, §4.18), IOCP Windows.
+Fase 4b : cierre — W (Windows: nexusd completo, ADR-0028), D (deuda diferida), L (nexus-loadgen).
+          Estado as-built: Fases 1→4 implementadas.
 
 ================================================================================
 FIN DEL DESGLOSE DETALLADO
