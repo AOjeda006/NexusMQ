@@ -28,14 +28,17 @@ del diseño de brokers (la que usa Redpanda), no la de hace una década.
   la partición (el WAL). El *high-watermark* es el `commitIndex` de Raft; el modelo de `acks`
   (`0`/`1`/`quorum`) se asienta sobre su *commit*. Postura **CP** (consistencia sobre disponibilidad).
 - **I/O por *completions* (proactor).** Abstracción común a **io_uring** (Linux) e **IOCP**
-  (Windows: la capa `nexus-io` está portada y **compile-verificada con MinGW-w64**, ADR-0022;
-  runtime en Windows pendiente), sobre la que se asientan las **corutinas de C++23**.
+  (Windows): el port a Windows está **verificado en runtime con MSVC** (VS 2026, `/W4 /WX`; ADR-0023),
+  con `nexusd` completo portado (señales, afinidad y backend por plataforma; ADR-0028). Sobre el
+  proactor se asientan las **corutinas de C++23**.
 - **Protocolo binario propio** (framing + multiplexing por *correlation ID* + versionado) con
-  **gateway REST** para interoperabilidad. Subconjunto Kafka-compatible diferido a *stretch*.
+  **gateway REST** para administración y un **subconjunto Kafka-compatible** ya implementado
+  (listener en `--kafka-port`, interop `kcat`; ADR-0029).
 - **Capa de *ingress* en dos modos:** cliente nativo directo al líder (primario) + proxy/REST (opt-in).
 
-La estructura prevista son **14 *targets* CMake** en 4 áreas (núcleo de librerías, ejecutables,
-cliente, pruebas). Ver el desglose para el grafo de dependencias y el detalle por clase.
+La solución son **15 librerías `nexus-*`** (núcleo) más los ejecutables (`nexusd`, `nexus-cli`,
+`nexus-bench`, `nexus-loadgen`), las *tools* de soporte y las pruebas. Ver el desglose para el grafo
+de dependencias y el detalle por clase.
 
 ### Roadmap por fases
 
@@ -51,19 +54,23 @@ El plan detallado y vivo está en **[`DocumentacionProvisional/hoja-de-ruta.md`]
 
 ## Build
 
-> El esqueleto compilable (CMake + vcpkg + CI + primer test) es el hito **M1** de la Fase 1; estas
-> instrucciones se completan a medida que aterriza. Objetivo primario: **Linux x86-64**.
+> Objetivo primario: **Linux x86-64**. El árbol completo compila y pasa la suite con GCC/libstdc++
+> y Clang/libc++; Windows (MSVC + clang-cl) está verificado en runtime (ADR-0023/0028).
 
-Requisitos previstos: **CMake ≥ 3.25**, un compilador C++20 (GCC/Clang), **vcpkg** y **Ninja**.
+Requisitos: **CMake ≥ 3.25**, un compilador **C++23** (GCC o Clang **con libc++**), **vcpkg** y
+**Ninja**.
 
 ```bash
-# (previsto, M1) configurar y compilar con un preset
+# configurar y compilar con un preset
 cmake --preset linux-gcc
 cmake --build --preset linux-gcc
 
-# (previsto) ejecutar las pruebas
+# ejecutar las pruebas
 ctest --preset linux-gcc
 ```
+
+Presets disponibles: `linux-gcc`, `linux-clang` (Clang/libc++), `linux-gcc-asan` (ASan/UBSan),
+`linux-gcc-tsan` (TSan) y, en Windows, `windows-msvc` y `windows-clang-cl`.
 
 Dependencias (vía vcpkg, modo *manifest*): `liburing` (solo Linux), `openssl`, `lz4`, `zstd`,
 `fmt`, `gtest`, `benchmark`. Todo el *toolchain* y las dependencias son **gratuitos y open source**:
@@ -75,7 +82,10 @@ desarrollo, testing y *benchmarking* se realizan **íntegramente sin coste** en 
 Todo el diseño vive en **[`DocumentacionProvisional/`](DocumentacionProvisional/)**:
 
 - **[`anteproyecto.md`](DocumentacionProvisional/anteproyecto.md)** — visión, alcance, arquitectura
-  y decisiones de arquitectura (**ADR-0001..0009**). Fuente de verdad del *qué* y el *porqué*.
+  y decisiones de arquitectura (**ADR-0001..0029**). Fuente de verdad del *qué* y el *porqué*.
+- **[`docs/`](docs/)** — contratos as-built: [`protocol.md`](docs/protocol.md) (protocolo binario),
+  [`kafka.md`](docs/kafka.md) (subset Kafka), [`openapi.yaml`](docs/openapi.yaml) (REST admin) y
+  [`benchmarks.md`](docs/benchmarks.md) (latencias).
 - **[`Desglose/nexusmqdesglose.md`](DocumentacionProvisional/Desglose/nexusmqdesglose.md)** — vista de
   conjunto (targets, dependencias, fases).
 - **[`Desglose/nexusmqdesglosedetallado.md`](DocumentacionProvisional/Desglose/nexusmqdesglosedetallado.md)**

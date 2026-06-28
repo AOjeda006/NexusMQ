@@ -1321,6 +1321,6 @@ Harness de benchmark vacío y CI:
 
 ## Documentación de diseño que crecerá por fases
 
-- [ ] `docs/protocol.md` (Anexo A): spec del protocolo binario (framing, correlation IDs, versionado, créditos) — Fase 1b.
-- [ ] `docs/openapi.yaml`: contrato del REST admin (RFC 7807) — Fase 3.
-- [ ] `docs/adr/adr-NNNN-*.md`: extraer los ADR del §9 del anteproyecto a archivos individuales (commit `docs:`).
+- [x] `docs/protocol.md` (Anexo A): spec del protocolo binario (framing, correlation IDs, versionado, créditos). Cerrado en I20; el **subset Kafka** (`--kafka-port`) se documenta aparte en `docs/kafka.md` (ADR-0029).
+- [x] `docs/openapi.yaml`: contrato del REST admin (RFC 7807). Cerrado en I20.
+- [ ] `docs/adr/adr-NNNN-*.md`: extraer los ADR del §9 del anteproyecto a archivos individuales (commit `docs:`). **Único pendiente de documentación.**

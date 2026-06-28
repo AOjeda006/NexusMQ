@@ -12,8 +12,8 @@ Es un **proyecto de aprendizaje y portfolio**: el objetivo nº1 es que el autor
 Fuentes de verdad del **diseño** (no las contradigas; si hay que ajustar el desglose
 al implementar, se propone y se decide; un **ADR aceptado no se edita**, se reemplaza):
 
-- `DocumentacionProvisional/anteproyecto.md` — visión, alcance, arquitectura y **ADR-0001..0026** (el *qué* y el *porqué*).
-- `DocumentacionProvisional/Desglose/nexusmqdesglose.md` — vista de conjunto: 14 *targets*, grafo de dependencias, mapa fase→targets.
+- `DocumentacionProvisional/anteproyecto.md` — visión, alcance, arquitectura y **ADR-0001..0029** (el *qué* y el *porqué*).
+- `DocumentacionProvisional/Desglose/nexusmqdesglose.md` — vista de conjunto: 15 librerías `nexus-*` + ejecutables/tools, grafo de dependencias, mapa fase→targets.
 - `DocumentacionProvisional/Desglose/nexusmqdesglosedetallado.md` — el plano: cada clase/campo/método con firma y visibilidad.
 - `DocumentacionProvisional/hoja-de-ruta.md` — **plan de desarrollo vivo**; se actualiza tras cada paso.
 
