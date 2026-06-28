@@ -11,7 +11,7 @@
 > Fuentes: `anteproyecto.md` (§4.5 roadmap, §4.6 hitos Fase 1), `Desglose/nexusmqdesglose.md`
 > (§6 mapa fase→targets), `Desglose/nexusmqdesglosedetallado.md` (firmas).
 
-**Estado actual:** **FASE 4 (Stretch, serie F) COMPLETADA** — **F1** (productor *effectively-once* + *fencing* por época), **F2** (codec por record + migración del cliente), **F3** (compactación por clave), **F4** (DLQ), **F5** (compresión LZ4/Zstd por batch), **F6** (E/S directa `O_DIRECT` + lector con readahead), **F7** (subconjunto Kafka-compatible: codec big-endian por versión —clásico/flexible—, cabeceras + `ApiVersions`/`Metadata`/`ListOffsets`/`Produce`/`Fetch`, *dispatcher* `KafkaGateway` y **adaptador asíncrono cross-core sobre el broker vivo en `--kafka-port`, con interop `kcat` verificada en vivo**, ADR-0029), **F8** (tracing distribuido: contexto W3C + spans), **F9** (*binding* Python vía ABI C `nexus-ffi` + `ctypes`, ADR-0020) y **F10** (backend IOCP Windows: **implementado y verificado en runtime sobre Windows con MSVC** (VS 2026, MSVC 19.51, `/W4 /WX`; arnés `tools/wincheck`), ADR-0023 —reemplaza ADR-0022, que a su vez reemplazó ADR-0021—). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
+**Estado actual:** **FASE 4 (Stretch, serie F) COMPLETADA** — **F1** (productor *effectively-once* + *fencing* por época), **F2** (codec por record + migración del cliente), **F3** (compactación por clave), **F4** (DLQ), **F5** (compresión LZ4/Zstd por batch), **F6** (E/S directa `O_DIRECT` + lector con readahead), **F7** (subconjunto Kafka-compatible: codec big-endian por versión —clásico/flexible—, cabeceras + `ApiVersions`/`Metadata`/`ListOffsets`/`Produce`/`Fetch`, *dispatcher* `KafkaGateway` y **adaptador asíncrono cross-core sobre el broker vivo en `--kafka-port`, con interop `kcat` verificada en vivo en Linux** —pendiente revalidación Windows del cableado server-side antes de cerrar F7f—, ADR-0029), **F8** (tracing distribuido: contexto W3C + spans), **F9** (*binding* Python vía ABI C `nexus-ffi` + `ctypes`, ADR-0020) y **F10** (backend IOCP Windows: **implementado y verificado en runtime sobre Windows con MSVC** (VS 2026, MSVC 19.51, `/W4 /WX`; arnés `tools/wincheck`), ADR-0023 —reemplaza ADR-0022, que a su vez reemplazó ADR-0021—). Cerrada la **FASE 3** (Ingress + operación: I1–I20). Cerrada la **Fase 2** (C1–C12): sobre el broker *thread-per-core* de Fase 1b se
 añade el **consenso Raft por partición** (`nexus-consensus`: estado/log/RPC, `RaftNode` como máquina de
 estados síncrona sin E/S con pre-vote, replicación, *high-watermark* por mayoría, transferencia de
 liderazgo y learners; ADR-0014/0015), la **integración en el broker** (`ReplicatedPartition`, ADR-0016),
@@ -786,7 +786,14 @@ Harness de benchmark vacío y CI:
     verificada**: `-L` (metadata), `-P` (produce) y `-C` (consume) limpios, incl. **multi-partición
     cross-core**. Tests: round-trip clásico v7/v11 y flexible, `MessageSet` vacío-no-nulo, despacho
     `ListOffsets`, adaptador `produce→fetch` con rebase de offset. Verde en GCC/Clang/ASan/TSan +
-    clang-format/clang-tidy. *(Cierra el objetivo "habla con `kcat`" de F7.)*
+    clang-format/clang-tidy **en Linux**. *(Cumple el objetivo "habla con `kcat`" de F7.)*
+    **⚠ PENDIENTE para darlo por cerrado:** **revalidación en Windows** (MSVC + clang-cl, `/W4 /WX`)
+    del cableado server-side nuevo (`kafka_adapter`, `kafka_connection`, listener en `server.cpp`).
+    El código nuevo no usa APIs POSIX ni guardas de plataforma —se apoya solo en abstracciones de
+    `nexus-io` ya verificadas en Windows (ADR-0028/F10)—, así que debería compilar por construcción,
+    pero **no se ha recompilado en Windows**; el arnés Linux (`verify-windows-io.sh`/MinGW) solo
+    cubre `nexus-io`, no el servidor. Falta una pasada `cmake --preset windows-msvc` en una sesión
+    Windows (decisión del autor: no cerrar F7f hasta entonces).
 - [x] **F8** Tracing distribuido (propagación de contexto de traza) — `telemetry/tracing.{hpp,cpp}`.
   Tipos de valor `TraceId` (128 bits) / `SpanId` (64 bits) / `SpanContext` (con *trace-flags* y
   *sampled*); codec **W3C Trace Context** (`format_traceparent`/`parse_traceparent`, versión `00`,
