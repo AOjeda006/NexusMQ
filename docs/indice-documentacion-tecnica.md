@@ -22,8 +22,17 @@
 - **Producción del PDF:** **pandoc** + motor LaTeX, con render previo de Mermaid (mermaid-cli /
   filtro) y portada/índice automático. *(Recomendación; se concretará al llegar a esa fase.)*
 - **Contratos as-built:** `docs/protocol.md`, `docs/kafka.md`, `docs/openapi.yaml` y
-  `docs/benchmarks.md` **ya existen** y son fuente de verdad; los capítulos correspondientes los
-  **enmarcan y amplían**, no los duplican.
+  `docs/benchmarks.md` **ya existen, se conservan** y son la **única fuente de verdad** de los
+  detalles precisos (byte-layout, ApiKeys/versiones, endpoints, cifras). Conviven dos **tipos**
+  de documentación distintos (**Diátaxis**): los contratos son **referencia** (se consultan), y
+  los capítulos narrativos son **explicación** (se leen en orden). Por eso los capítulos
+  correspondientes **explican y enlazan** (rationale, flujos, diagramas, ejemplos) — **no
+  duplican** el contrato. Razones para mantenerlos separados: `openapi.yaml` es un **artefacto de
+  tooling** (Swagger UI, *codegen*, *contract testing*), DRY/no-*drift* (una sola fuente
+  autoritativa), audiencia y ciclo de vida distintos, y descubribilidad junto al código en el repo.
+- **El PDF los incluye por transclusión.** Para que el PDF sea autocontenido sin duplicar, pandoc
+  **transcluye** los contratos de `docs/` como **apéndices** al compilar (una sola fuente, PDF
+  completo); no se copian a la prosa.
 
 ### Disposición de archivos propuesta
 
@@ -79,9 +88,9 @@ docs/
 
 | # | Capítulo | Alcance | Fuente |
 |---|----------|---------|--------|
-| 13 | Protocolo binario nativo | Framing 14 B, ApiKeys, versionado, *correlation*, flujo produce/fetch | **docs/protocol.md** — Enmarca/amplía |
-| 14 | Subconjunto Kafka | Framing `Size:INT32`, APIs/versiones, clásico vs flexible, RecordBatch opaco | **docs/kafka.md**; ADR-0029 — Enmarca/amplía |
-| 15 | API REST de administración | Endpoints, auth JWT, paginación, RFC 7807 | **docs/openapi.yaml** — Enmarca/amplía |
+| 13 | Protocolo binario nativo | Framing 14 B, ApiKeys, versionado, *correlation*, flujo produce/fetch | **docs/protocol.md** — Explica y enlaza |
+| 14 | Subconjunto Kafka | Framing `Size:INT32`, APIs/versiones, clásico vs flexible, RecordBatch opaco | **docs/kafka.md**; ADR-0029 — Explica y enlaza |
+| 15 | API REST de administración | Endpoints, auth JWT, paginación, RFC 7807 | **docs/openapi.yaml** — Explica y enlaza |
 | 16 | Modelo de errores y wire codes | `expected`/excepciones/códigos por capa; traducción en el borde | ADR-0009; `nexus-protocol` |
 
 ### Parte IV — Implementación (sustituye al desglose detallado)
@@ -99,7 +108,7 @@ docs/
 |---|----------|---------|--------|
 | 21 | Estrategia de pruebas | TDD; unitarias; property-based; fuzzing; **simulación determinista**; chaos; sanitizers | `principios/testing.md`; ADR-0015; `tests/` |
 | 22 | Puerta de calidad y CI/CD | Dos compiladores, formato, clang-tidy, sanitizers; GitHub Actions | CLAUDE.md; `.github/`; ADR-0011 |
-| 23 | Rendimiento y benchmarks | Metodología (percentiles, *coordinated omission*), resultados | **docs/benchmarks.md** — Enmarca/amplía |
+| 23 | Rendimiento y benchmarks | Metodología (percentiles, *coordinated omission*), resultados | **docs/benchmarks.md** — Explica y enlaza |
 | 24 | Portabilidad | Linux/Windows; niveles compile/link/**runtime**-verified | ADR-0021-0023/0028 |
 
 ### Parte VI — Operación y despliegue
