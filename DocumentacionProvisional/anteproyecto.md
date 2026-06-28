@@ -477,20 +477,26 @@ nexusmq/
 │   ├── protocol.md
 │   └── adr/               # adr-NNNN-*.md (extraídos de §9 al crecer)
 ├── src/
-│   ├── common/            # logging JSON, config, Buffer/Slice, crc32c, time (reloj)
-│   ├── reactor/           # reactor per-core: event loop io_uring, scheduler de corutinas,
-│   │                      #   cross-core SPSC (submit_to), allocator por núcleo
-│   ├── io/                # abstracción proactor: io_uring (ahora), iocp (después)
-│   ├── storage/           # record, segment, index, log, wal, retention
+│   ├── common/            # bytes, crc32c, varint, base64, sha256, compresión, record, error, task
+│   ├── io/                # abstracción proactor: io_uring (Linux), iocp (Windows)
+│   ├── reactor/           # reactor per-core: event loop, scheduler de corutinas,
+│   │                      #   cross-core SPSC/MPMC (submit_to), allocator, PartitionRouter
+│   ├── storage/           # segment, index, partition_log, retention, compactación
 │   ├── protocol/          # framing, codec, tipos de mensaje, versioning
-│   ├── consensus/         # raft: log replicado, elección, snapshots
-│   ├── broker/            # topics, partitions, handlers produce/fetch, backpressure
-│   ├── ingress/           # tls, rate-limit, circuit-breaker, REST gateway
-│   └── server/            # listener, conexiones
-├── client/cpp/            # librería cliente C++ nativa (smart-client)
-├── tools/                 # nexus-cli, bench (load generator open-loop)
-├── tests/                 # unit, integration, crash, chaos
-└── deploy/docker/         # Dockerfile + docker-compose (cluster de 3 nodos)
+│   ├── wire/              # frame_io (framing sobre Socket+Proactor, INTERFACE)
+│   ├── consensus/         # raft: log replicado, elección, snapshots, RaftNode, carrier
+│   ├── cluster/           # transporte inter-nodo de Raft (RaftTransport/Receiver, PeerDirectory)
+│   ├── broker/            # topics, partitions, grupos, offsets, ReplicatedPartition
+│   ├── kafka/             # subset Kafka: codec por versión, gateway (ADR-0029)
+│   ├── ingress/           # tls, rate-limit, circuit-breaker, REST gateway, JWT, proxy
+│   ├── telemetry/         # métricas (Prometheus), logging, tracing W3C
+│   ├── client/            # librería cliente C++ nativa (smart-client)
+│   ├── ffi/               # ABI C estable para el binding Python (ctypes, ADR-0020)
+│   └── server/            # Server, admin API/HTTP/router, conexiones, nexusd
+├── tools/                 # nexus-cli, bench, loadgen, wincheck (Windows)
+├── bindings/python/       # wrapper ctypes sobre nexus-ffi
+├── tests/                 # unit, integration, crash, chaos, sim, fuzz
+└── deploy/                # Dockerfile + docker-compose (cluster 3 nodos) + k8s + grafana
 ```
 
 > **Una sola solución, multiplataforma (no bloquea Windows).** Todo el árbol es **un único proyecto CMake** —con CMake no hay `.sln` ni "solución" tradicional—. Esto **no** condiciona el soporte de plataforma: "nº de soluciones" y "nº de plataformas" son ejes **independientes**. El mismo árbol compila a **Linux** (GCC/Clang) y, más adelante, a **Windows nativo** (MSVC) seleccionando *preset* en `CMakePresets.json`, **sin reestructurar**. El soporte Windows vive **solo** en `src/io/` (un adaptador **IOCP** junto al de io_uring, tras el mismo puerto *proactor*; ver ADR-0002); el resto (`reactor`, `storage`, `protocol`, `consensus`, `broker`) es **agnóstico de plataforma**. Las dependencias *platform-specific* (p.ej. `liburing`, solo Linux) se condicionan en `vcpkg.json`/CMake. *Separar* en varias soluciones **dificultaría** la portabilidad (duplicaría la costura de plataforma); por eso la **solución única es la opción correcta también para el objetivo Windows**.
