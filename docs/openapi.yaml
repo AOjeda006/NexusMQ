@@ -3,18 +3,19 @@ info:
   title: NexusMQ — REST admin API
   version: "1.0.0"
   description: >
-    API de administración y operación de NexusMQ, servida en el **puerto de operación**
-    (por defecto 9644), separado del plano de datos binario (puerto 9092). Cubre la gestión
-    de topics y grupos bajo `/api/v1` (autenticada con Bearer JWT cuando el nodo arranca con
-    `--jwt-secret`) y los endpoints de salud/métricas (sin autenticar). Los errores siguen
-    **RFC 7807** (`application/problem+json`).
+    API de administración y operación de NexusMQ, servida en el **puerto de operación**, separado
+    del plano de datos binario (puerto 9092). El puerto de operación **no tiene valor por defecto**:
+    está desactivado salvo que el nodo arranque con `--admin-port <N>` (en este documento se usa
+    9644 solo como ejemplo). Cubre la gestión de topics y grupos bajo `/api/v1` (autenticada con
+    Bearer JWT cuando el nodo arranca con `--jwt-secret`) y los endpoints de salud/métricas (sin
+    autenticar). Los errores siguen **RFC 7807** (`application/problem+json`).
   license:
     name: PolyForm Noncommercial 1.0.0
     url: https://polyformproject.org/licenses/noncommercial/1.0.0/
 
 servers:
   - url: http://localhost:9644
-    description: Puerto de operación local
+    description: Puerto de operación local (ejemplo; se fija con `--admin-port`, sin default)
 
 tags:
   - name: topics
