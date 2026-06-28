@@ -1,8 +1,14 @@
 # Protocolo binario de NexusMQ (plano de datos)
 
-Contrato del **plano de datos** de NexusMQ: el protocolo binario sobre TCP que hablan los
+Contrato del **plano de datos** de NexusMQ: el protocolo binario propio sobre TCP que hablan los
 clientes nativos con el broker (puerto `9092` por defecto). El **plano de administración** es
 aparte (REST sobre el puerto de operación; ver [`openapi.yaml`](openapi.yaml)).
+
+> NexusMQ expone **además** un **listener compatible con el protocolo de Apache Kafka** (un
+> subconjunto: `Produce`/`Fetch`/`Metadata`/`ListOffsets`/`ApiVersions`) en `--kafka-port`, para
+> interoperar con clientes del ecosistema (`kcat`, librdkafka). Ese contrato —big-endian, *framing*
+> `Size:INT32`, clásico vs flexible— se documenta aparte en [`kafka.md`](kafka.md) (ADR-0029). Este
+> documento describe el **protocolo nativo**.
 
 - **Transporte:** TCP. Una conexión multiplexa muchas peticiones por `correlation_id`.
 - **Modelo:** petición/respuesta. El cliente envía una trama de petición; el broker responde con
