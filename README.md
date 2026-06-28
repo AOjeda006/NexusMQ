@@ -69,13 +69,16 @@ cmake --build --preset linux-gcc
 ctest --preset linux-gcc
 ```
 
-Presets disponibles: `linux-gcc`, `linux-clang` (Clang/libc++), `linux-gcc-asan` (ASan/UBSan),
-`linux-gcc-tsan` (TSan) y, en Windows, `windows-msvc` y `windows-clang-cl`.
+Presets disponibles: `linux-gcc`, `linux-clang` (Clang/libc++), `linux-gcc-release` (optimizado),
+`linux-gcc-asan` (ASan/UBSan), `linux-gcc-tsan` (TSan) y, en Windows, `windows-msvc` y
+`windows-clang-cl`.
 
-Dependencias (vía vcpkg, modo *manifest*): `liburing` (solo Linux), `openssl`, `lz4`, `zstd`,
-`fmt`, `gtest`, `benchmark`. Todo el *toolchain* y las dependencias son **gratuitos y open source**:
-desarrollo, testing y *benchmarking* se realizan **íntegramente sin coste** en una máquina local
-(cluster de 3 nodos vía Docker Compose).
+Dependencias (vía vcpkg, modo *manifest*): `fmt`, `gtest`, `benchmark` y `openssl`. **io_uring** se
+usa **directamente sobre el uapi del kernel** (sin `liburing`; ADR-0012) y la **compresión** LZ4/Zstd
+es **opcional** (se compila solo si `find_package` las encuentra; igual que OpenSSL en ADR-0019, que
+degrada a texto en claro si falta). Todo el *toolchain* y las dependencias son **gratuitos y open
+source**: desarrollo, testing y *benchmarking* se realizan **íntegramente sin coste** en una máquina
+local (cluster de 3 nodos vía Docker Compose).
 
 ## Documentación
 
