@@ -2,15 +2,6 @@
 
 [![CI](https://github.com/AOjeda006/NexusMQ/actions/workflows/ci.yml/badge.svg)](https://github.com/AOjeda006/NexusMQ/actions/workflows/ci.yml)
 
-> **Broker de mensajería distribuido de alto rendimiento** en C++23, con arquitectura
-> **shared-nothing thread-per-core** y **Raft por partición**.
->
-> **Estado: Fases 1→4 implementadas** (motor de log, reactor+broker, Raft por partición,
-> ingress/operación y *stretch*). Es un **proyecto de aprendizaje y portfolio**: prioriza la
-> profundidad técnica de un sistema coherente sobre la cantidad de funcionalidad. La puerta de
-> calidad (dos compiladores, sanitizers, formato y `clang-tidy`) corre en local y en
-> **CI (GitHub Actions)**.
-
 NexusMQ es un *message broker* de **log particionado** (estilo Kafka): productores **añaden**
 registros al final de un log append-only y consumidores **leen** desde el offset que elijan y
 avanzan a su ritmo. Se construye **desde cero** como vehículo de aprendizaje y pieza de portfolio:
@@ -58,9 +49,6 @@ El recorrido por fases, en retrospectiva, está en
 **[`docs/tecnica/29-historia-de-desarrollo.md`](docs/tecnica/29-historia-de-desarrollo.md)**.
 
 ## Build
-
-> Objetivo primario: **Linux x86-64**. El árbol completo compila y pasa la suite con GCC/libstdc++
-> y Clang/libc++; Windows (MSVC + clang-cl) está verificado en runtime (ADR-0023/0028).
 
 Requisitos: **CMake ≥ 3.25**, un compilador **C++23** (GCC o Clang **con libc++**), **vcpkg** y
 **Ninja**.
