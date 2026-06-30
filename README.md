@@ -96,6 +96,9 @@ La documentación técnica **final** vive en **[`docs/`](docs/)**:
 - Contratos **as-built**: [`protocol.md`](docs/protocol.md) (protocolo binario),
   [`kafka.md`](docs/kafka.md) (subset Kafka), [`openapi.yaml`](docs/openapi.yaml) (REST admin) y
   [`benchmarks.md`](docs/benchmarks.md) (latencias).
+- **[Documentación técnica en PDF](docs/pdf/NexusMQ-documentacion-tecnica.pdf)** — todo lo anterior
+  (capítulos + diagramas + ADR) compilado en un único documento; ver [`docs/pdf/`](docs/pdf/) para
+  regenerarlo.
 
 ## Licencia
 

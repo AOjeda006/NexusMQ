@@ -5,6 +5,9 @@
 > proyecto: se apoya en los **contratos as-built** de [`docs/`](../) y en los
 > [diagramas](../diagramas/) y [ADR](../adr/).
 
+> Disponible también como **[PDF único](../pdf/NexusMQ-documentacion-tecnica.pdf)** (documentación
+> técnica + catálogo de diagramas + registro de ADR). Se regenera con [`docs/pdf/`](../pdf/).
+
 Lectura recomendada en orden; cada capítulo es autocontenido y enlaza con los demás.
 
 - [Prefacio](./00-prefacio.md)
