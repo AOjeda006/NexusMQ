@@ -84,4 +84,4 @@ El adaptador (`KafkaServerBroker`) traduce cada petición Kafka a operaciones de
 - Sin grupos de consumidores por el plano Kafka (`OffsetCommit`/`JoinGroup`/… no están en el
   subconjunto): el seguimiento de offsets del lado servidor vive en el plano nativo.
 - Sin transacciones ni *idempotent producer* de Kafka (la idempotencia del broker es la del plano
-  nativo, §5.9 del anteproyecto).
+  nativo).

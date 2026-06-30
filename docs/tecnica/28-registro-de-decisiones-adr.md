@@ -6,7 +6,7 @@ Este capítulo es la puerta de entrada al **registro de decisiones de arquitectu
 
 Un *Architecture Decision Record* (ADR) documenta **una** decisión de arquitectura: la fuerza o problema que la motiva (*Contexto*), lo que se decide (*Decisión*), los efectos positivos y negativos que se aceptan (*Consecuencias*) y las opciones descartadas con su porqué (*Alternativas consideradas*). El valor de un ADR no es la decisión en sí, sino el **rastro del razonamiento**: por qué se eligió esto y no aquello, qué se sacrificó y bajo qué supuestos. Es la pieza de portfolio que evidencia el **criterio de ingeniería**, no solo el resultado.
 
-Cada ADR de NexusMQ sigue la plantilla común (*Contexto · Decisión · Consecuencias · Alternativas consideradas*) y conserva su **estado** y su **fecha**. Los ADR se extrajeron del catálogo §9 del anteproyecto a ficheros individuales `adr-NNNN-titulo-corto.md`.
+Cada ADR de NexusMQ sigue la plantilla común (*Contexto · Decisión · Consecuencias · Alternativas consideradas*) y conserva su **estado** y su **fecha**. Cada decisión vive en un fichero individual `adr-NNNN-titulo-corto.md` bajo [`../adr/`](../adr/).
 
 ## 28.2 La regla de inmutabilidad
 

@@ -1,5 +1,5 @@
 # NexusMQ — árbol de build raíz (una sola "solución" CMake, multiplataforma).
-# Diseño: anteproyecto §5.2 · desglose §5. Fasing: Fase 1 = monohilo + I/O bloqueante.
+# Diseño: docs/tecnica/ (arquitectura y mapa de módulos).
 
 cmake_minimum_required(VERSION 3.25)
 

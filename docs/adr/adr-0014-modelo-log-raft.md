@@ -5,7 +5,7 @@
 
 ## Contexto
 
-Este ADR **refina el desglose** (no cambia ADR-0003): concreta *cómo* `RaftLog` es «una vista `(term, index)` sobre el `PartitionLog`» cuando el formato de `RecordBatch` (§5.4) no lleva campo de término y los offsets del log son **por record** (un batch abarca varios offsets).
+Este ADR **refina el diseño detallado** (no cambia ADR-0003): concreta *cómo* `RaftLog` es «una vista `(term, index)` sobre el `PartitionLog`» cuando el formato de `RecordBatch` (§5.4) no lleva campo de término y los offsets del log son **por record** (un batch abarca varios offsets).
 
 ADR-0003 fija que «el log de Raft **es** el log de la partición». Al implementarlo surgen dos fricciones:
 

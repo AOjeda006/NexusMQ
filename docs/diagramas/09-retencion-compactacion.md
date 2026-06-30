@@ -2,7 +2,7 @@
 
 El log de una partición se acota por dos mecanismos independientes: la **retención** borra segmentos sellados enteros cuando superan `retention.ms`/`retention.bytes`, y la **compactación por clave** (`LogCompactor`) conserva solo el último record por clave. Este diagrama detalla ambos flujos tal como los implementa `nexus-storage`.
 
-> Fuentes: `src/storage/partition_log.{hpp,cpp}` (`enforce_retention`), `src/storage/retention.hpp` (`RetentionPolicy`), `src/storage/log_compactor.{hpp,cpp}` (`LogCompactor`). Diseño: anteproyecto §5.9 (ciclo de vida del segmento), §6.5, §7.10. Mecanismo vs política (§6.1): el storage ofrece el mecanismo; la política la fija el llamante.
+> Fuentes: `src/storage/partition_log.{hpp,cpp}` (`enforce_retention`), `src/storage/retention.hpp` (`RetentionPolicy`), `src/storage/log_compactor.{hpp,cpp}` (`LogCompactor`). Diseño: [capítulo 9 (Almacenamiento)](../tecnica/09-almacenamiento.md). Mecanismo vs política: el storage ofrece el mecanismo; la política la fija el llamante.
 
 ## 1. Retención por segmentos sellados enteros (`PartitionLog::enforce_retention`)
 
@@ -29,7 +29,7 @@ flowchart TD
 
 Efectos de borrar un segmento (fieles a `enforce_retention`): se quita del frente del vector (lo que **cierra sus descriptores por RAII**), se eliminan los ficheros `.log` e `.index`, se descuenta su tamaño del total y se **avanza `log_start_offset()`** hasta la base del nuevo primer segmento.
 
-### Ciclo de vida del segmento (anteproyecto §5.9)
+### Ciclo de vida del segmento
 
 ```mermaid
 stateDiagram-v2
@@ -44,7 +44,7 @@ stateDiagram-v2
     end note
 ```
 
-> `eligible` y `deleted` son fases lógicas del ciclo de vida descrito en el anteproyecto; en el código el estado persistente del `Segment` es solo `Active`/`Closed`, y la elegibilidad se evalúa dentro de `enforce_retention`.
+> `eligible` y `deleted` son fases lógicas del ciclo de vida; en el código el estado persistente del `Segment` es solo `Active`/`Closed`, y la elegibilidad se evalúa dentro de `enforce_retention`.
 
 ## 2. Compactación por clave (`LogCompactor`)
 

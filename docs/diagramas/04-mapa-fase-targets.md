@@ -1,6 +1,6 @@
 # Diagrama 4: Mapa fase → targets
 
-Qué librerías y ejecutables se entregan en cada fase del plan de desarrollo (§6 del desglose). Las fases son incrementales: cada una se apoya en lo construido antes. Estado as-built: las fases 1→4 están implementadas, con el cierre 4b (Windows, deuda diferida y benchmarks).
+Qué librerías y ejecutables se entregan en cada fase del plan de desarrollo. Las fases son incrementales: cada una se apoya en lo construido antes. Estado as-built: las fases 1→4 están implementadas, con el cierre 4b (Windows, deuda diferida y benchmarks).
 
 ## Tabla resumen
 

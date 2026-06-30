@@ -1,7 +1,7 @@
 # Benchmarks de latencia — NexusMQ
 
 > Cifras de rendimiento **end-to-end** (produce sobre la red) del broker. Es uno de los entregables
-> declarados del proyecto (Bloque L de la hoja de ruta). La metodología sigue
+> declarados del proyecto. La metodología sigue
 > `fundamentos/rendimiento/` de la biblioteca: medición **open-loop**, percentiles (no medias) e
 > interpretación por el método **USE** (utilización / saturación / errores).
 

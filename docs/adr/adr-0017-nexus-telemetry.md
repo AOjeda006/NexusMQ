@@ -5,7 +5,7 @@
 
 ## Contexto
 
-Este ADR **refina el desglose** (no cambia ninguna decisión de arquitectura previa): el desglose detallado (§4.9) ubicaba `metrics.{hpp,cpp}` dentro de `nexus-server`, que es el **ejecutable** del broker. La decisión mueve la observabilidad a una **biblioteca** propia para respetar el grafo de dependencias.
+Este ADR **refina el diseño detallado** (no cambia ninguna decisión de arquitectura previa): el diseño detallado original ubicaba `metrics.{hpp,cpp}` dentro de `nexus-server`, que es el **ejecutable** del broker. La decisión mueve la observabilidad a una **biblioteca** propia para respetar el grafo de dependencias.
 
 La `MetricsRegistry` es **THREAD-SAFE** y la **alimentan** capas del plano de datos (broker/reactor: tasa de produce/fetch, *lag*, `commit_index`/term de Raft, latencias) mientras que la **exponen** el gateway REST (`nexus-ingress`, que tiene un `MetricsRegistry&`) y el servidor (`/metrics`). Si viviera en `nexus-server` (un *exe*, no enlazable como dependencia) ninguna biblioteca inferior podría registrar métricas; y colocarla en `nexus-ingress` crearía una dependencia ascendente `broker → ingress` (ciclo de capas). Lo mismo aplica al logger JSON estructurado (lo usa todo el árbol). `nexus-common` se reserva para vocabulario mínimo (tipos, errores, bytes); una registry con mutex, familias y render Prometheus no encaja ahí.
 
@@ -24,6 +24,6 @@ Se crea el target **`nexus-telemetry`** (`src/telemetry/`), que **depende solo d
 
 ## Alternativas consideradas
 
-- **`metrics` en `nexus-server` (desglose literal):** imposible que las bibliotecas inferiores registren métricas (un *exe* no es dependencia); descartado.
+- **`metrics` en `nexus-server` (diseño detallado literal):** imposible que las bibliotecas inferiores registren métricas (un *exe* no es dependencia); descartado.
 - **`metrics` en `nexus-ingress`:** crea el ciclo de capas `broker → ingress`; descartado.
 - **`metrics` en `nexus-common`:** mete infraestructura con estado (mutex, familias, render) en la capa de vocabulario mínimo; descartado por cohesión.

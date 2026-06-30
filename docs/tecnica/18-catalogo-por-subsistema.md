@@ -2,8 +2,8 @@
 
 > Una ficha por librería `nexus-*`: su responsabilidad, sus tipos clave, su **afinidad** de
 > concurrencia y sus invariantes principales. El nivel es "tipos clave + invariantes", no
-> clase-a-clase: el detalle exhaustivo (cada campo y firma) vive en el desglose detallado del
-> repositorio. La afinidad sigue la anotación del proyecto:
+> clase-a-clase: el detalle exhaustivo (cada campo y firma) vive en el código fuente de cada
+> subsistema (`src/`). La afinidad sigue la anotación del proyecto:
 > **REACTOR-LOCAL** (de un reactor, no *thread-safe*) · **INMUTABLE** (solo lectura tras
 > construir) · **CROSS-CORE** (solo se comunica por paso de mensajes) · **THREAD-SAFE**.
 

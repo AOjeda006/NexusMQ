@@ -37,8 +37,9 @@ del diseño de brokers (la que usa Redpanda), no la de hace una década.
 - **Capa de *ingress* en dos modos:** cliente nativo directo al líder (primario) + proxy/REST (opt-in).
 
 La solución son **15 librerías `nexus-*`** (núcleo) más los ejecutables (`nexusd`, `nexus-cli`,
-`nexus-bench`, `nexus-loadgen`), las *tools* de soporte y las pruebas. Ver el desglose para el grafo
-de dependencias y el detalle por clase.
+`nexus-bench`, `nexus-loadgen`), las *tools* de soporte y las pruebas. Ver el
+[diagrama de dependencias](docs/diagramas/03-grafo-dependencias.md) y el
+[catálogo por subsistema](docs/tecnica/18-catalogo-por-subsistema.md) para el detalle.
 
 ### Roadmap por fases
 
@@ -50,7 +51,8 @@ de dependencias y el detalle por clase.
 | **3**  | Ingress + operación         | Plataforma operable y observable (TLS, REST admin, CLI, métricas). |
 | **4**  | *Stretch*                   | Idempotencia, DLQ, compactación, LZ4/Zstd, *direct I/O*, subconjunto Kafka, IOCP. |
 
-El plan detallado y vivo está en **[`DocumentacionProvisional/hoja-de-ruta.md`](DocumentacionProvisional/hoja-de-ruta.md)**.
+El recorrido por fases, en retrospectiva, está en
+**[`docs/tecnica/29-historia-de-desarrollo.md`](docs/tecnica/29-historia-de-desarrollo.md)**.
 
 ## Build
 
@@ -82,18 +84,18 @@ local (cluster de 3 nodos vía Docker Compose).
 
 ## Documentación
 
-Todo el diseño vive en **[`DocumentacionProvisional/`](DocumentacionProvisional/)**:
+La documentación técnica **final** vive en **[`docs/`](docs/)**:
 
-- **[`anteproyecto.md`](DocumentacionProvisional/anteproyecto.md)** — visión, alcance, arquitectura
-  y decisiones de arquitectura (**ADR-0001..0029**). Fuente de verdad del *qué* y el *porqué*.
-- **[`docs/`](docs/)** — contratos as-built: [`protocol.md`](docs/protocol.md) (protocolo binario),
+- **[`docs/tecnica/`](docs/tecnica/)** — la documentación técnica completa (30 capítulos en 7 partes:
+  visión, arquitectura, contratos, implementación, calidad, operación y decisiones). Empieza por su
+  [índice de lectura](docs/tecnica/README.md). Es la **fuente de verdad** del *qué* y el *porqué*.
+- **[`docs/adr/`](docs/adr/)** — los 29 *Architecture Decision Records* (**ADR-0001..0029**), uno por
+  fichero, con su [índice](docs/adr/README.md).
+- **[`docs/diagramas/`](docs/diagramas/)** — los 23 diagramas (Mermaid) de arquitectura, runtime,
+  almacenamiento, consenso, protocolos, ingress y operación.
+- Contratos **as-built**: [`protocol.md`](docs/protocol.md) (protocolo binario),
   [`kafka.md`](docs/kafka.md) (subset Kafka), [`openapi.yaml`](docs/openapi.yaml) (REST admin) y
   [`benchmarks.md`](docs/benchmarks.md) (latencias).
-- **[`Desglose/nexusmqdesglose.md`](DocumentacionProvisional/Desglose/nexusmqdesglose.md)** — vista de
-  conjunto (targets, dependencias, fases).
-- **[`Desglose/nexusmqdesglosedetallado.md`](DocumentacionProvisional/Desglose/nexusmqdesglosedetallado.md)**
-  — el plano de implementación (clases, campos, métodos).
-- **[`hoja-de-ruta.md`](DocumentacionProvisional/hoja-de-ruta.md)** — plan de desarrollo vivo.
 
 ## Licencia
 

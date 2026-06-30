@@ -36,7 +36,7 @@ enum class RaftEntryType : std::uint8_t {
 /// @brief Una entrada del log replicado de Raft. Afinidad: INMUTABLE.
 /// @details Asocia un `(term, index)` a una carga. **Posee** sus bytes (`payload`): es un tipo de
 ///   valor que debe sobrevivir a cualquier búfer transitorio del que provenga (mismo criterio que
-///   `RecordBatch`, que posee sus records). El desglose preveía `ByteSpan`; se ajusta a propiedad
+///   `RecordBatch`, que posee sus records). El diseño preveía `ByteSpan`; se ajusta a propiedad
 ///   por seguridad de vida.
 /// @invariant `index >= 1` (índices de Raft 1-based; `0` es el centinela "antes de la primera").
 struct RaftLogEntry {

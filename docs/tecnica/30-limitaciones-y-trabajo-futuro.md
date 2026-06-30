@@ -2,8 +2,8 @@
 
 > Qué **no** hace NexusMQ (a propósito) y por dónde podría crecer. Acotar el alcance es
 > una decisión de ingeniería: mantiene el proyecto profundo en una sola tesis
-> arquitectónica en lugar de disperso. Base: el "fuera de alcance" del anteproyecto (§4.4)
-> y las consecuencias registradas en los ADR.
+> arquitectónica en lugar de disperso. Base: el alcance declarado del proyecto y las
+> consecuencias registradas en los ADR.
 
 ## 30.1 Limitaciones conscientes (fuera de alcance)
 

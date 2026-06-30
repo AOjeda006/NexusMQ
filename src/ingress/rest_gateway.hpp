@@ -21,7 +21,7 @@ namespace nexus {
 /// @details Enruta `/api/v1/...` al puerto `AdminService` (ADR-0018), autentica con **Bearer
 ///   JWT** (opcional), pagina las colecciones (`page`/`size`) y traduce los `Error` del núcleo
 ///   a **RFC 7807** (`application/problem+json`). Serializa los DTOs a JSON (sin exponer tipos
-///   internos). *Ajuste del desglose:* `handle` es **síncrono** (el puerto es síncrono y
+///   internos). *Ajuste del diseño:* `handle` es **síncrono** (el puerto es síncrono y
 ///   THREAD-SAFE); la corrutina `route` se reserva para E/S asíncrona. El instante del JWT se
 ///   **inyecta** (`now_unix_seconds`), para pruebas deterministas.
 /// @invariant El `AdminService` y el verificador referenciados viven más que la pasarela.

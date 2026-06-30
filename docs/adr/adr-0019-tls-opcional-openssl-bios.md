@@ -3,7 +3,7 @@
 - **Estado:** aceptado
 - **Fecha:** 2026-06-19
 
-> **Refina el desglose** (no cambia ninguna decisión previa): el desglose detallado (§4.8) ya situaba `TlsContext`/`TlsConnection` sobre OpenSSL en `nexus-ingress`. Este ADR fija **cómo** se integra OpenSSL (síncrono por diseño) con el modelo proactor asíncrono y **qué grado de dependencia** es OpenSSL en el build.
+> **Refina el diseño detallado** (no cambia ninguna decisión previa): el diseño detallado original ya situaba `TlsContext`/`TlsConnection` sobre OpenSSL en `nexus-ingress`. Este ADR fija **cómo** se integra OpenSSL (síncrono por diseño) con el modelo proactor asíncrono y **qué grado de dependencia** es OpenSSL en el build.
 
 ## Contexto
 
@@ -29,4 +29,4 @@ Se toman tres decisiones coordinadas:
 
 - **`BIO` propio sobre el `Proactor` (custom BIO method):** evita una copia, pero exige implementar un `BIO_METHOD` con semántica de reintento correcta y es mucho más frágil; el puente de BIOs de memoria es el patrón canónico y suficiente.
 - **OpenSSL como dependencia obligatoria (vcpkg/sistema):** simplifica el build, pero rompe coste-cero y el arranque en claro para desarrollo; descartado a favor del acoplamiento opcional.
-- **Otra librería (BearSSL/mbedTLS/rustls-ffi):** menor huella, pero peor ergonomía/cobertura y menos familiar; OpenSSL ya estaba fijado en el desglose.
+- **Otra librería (BearSSL/mbedTLS/rustls-ffi):** menor huella, pero peor ergonomía/cobertura y menos familiar; OpenSSL ya estaba fijado en el diseño detallado original.

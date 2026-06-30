@@ -6,7 +6,8 @@ con las secciones **Contexto · Decisión · Consecuencias · Alternativas consi
 
 > **Una decisión `aceptado` no se edita:** si cambia, se **reemplaza** por un ADR nuevo
 > que la marca como *reemplazada por adr-NNNN*. La historia de decisiones es inmutable.
-> Estos ADR se extrajeron del catálogo §9 de `DocumentacionProvisional/anteproyecto.md`.
+> El recorrido narrado de estas decisiones vive en el capítulo
+> [28 de la documentación técnica](../tecnica/28-registro-de-decisiones-adr.md).
 
 | ADR | Título | Estado | Fecha |
 |-----|--------|--------|-------|

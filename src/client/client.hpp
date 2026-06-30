@@ -27,8 +27,8 @@ class Consumer;
 ///   (`Socket::connect` + framing manual). Expone las operaciones de bajo nivel (create/delete
 ///   topic, metadata, produce, fetch) y dos fachadas de alto nivel (`Producer`/`Consumer`). El
 ///   *smart-client* completo (multi-broker: `MetadataCache`/`ConnectionPool`, reintentos con
-///   backoff, grupos de consumidores) llega con la distribución de Fase 2; aquí se ajusta el
-///   desglose a un cliente síncrono de un solo nodo (anotado en la hoja de ruta).
+///   backoff, grupos de consumidores) llega con la distribución de Fase 2; aquí se acota el
+///   diseño a un cliente síncrono de un solo nodo.
 /// @invariant Las vistas zero-copy de la respuesta (`FetchResponse::batches`) apuntan al búfer de
 ///   recepción interno y solo son válidas hasta la **siguiente** petición sobre este `Client`.
 /// @note Movible (lo devuelve `connect`), pero no lo muevas mientras existan `Producer`/`Consumer`

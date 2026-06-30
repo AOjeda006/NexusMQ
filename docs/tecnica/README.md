@@ -1,10 +1,9 @@
 # Documentación técnica de NexusMQ
 
 > Documentación técnica **final** de NexusMQ (broker de mensajería distribuido en C++23,
-> *shared-nothing thread-per-core*, Raft por partición). Sustituye y amplía a
-> `DocumentacionProvisional/`, se apoya en los **contratos as-built** de [`docs/`](../) y en
-> los [diagramas](../diagramas/) y [ADR](../adr/). El plan que la define está en
-> [`../indice-documentacion-tecnica.md`](../indice-documentacion-tecnica.md).
+> *shared-nothing thread-per-core*, Raft por partición). Es la **fuente de verdad** del
+> proyecto: se apoya en los **contratos as-built** de [`docs/`](../) y en los
+> [diagramas](../diagramas/) y [ADR](../adr/).
 
 Lectura recomendada en orden; cada capítulo es autocontenido y enlaza con los demás.
 

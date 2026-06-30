@@ -5,7 +5,6 @@
 build/
 **/build/
 .cache/
-DocumentacionProvisional/
 docs/
 deploy/
 **/*.md

@@ -6,7 +6,7 @@ una `MetricsRegistry` (THREAD-SAFE, en `nexus-telemetry`) desde las capas del pl
 **expone** en `/metrics` por el **puerto de operación** (`9644`), en **formato de exposición
 Prometheus** (`text/plain; version=0.0.4`). Prometheus **raspa** ese endpoint periódicamente y
 Grafana lo consulta como *datasource*. En paralelo, el proceso emite **logs JSON** estructurados (con
-niveles y *correlation IDs*). Fuentes: anteproyecto §7.6, `src/telemetry/metrics.hpp`,
+niveles y *correlation IDs*). Fuentes: [capítulo 12 (Observabilidad)](../tecnica/12-observabilidad.md), `src/telemetry/metrics.hpp`,
 [`../../deploy/prometheus.yml`](../../deploy/prometheus.yml),
 [`../../deploy/docker-compose.yml`](../../deploy/docker-compose.yml).
 

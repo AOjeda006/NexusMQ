@@ -54,7 +54,7 @@ public:
 
     /// @brief Un giro del bucle: lista → buzón → espera E/S. @return si hizo algún trabajo.
     /// @note Público para poder embeber el reactor en otro bucle y para tests deterministas paso a
-    ///   paso (el desglose lo marcaba privado; ajuste anotado en la hoja de ruta).
+    ///   paso (el diseño original lo marcaba privado).
     bool poll_once();
 
     /// @brief Programa @p coro en **este** reactor (arranque diferido). El reactor posee su frame y

@@ -31,7 +31,7 @@ enum class BalanceStrategy : std::uint8_t {
 ///   nodos virtuales por nodo real, de modo que añadir/quitar un nodo reubica solo una fracción de
 ///   las claves). El hash es **FNV-1a de 64 bits**, determinista y estable entre plataformas (no
 ///   `std::hash`, que no lo es), apto para pruebas reproducibles.
-/// @note **Ajuste del desglose:** `pick` es no-`const` (round-robin avanza un cursor interno). No
+/// @note **Ajuste del diseño:** `pick` es no-`const` (round-robin avanza un cursor interno). No
 /// es
 ///   thread-safe: vive en su reactor.
 /// @invariant `node_count()` = nodos distintos añadidos y no quitados; en consistent-hashing el

@@ -5,7 +5,7 @@
 
 ## Contexto
 
-Este ADR **refina el desglose** (no cambia ADR-0003/0015): el desglose detallado preveía **mutar** `Partition` para intercalar `RaftNode` y convertir `produce`/`fetch` en `task<expected<…>>`. La decisión mantiene `Partition` intacta y añade un tipo nuevo, sin alterar el algoritmo ni la frontera de E/S de ADR-0015.
+Este ADR **refina el diseño detallado** (no cambia ADR-0003/0015): el diseño detallado original preveía **mutar** `Partition` para intercalar `RaftNode` y convertir `produce`/`fetch` en `task<expected<…>>`. La decisión mantiene `Partition` intacta y añade un tipo nuevo, sin alterar el algoritmo ni la frontera de E/S de ADR-0015.
 
 En C9 hay que dar a la partición respaldo Raft (`acks=quorum`, *high-watermark* = `commit_index`, ADR-0003). La `Partition` de la Fase 1b funciona con *ack* local y sirve al broker e2e que ya pasa. Dos fricciones al mutarla in situ:
 
@@ -31,6 +31,6 @@ Se añade **`ReplicatedPartition`** (`src/broker/replicated_partition.{hpp,cpp}`
 
 ## Alternativas consideradas
 
-- **Mutar `Partition` (desglose literal):** un solo tipo, pero rompe su movilidad por la pila autorreferencial, mezcla ack local/quorum en un tipo en uso y arriesga el e2e verde antes de tener el portador (C11); descartado.
+- **Mutar `Partition` (diseño detallado literal):** un solo tipo, pero rompe su movilidad por la pila autorreferencial, mezcla ack local/quorum en un tipo en uso y arriesga el e2e verde antes de tener el portador (C11); descartado.
 - **`RaftNode` por valor dentro de la partición:** evita una indirección, pero el tipo deja de ser movible (referencias internas colgantes al mover) y complica almacenarlo en contenedores del broker; descartado a favor de los `unique_ptr`.
 - **Fusionar ambos tras C11** (un tipo con modo local/quorum): posible evolución futura; hoy se prefiere separar para no acoplar la Fase 1b a la 2.

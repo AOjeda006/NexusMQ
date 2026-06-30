@@ -9,13 +9,13 @@ Broker de mensajería distribuido de alto rendimiento en **C++23**, con arquitec
 Es un **proyecto de aprendizaje y portfolio**: el objetivo nº1 es que el autor
 **aprenda C++ moderno y sistemas**, no entregar funcionalidad rápido.
 
-Fuentes de verdad del **diseño** (no las contradigas; si hay que ajustar el desglose
+Fuentes de verdad del **diseño** (no las contradigas; si hay que ajustar algo
 al implementar, se propone y se decide; un **ADR aceptado no se edita**, se reemplaza):
 
-- `DocumentacionProvisional/anteproyecto.md` — visión, alcance, arquitectura y **ADR-0001..0029** (el *qué* y el *porqué*).
-- `DocumentacionProvisional/Desglose/nexusmqdesglose.md` — vista de conjunto: 15 librerías `nexus-*` + ejecutables/tools, grafo de dependencias, mapa fase→targets.
-- `DocumentacionProvisional/Desglose/nexusmqdesglosedetallado.md` — el plano: cada clase/campo/método con firma y visibilidad.
-- `DocumentacionProvisional/hoja-de-ruta.md` — **plan de desarrollo vivo**; se actualiza tras cada paso.
+- `docs/tecnica/` — documentación técnica **final** (30 capítulos en 7 partes): visión, arquitectura, contratos, implementación (mapa de módulos y catálogo por subsistema), calidad, operación y decisiones. Empieza por `docs/tecnica/README.md`.
+- `docs/adr/` — los **ADR-0001..0029**, uno por fichero, con su `README.md` índice (el *qué* y el *porqué* de cada decisión).
+- `docs/diagramas/` — los diagramas (Mermaid) de arquitectura, runtime, almacenamiento, consenso, protocolos, ingress y operación.
+- `docs/` — contratos **as-built**: `protocol.md`, `kafka.md`, `openapi.yaml`, `benchmarks.md`. El código en `src/` y la suite de pruebas son la referencia última.
 
 ## Modo de trabajo (REGLA DE ORO)
 
@@ -25,14 +25,14 @@ revisa, no teclea. *(Sustituye al modo tutor previo de las fases iniciales — d
 
 Cada incremento: (1) **qué** y por qué encaja en el diseño → (2) lo **implementas** (código + tests,
 TDD rojo→verde→refactor) → (3) **pasas la puerta de calidad** (abajo) → (4) **commit + push** →
-(5) **actualizas la hoja de ruta**. Incrementos **pequeños y siempre compilables**; nunca dejes el
-árbol roto entre commits.
+(5) **actualizas la documentación** (`docs/tecnica/`, ADR nuevo si procede). Incrementos **pequeños
+y siempre compilables**; nunca dejes el árbol roto entre commits.
 
 - **No te detengas a preguntar** salvo decisiones de **producto** genuinas e irreversibles. Las
   técnicas: elige la opción más alineada con la normativa, impleméntala y, si es de arquitectura,
   regístrala como **ADR nuevo** (un ADR aceptado no se edita: se reemplaza). Documenta supuestos.
-- Si al implementar hay que **ajustar el desglose**, hazlo y anótalo (hoja de ruta; ADR si procede).
-- El **andamiaje y la documentación** (hoja de ruta, README, LICENSE, este CLAUDE.md, ficheros de
+- Si al implementar hay que **ajustar el diseño**, hazlo y anótalo (`docs/tecnica/`; ADR si procede).
+- El **andamiaje y la documentación** (`docs/`, README, LICENSE, este CLAUDE.md, ficheros de
   build, CI, ADRs) los gestiona el agente directamente.
 
 ## Puerta de calidad (OBLIGATORIA antes de CADA push — nunca pushees en rojo)

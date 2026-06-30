@@ -26,7 +26,7 @@ namespace nexus {
 ///   una trama del cliente, la reenvía al líder, lee la respuesta y la devuelve al cliente, hasta
 ///   que el cliente cierra. El **dialado** del líder y el *pool* de conexiones aguas arriba son
 ///   cableado del servidor (se difieren); aquí vive la lógica enrutable y testeable.
-/// @note **Ajuste del desglose:** el desglose firmaba `forward(Connection&)`; como aún no existe un
+/// @note **Ajuste del diseño:** el diseño firmaba `forward(Connection&)`; como aún no existe un
 ///   tipo `Connection`, `forward` toma los dos `Socket` (cliente y líder) ya conectados. El relevo
 ///   es a nivel de **trama** (no de bytes en bruto) porque el plano de datos es petición/respuesta.
 class Proxy {

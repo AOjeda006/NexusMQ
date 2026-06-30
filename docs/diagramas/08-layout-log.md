@@ -2,7 +2,7 @@
 
 El log de una partición es una secuencia *append-only* de **segmentos** sellados más un **segmento activo**; cada segmento es un par de ficheros `.log` (los `RecordBatch` en orden de *offset*) y `.index` (índice disperso *offset*→posición). Este diagrama detalla esa estructura física, el byte-layout de la cabecera de batch y la mecánica de *seek*.
 
-> Fuentes: `src/storage/partition_log.hpp`, `src/storage/segment.hpp`, `src/storage/index.hpp`, `src/common/record.{hpp,cpp}`. Contrato de bytes: [`../protocol.md`](../protocol.md) (§ «Registros y batches»). Diseño: anteproyecto §5.4, §5.8, §7.1, §7.11.
+> Fuentes: `src/storage/partition_log.hpp`, `src/storage/segment.hpp`, `src/storage/index.hpp`, `src/common/record.{hpp,cpp}`. Contrato de bytes: [`../protocol.md`](../protocol.md) (§ «Registros y batches»). Diseño: [capítulo 9 (Almacenamiento)](../tecnica/09-almacenamiento.md).
 
 ## Composición: `PartitionLog` → `Segment` → (`.log` / `.index`)
 
@@ -27,7 +27,7 @@ graph TD
 ```
 
 - **Nombrado de ficheros:** cada segmento se nombra con su *offset* base a **20 dígitos** con relleno de ceros, de modo que el orden lexicográfico coincide con el orden de *offset* (`Segment`: `00000000000000000000.log` / `.index`).
-- **Estados del segmento** (`Segment::State`, anteproyecto §5.9): `Active` (admite `append`; es el último del log) → `Closed` (sellado, índice persistido, solo lectura). La retención (Diagrama 9) borra después segmentos `Closed` enteros.
+- **Estados del segmento** (`Segment::State`): `Active` (admite `append`; es el último del log) → `Closed` (sellado, índice persistido, solo lectura). La retención (Diagrama 9) borra después segmentos `Closed` enteros.
 - **Offsets del log** (`PartitionLog`): `log_start_offset()` (base del primer segmento), `log_end_offset()` (siguiente *offset* a asignar) y `recovery_point()` (hasta dónde está sincronizado a disco estable, garantía de durabilidad).
 
 ## Byte-layout del `.log`: secuencia de `RecordBatch`
@@ -91,7 +91,7 @@ IndexEntry (little-endian; kEntrySize = 8 bytes):
 - **`relative_offset`** = *offset* absoluto − base del segmento; cabe en `u32` porque el segmento está acotado por `segment_bytes`. Ambos campos crecen de forma **estrictamente monótona** a lo largo del índice (invariante).
 - `SparseIndex` posee el fichero `.index` (RAII) y mantiene las entradas en memoria como espejo del disco; `maybe_append(offset, file_position, batch_len)` siembra una entrada solo cuando el intervalo lo exige; `flush()` persiste lo pendiente y hace `fsync` (al sellar); `reset()` lo vacía para reconstruirlo durante `recover`.
 
-## Mecánica de *seek* (fetch desde un offset; anteproyecto §7.11 #3)
+## Mecánica de *seek* (fetch desde un offset)
 
 ```mermaid
 graph LR
@@ -105,7 +105,7 @@ graph LR
 - `PartitionLog::read` localiza el segmento por *offset*, delega en `Segment::read` y, si no se llena `max_bytes` y quedan datos, **continúa en el segmento siguiente** (lectura cruzando segmentos) hasta `log_end_offset()`. `OutOfRange` si el *offset* es anterior a `log_start_offset()`.
 - `Segment::read` no revalida el CRC (eso es de `recover`); ante un batch *torn* al final, se detiene.
 
-## Recuperación al arrancar (`Segment::recover`; anteproyecto §7.11 #2)
+## Recuperación al arrancar (`Segment::recover`)
 
 Al abrir el log, `PartitionLog::open` descubre los `.log` del directorio, abre todos los segmentos y **recupera el activo**: recorre los batches desde el inicio validando `length` y CRC32C, se detiene en el primer batch incompleto o corrupto (la cola *torn* de un *crash*), **trunca el `.log`** justo tras el último batch válido y **re-siembra el `.index`**. Así se fija `log_end_offset()` y `recovery_point`.
 

@@ -26,8 +26,8 @@ class Proactor;
 ///   `correlation_id`/`api_key`. Toma posesión del @p stream (lo cierra al terminar, RAII). El tipo
 ///   de flujo (`Socket` en claro, `TlsConnection` cifrado) es un parámetro de plantilla, de modo
 ///   que el mismo bucle sirve ambos planos sin coste de llamada virtual (ADR-0019).
-/// @note El desglose modelaba una clase `Connection`; aquí es una corrutina libre que posee el
-///   flujo en su *frame* (evita miembros auto-referenciados); ajuste anotado en la hoja de ruta.
+/// @note El diseño original modelaba una clase `Connection`; aquí es una corrutina libre que posee
+///   el flujo en su *frame* (evita miembros auto-referenciados).
 template <ByteStream Stream>
 task<void> serve_connection(Proactor& proactor, Stream stream, RequestRouter& router) {
     /// Tope de tamaño de trama entrante (anti-DoS); las peticiones del protocolo son pequeñas salvo

@@ -2,7 +2,7 @@
 
 > Fuentes canónicas que sustentan las decisiones de diseño de NexusMQ. Coinciden con la
 > autoridad de la `BibliotecaDocumentacion` (fundamentos de sistemas, concurrencia,
-> rendimiento, datos distribuidos) y con las referencias del anteproyecto.
+> rendimiento, datos distribuidos).
 
 ## Datos distribuidos y consenso
 

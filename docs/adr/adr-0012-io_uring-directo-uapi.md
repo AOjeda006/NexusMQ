@@ -1,9 +1,9 @@
 # ADR-0012: Backend io_uring directo sobre el uapi del kernel (sin liburing)
 
-- **Estado:** aceptado (precisa el desglose de `nexus-io`, no cambia el diseño)
+- **Estado:** aceptado (precisa el diseño detallado de `nexus-io`, no cambia el diseño)
 - **Fecha:** 2026-06-12
 
-> **Precisa el desglose de `nexus-io`** (no cambia el diseño): el desglose anotaba el backend del `Proactor` como *«io_uring (liburing)»*. Este ADR registra que la **implementación** habla con io_uring **directamente** por el uapi del kernel, sin la biblioteca liburing. El **puerto `Proactor` y sus contratos no cambian**; solo el backend.
+> **Precisa el diseño detallado de `nexus-io`** (no cambia el diseño): el diseño detallado anotaba el backend del `Proactor` como *«io_uring (liburing)»*. Este ADR registra que la **implementación** habla con io_uring **directamente** por el uapi del kernel, sin la biblioteca liburing. El **puerto `Proactor` y sus contratos no cambian**; solo el backend.
 
 ## Contexto
 

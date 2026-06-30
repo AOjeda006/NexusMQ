@@ -70,9 +70,11 @@ cambia, se **reemplaza** por un ADR nuevo que marca al anterior como reemplazado
 narrado vive en el capítulo 28; los capítulos los referencian por su número (p. ej.
 [ADR-0005](../adr/adr-0005-concurrencia-shared-nothing-thread-per-core.md)).
 
-## Sustituye a `DocumentacionProvisional/`
+## Alcance y fuentes
 
-Esta documentación técnica **sustituye** a la carpeta `DocumentacionProvisional/` (anteproyecto,
-desgloses y hoja de ruta), reparte y **amplía** su contenido por las siete partes, **extrae** sus
-ADR a `docs/adr/` y se apoya en los contratos as-built de `docs/`. Una vez compilada y verificado
-que nada queda solo en la carpeta provisional, esta se elimina y el repositorio se publica.
+Esta documentación técnica es la **fuente de verdad** del proyecto: reparte y desarrolla la
+visión, la arquitectura y las decisiones por las siete partes, **extrae** los ADR a
+[`docs/adr/`](../adr/) y se apoya en los **contratos as-built** de [`docs/`](../)
+([`protocol.md`](../protocol.md), [`kafka.md`](../kafka.md), [`openapi.yaml`](../openapi.yaml),
+[`benchmarks.md`](../benchmarks.md)). El código fuente en [`src/`](../../src/) y la suite de
+pruebas son la referencia última cuando el detalle de implementación importa.

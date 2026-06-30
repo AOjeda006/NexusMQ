@@ -2,8 +2,8 @@
 
 > Retrospectiva del proyecto por fases. NexusMQ se construyó **por capas**, cada una
 > autocontenida y demoable, registrando las decisiones de arquitectura como ADR a medida
-> que surgían. El plan vivo está en `DocumentacionProvisional/hoja-de-ruta.md`; aquí se
-> resume el recorrido y los aprendizajes.
+> que surgían. Aquí se resume el recorrido y los aprendizajes; el catálogo de decisiones
+> vive en [`docs/adr/`](../adr/) y el capítulo [28](./28-registro-de-decisiones-adr.md).
 
 ## 29.1 Filosofía de avance
 

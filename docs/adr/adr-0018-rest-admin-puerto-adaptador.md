@@ -5,7 +5,7 @@
 
 ## Contexto
 
-Este ADR **refina el desglose** (no cambia ninguna decisión de arquitectura previa): el desglose detallado (§4.9) ubicaba `admin_api.{hpp,cpp}` dentro de `nexus-server` y, a la vez (§4.8), hacía que `RestGateway` (en `nexus-ingress`) tuviera un `AdminApi&`. Eso crea un **ciclo de capas** `ingress → server` (la pasarela usa la API) y `server → ingress` (el `Server` posee la `Ingress`). La decisión rompe el ciclo con **inversión de dependencias**, igual que ADR-0017 hizo con la telemetría.
+Este ADR **refina el diseño detallado** (no cambia ninguna decisión de arquitectura previa): el diseño detallado original ubicaba `admin_api.{hpp,cpp}` dentro de `nexus-server` y, a la vez, hacía que `RestGateway` (en `nexus-ingress`) tuviera un `AdminApi&`. Eso crea un **ciclo de capas** `ingress → server` (la pasarela usa la API) y `server → ingress` (el `Server` posee la `Ingress`). La decisión rompe el ciclo con **inversión de dependencias**, igual que ADR-0017 hizo con la telemetría.
 
 El `RestGateway` (plano de ingress) traduce HTTP↔dominio y necesita ejecutar operaciones de administración (crear/borrar/describir/listar topics y grupos). La lógica de esas operaciones vive sobre `TopicManager`/`GroupCoordinator`, que son del **broker** (capa inferior a server, pero `ingress` **no** depende de broker en el grafo: `ingress → common, io, protocol, wire`). Si el gateway dependiera de un `AdminApi` concreto alojado en `nexus-server`, `ingress` dependería de `server` (que ya depende de `ingress`): ciclo.
 
@@ -23,6 +23,6 @@ Se define el **puerto** `AdminService` (interfaz abstracta) y sus **DTOs** (`Cre
 
 ## Alternativas consideradas
 
-- **`AdminApi` concreto en `nexus-server`, referenciado por `ingress` (desglose literal):** crea el ciclo `ingress ↔ server`; descartado.
+- **`AdminApi` concreto en `nexus-server`, referenciado por `ingress` (diseño detallado literal):** crea el ciclo `ingress ↔ server`; descartado.
 - **`AdminApi` en `nexus-broker`:** tendría que implementar la interfaz `AdminService` de `ingress` ⇒ `broker → ingress` (dependencia **ascendente**, prohibida); descartado.
-- **`RestGateway` como router genérico de *handlers* (`std::function`):** rompe el ciclo, pero diluye el contrato de administración en *callbacks* sin tipado; el puerto explícito documenta mejor la API y es más fiel al desglose.
+- **`RestGateway` como router genérico de *handlers* (`std::function`):** rompe el ciclo, pero diluye el contrato de administración en *callbacks* sin tipado; el puerto explícito documenta mejor la API y es más fiel al diseño detallado original.

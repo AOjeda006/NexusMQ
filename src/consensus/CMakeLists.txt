@@ -1,5 +1,5 @@
 # nexus-consensus — Raft por partición (ADR-0003): estado, RPC, log replicado, elección.
-# Capa: depende de common, storage y protocol (deps del desglose §4.6).
+# Capa: depende de common, storage y protocol.
 add_library(nexus-consensus
   raft_state.cpp
   raft_state_store.cpp

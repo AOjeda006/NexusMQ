@@ -3,7 +3,7 @@
 - **Estado:** aceptado
 - **Fecha:** 2026-06-20
 
-> **Ajusta la hoja de ruta** (F9 decía «*binding* Python (pybind11) *si el entorno lo soporta*»): fija **cómo** se expone NexusMQ a Python cuando el entorno **no** soporta construir extensiones de CPython.
+> **Ajusta el alcance previsto** (la fase F9 contemplaba «*binding* Python (pybind11) *si el entorno lo soporta*»): fija **cómo** se expone NexusMQ a Python cuando el entorno **no** soporta construir extensiones de CPython.
 
 ## Contexto
 
