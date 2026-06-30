@@ -15,9 +15,9 @@ sequenceDiagram
     Note over L,F: El seguidor va tan atras que su next_index <= snapshot_index del lider
 
     L->>F: InstallSnapshot(term, leader_id, Snapshot{last_included_index/term/offset})
-    Note over F: on_install_snapshot: rechaza lider obsoleto;<br/>con term >= propio reconoce al lider
+    Note over F: on_install_snapshot: rechaza lider obsoleto,<br/>con term >= propio reconoce al lider
     F->>F: RaftLog::install_snapshot(index, term, last_offset)
-    Note over F: Adopta la base: si ya tiene (index, term) compacta hasta ella;<br/>si no, descarta el log y reabre PartitionLog en last_offset+1.<br/>Avanza commit_index hasta el indice incluido. Persiste (fsync)
+    Note over F: Adopta la base: si ya tiene (index, term) compacta hasta ella,<br/>si no, descarta el log y reabre PartitionLog en last_offset+1.<br/>Avanza commit_index hasta el indice incluido. Persiste (fsync)
     F-->>L: InstallSnapshotReply(term)
 
     Note over L: on_install_snapshot_reply: fija match_index/next_index<br/>del seguidor en el indice del snapshot

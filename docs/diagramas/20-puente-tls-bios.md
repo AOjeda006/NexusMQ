@@ -46,7 +46,7 @@ sequenceDiagram
 
     App->>IO: async_recv() hacia el rbio
     IO-->>App: ciphertext del par
-    App->>SSL: BIO_write(rbio); SSL_read()
+    App->>SSL: BIO_write(rbio) + SSL_read()
     activate SSL
     SSL-->>App: plaintext descifrado (0 = close_notify/EOF)
     deactivate SSL

@@ -44,7 +44,7 @@ sequenceDiagram
     participant G as Gateway Kafka (nexusd --kafka-port)
     participant B as Broker (KafkaServerBroker)
 
-    Note over C,G: Conexión TCP; cada mensaje lleva Size:INT32 (big-endian) por delante
+    Note over C,G: Conexión TCP — cada mensaje lleva Size:INT32 (big-endian) por delante
 
     C->>G: ApiVersions v3 (cab. petición flexible)
     G-->>C: ApiVersions (cuerpo flexible, cab. respuesta v0)<br/>rangos min-max por ApiKey
@@ -64,7 +64,7 @@ sequenceDiagram
     C->>G: Fetch v11 (clásico) desde offset
     G->>B: lee desde offset hasta high-watermark
     B-->>G: RecordBatch(es) opacos (baseOffset reescrito, CRC intacto)
-    G-->>C: Fetch response; si vacío, MessageSet presente de longitud 0 (nunca -1)
+    G-->>C: Fetch response — si vacío, MessageSet presente de longitud 0 (nunca -1)
 ```
 
 El `correlationId` espeja petición↔respuesta (igual que Kafka). En `Fetch` el blob se reconstruye

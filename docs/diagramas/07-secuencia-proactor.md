@@ -8,7 +8,7 @@ sequenceDiagram
     participant Coro as Corrutina (task)
     participant Aw as IoAwaitable (p. ej. RecvAwaitable)
     participant Pr as Proactor (anillo io_uring)
-    participant Loop as Reactor::poll_once
+    participant RL as Reactor::poll_once
     participant OS as Kernel (io_uring)
 
     Coro->>Aw: co_await async_recv(...)
@@ -19,9 +19,9 @@ sequenceDiagram
     Aw-->>Coro: suspende (cede el control al reactor)
 
     loop bucle del reactor
-        Loop->>Loop: run_ready() + mailbox.drain()
-        Loop->>Pr: wait_completions(max, deadline)
-        Note over Loop,Pr: si no hay trabajo, bloquea cediendo la CPU<br/>(un wake o el deadline lo despiertan)
+        RL->>RL: run_ready() + mailbox.drain()
+        RL->>Pr: wait_completions(max, deadline)
+        Note over RL,Pr: si no hay trabajo, bloquea cediendo la CPU<br/>(un wake o el deadline lo despiertan)
         OS-->>Pr: CQE lista (result = bytes o -errno)
         Pr->>Aw: ejecuta on_done(result)
         Aw->>Aw: result_ = result
