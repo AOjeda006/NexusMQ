@@ -44,6 +44,10 @@ El plano de salud distingue dos preguntas distintas:
 - **`GET /readyz` (*readiness*):** ¿puede recibir tráfico? Comprueba disco, estado de Raft y
   *lag*; si falla, el orquestador lo saca de balanceo **sin** reiniciarlo.
 
+Ambos endpoints solo aceptan **`GET`** (y `HEAD`); cualquier otro método responde **405 Method Not
+Allowed**, para que un `POST`/`PUT` accidental de una *probe* mal configurada falle de forma
+explícita en vez de ser tratado como una consulta de salud.
+
 Esta distinción evita reiniciar procesos "vivos pero no listos" (p. ej. poniéndose al día tras
 un *failover*). El `HEALTHCHECK` de la imagen y las *probes* de Kubernetes se cablean a
 `/readyz` (ver [capítulo 25](./25-despliegue.md)). El despliegue de observabilidad

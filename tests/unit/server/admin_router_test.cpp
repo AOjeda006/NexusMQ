@@ -100,6 +100,29 @@ TEST(AdminRouter, Healthz_200Liveness) {
     EXPECT_NE(response.body.find(R"("status":"ok")"), std::string::npos);
 }
 
+TEST(AdminRouter, Healthz_MetodoNoGet_405) {
+    FakeAdmin admin;
+    nexus::RestGateway rest{admin, nullptr};
+    nexus::HealthMonitor health;
+    nexus::MetricsRegistry metrics;
+    const nexus::AdminRouter router{rest, health, metrics};
+
+    // P5b: consistente con /metrics — un método no-GET en un endpoint de solo lectura es 405.
+    const auto response = run_handle(router, make_request(nexus::HttpMethod::Post, "/healthz"));
+    EXPECT_EQ(response.status, 405);
+}
+
+TEST(AdminRouter, Readyz_MetodoNoGet_405) {
+    FakeAdmin admin;
+    nexus::RestGateway rest{admin, nullptr};
+    nexus::HealthMonitor health;
+    nexus::MetricsRegistry metrics;
+    const nexus::AdminRouter router{rest, health, metrics};
+
+    const auto response = run_handle(router, make_request(nexus::HttpMethod::Delete, "/readyz"));
+    EXPECT_EQ(response.status, 405);
+}
+
 TEST(AdminRouter, Readyz_AntesDeArrancar_503) {
     FakeAdmin admin;
     nexus::RestGateway rest{admin, nullptr};

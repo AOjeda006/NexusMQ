@@ -42,6 +42,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/HealthStatus" }
+        "405":
+          description: Método no permitido — solo GET/HEAD (texto plano).
+          content:
+            text/plain:
+              schema: { type: string }
 
   /readyz:
     get:
@@ -60,6 +65,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ReadinessStatus" }
+        "405":
+          description: Método no permitido — solo GET/HEAD (texto plano).
+          content:
+            text/plain:
+              schema: { type: string }
 
   /metrics:
     get:

@@ -50,9 +50,15 @@ task<HttpResponse> AdminRouter::handle(const HttpRequest& request) const {
                                 metrics_.render_prometheus());
     }
     if (path == "/healthz") {
+        if (!is_read_method(request.method)) {
+            co_return text_response(405, "text/plain; charset=utf-8", "method not allowed\n");
+        }
         co_return health_.liveness();
     }
     if (path == "/readyz") {
+        if (!is_read_method(request.method)) {
+            co_return text_response(405, "text/plain; charset=utf-8", "method not allowed\n");
+        }
         co_return health_.readiness();
     }
     const std::int64_t now = clock_ ? clock_() : system_now_seconds();

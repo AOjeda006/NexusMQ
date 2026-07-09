@@ -35,6 +35,10 @@ Fuera de `/api/v1` y **sin autenticación**, el plano de salud/observabilidad:
 | `GET /readyz` | *Readiness*: ¿puede recibir tráfico? (disco/Raft/*lag*). |
 | `GET /metrics` | Métricas en formato de exposición de Prometheus. |
 
+`/healthz` y `/readyz` solo aceptan **`GET`** (y `HEAD`); cualquier otro método responde
+**`405 Method Not Allowed`**, para que una *probe* mal configurada (p. ej. un `POST`) falle de forma
+explícita en vez de tratarse como una consulta de salud.
+
 La distinción *liveness*/*readiness* permite que un orquestador reinicie procesos
 "vivos pero no listos" sin sacarlos de servicio prematuramente (ver
 [capítulo 12, Observabilidad](./12-observabilidad.md)).
