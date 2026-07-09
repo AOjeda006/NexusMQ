@@ -4,8 +4,10 @@
 
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -21,6 +23,8 @@
 #include "reactor/reactor.hpp"
 
 namespace nexus {
+
+class MetricsRegistry;
 
 /// @brief Adaptador que implementa el puerto `kafka::KafkaBroker` sobre el broker real
 ///   (`TopicManager`/particiones), traduciendo entre el formato de Kafka y el log interno.
@@ -60,6 +64,13 @@ public:
         topics_by_core_ = std::move(topics_by_core);
     }
 
+    /// @brief Cablea el registro de métricas (P5e): produce/fetch de Kafka se contabilizan en las
+    ///   familias `nexus_broker_*` con `protocol="kafka"`, junto al plano nativo
+    ///   (`protocol="native"`).
+    /// @pre @p metrics vive más que este adaptador. `nullptr` implícito (sin cablear) = sin
+    /// métricas.
+    void set_metrics(MetricsRegistry& metrics) noexcept { metrics_ = &metrics; }
+
     task<kafka::MetadataResponse> metadata(const kafka::MetadataRequest& req) override;
     task<kafka::ProduceResponse> produce(const kafka::ProduceRequest& req) override;
     task<kafka::FetchResponse> fetch(const kafka::FetchRequest& req) override;
@@ -69,10 +80,18 @@ private:
     /// `TopicManager` dueño de @p partition: el del núcleo `partition % N` (cableado) o `topics_`.
     [[nodiscard]] TopicManager& owner_manager(PartitionId partition) noexcept;
 
+    /// Contabiliza una RPC Kafka en `nexus_broker_*{api,protocol="kafka"}` (P5e). No-op sin
+    /// registro.
+    void record_request(std::string_view api, std::uint64_t bytes, bool had_error,
+                        std::chrono::steady_clock::time_point start) const;
+
     TopicManager& topics_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     NodeId node_id_;
     std::string host_;
     std::uint16_t port_;
+    /// Registro de métricas (no propietario; cableado por `set_metrics`). `nullptr` = sin
+    /// registrar.
+    MetricsRegistry* metrics_ = nullptr;
     /// Enrutado cross-core (cableado por `bind_cluster`; `nullptr` = operación local, tests).
     Reactor* self_ = nullptr;
     PartitionRouter* partitions_ = nullptr;

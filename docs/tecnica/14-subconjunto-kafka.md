@@ -49,6 +49,8 @@ En `Fetch`, el blob se reconstruye y se le **reescribe el `baseOffset`** autorit
 
 Un detalle de interop importante: un `Fetch` sin datos nuevos (consumidor al día con el *high-watermark*) devuelve un `MessageSet` **presente pero de longitud 0**, nunca `null` (-1) — librdkafka rechaza un `MessageSetSize` de -1 como trama corrupta.
 
+Como el blob de Kafka y los records nativos comparten el mismo log pero **no** el mismo formato, mezclar ambos protocolos en una misma partición daría lecturas ilegibles. Por eso una partición es **mono-protocolo** ([ADR-0030](../adr/adr-0030-particion-mono-protocolo.md)): la **primera** escritura reclama su protocolo (nativo o Kafka) y un `Produce`/`Fetch` del **otro** protocolo sobre esa partición se rechaza con `InvalidRequest`, en lugar de servir bytes que el cliente no sabe decodificar (antes se devolvían cero records en silencio). La marca es por partición y en memoria (se re-establece con la primera escritura tras un reinicio).
+
 ## 14.7. Mapeo al broker e interop
 
 El adaptador traduce cada petición Kafka a operaciones del broker vivo: `Metadata` → topics/particiones del nodo; `Produce` → `produce` sobre la partición destino (RecordBatch opaco); `Fetch` → lectura desde el offset pedido hasta el *high-watermark*; `ListOffsets` → *earliest* (`log_start_offset`) / *latest* (*high-watermark*); `ApiVersions` → los rangos publicados. El mapeo completo está en [`../kafka.md`](../kafka.md#mapeo-al-broker).
@@ -62,10 +64,11 @@ El subconjunto es deliberadamente parcial (las limitaciones se detallan también
 - **Un-nodo:** la `Metadata` anuncia este nodo como único broker y líder de sus particiones; no hay descubrimiento de clúster por el plano Kafka.
 - **Sin grupos de consumidores** por el plano Kafka (`OffsetCommit`/`JoinGroup`/… no están en el subconjunto): el seguimiento de offsets del lado servidor vive en el plano nativo.
 - **Sin transacciones ni *idempotent producer*** de Kafka: la idempotencia del broker es la del plano nativo.
+- **Sin mezcla de protocolos en una partición:** una partición la posee el primer protocolo que escribe en ella; el otro se rechaza con `InvalidRequest` ([ADR-0030](../adr/adr-0030-particion-mono-protocolo.md)). Para convivir nativo y Kafka, usa particiones o topics separados.
 
 ## 14.9. Referencias
 
 - Contrato *as-built*: [`../kafka.md`](../kafka.md).
 - Diagrama: [diagrama 17](../diagramas/17-peticion-respuesta-kafka.md).
-- ADRs: [ADR-0029](../adr/adr-0029-adaptador-kafka-async-cross-core.md) (adaptador async cross-core), [ADR-0004](../adr/adr-0004-protocolo-binario-propio-gateway-rest.md) (subconjunto diferido a Fase 4).
+- ADRs: [ADR-0029](../adr/adr-0029-adaptador-kafka-async-cross-core.md) (adaptador async cross-core), [ADR-0030](../adr/adr-0030-particion-mono-protocolo.md) (partición mono-protocolo), [ADR-0004](../adr/adr-0004-protocolo-binario-propio-gateway-rest.md) (subconjunto diferido a Fase 4).
 - Capítulos relacionados: [13 (protocolo nativo)](./13-protocolo-binario-nativo.md), [7 (concurrencia / sharding)](./07-concurrencia.md), [30 (limitaciones)](./30-limitaciones-y-trabajo-futuro.md).

@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 #include "common/error.hpp"
 #include "common/record.hpp"
@@ -13,6 +14,18 @@
 #include "storage/partition_log.hpp"
 
 namespace nexus {
+
+/// @brief Protocolo de wire que **posee** la codificación de records de una partición (P2,
+///   [ADR-0030](../adr/adr-0030-particion-mono-protocolo.md)). Afinidad: INMUTABLE.
+/// @details El plano nativo guarda los records en su formato propio; el subconjunto Kafka envuelve
+///   un `RecordBatch` v2 **opaco**. Los dos formatos son **incompatibles** dentro de una misma
+///   partición: leer con el protocolo equivocado devolvería bytes ilegibles. Por eso la primera
+///   escritura *reclama* el protocolo de la partición y las de otro protocolo se rechazan.
+enum class WireProtocol : std::uint8_t {
+    Unset = 0,  ///< Sin escrituras aún: la primera reclama el protocolo.
+    Native,     ///< Protocolo binario nativo de NexusMQ (records nativos).
+    Kafka,      ///< Subconjunto Kafka (F7f): un `RecordBatch` v2 opaco envuelto.
+};
 
 /// @brief Superficie común de una partición servible por el broker. Afinidad: REACTOR-LOCAL.
 /// @details Unifica la `Partition` (mono-nodo, *ack* local) y la `ReplicatedPartition` (respaldada
@@ -57,11 +70,36 @@ public:
     /// @brief Acceso de solo lectura al log subyacente (offsets de inicio/fin, lecturas).
     [[nodiscard]] virtual const PartitionLog& log() const noexcept = 0;
 
+    /// @brief Reclama @p proto como protocolo de esta partición si aún no tiene dueño, o confirma
+    ///   que ya es el suyo. Lo invoca el camino de `produce` **antes** de anexar (P2, ADR-0030).
+    /// @return Vacío si la partición queda (o ya estaba) en @p proto; `InvalidArgument` si ya la
+    ///   posee el **otro** protocolo (produce cruzado nativo/Kafka: formatos de record
+    ///   incompatibles). El borde lo traduce a `InvalidRequest` en ambos wires.
+    [[nodiscard]] expected<void> claim_protocol(WireProtocol proto) {
+        if (protocol_ == WireProtocol::Unset || protocol_ == proto) {
+            protocol_ = proto;
+            return {};
+        }
+        return make_error(ErrorCode::InvalidArgument,
+                          "partición con records de otro protocolo de wire (cruce nativo/Kafka)");
+    }
+
+    /// @brief Protocolo que posee la codificación de records; `Unset` si aún no se ha escrito.
+    /// @details Lo consulta el camino de `fetch` para **rechazar** una lectura de otro protocolo en
+    ///   vez de devolver bytes ilegibles (o cero records) en silencio.
+    [[nodiscard]] WireProtocol protocol() const noexcept { return protocol_; }
+
 protected:
     PartitionBase(const PartitionBase&) = default;
     PartitionBase& operator=(const PartitionBase&) = default;
     PartitionBase(PartitionBase&&) = default;
     PartitionBase& operator=(PartitionBase&&) = default;
+
+private:
+    /// Protocolo dueño de la codificación de records (P2). Lo fija la primera escritura; `fetch` y
+    /// las escrituras posteriores lo consultan para rechazar cruces. REACTOR-LOCAL (sin
+    /// sincronizar).
+    WireProtocol protocol_{WireProtocol::Unset};
 };
 
 }  // namespace nexus

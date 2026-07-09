@@ -587,7 +587,7 @@ TEST(RequestRouter, Metrics_ProduceConExito_RegistraTraficoBytesYLatencia) {
     nexus::Buffer out;
     ASSERT_TRUE(run_dispatch(router, nexus::ApiKey::Produce, 0, dec, out).has_value());
 
-    const nexus::Labels api{{"api", "produce"}};
+    const nexus::Labels api{{"api", "produce"}, {"protocol", "native"}};
     EXPECT_EQ(metrics.counter("nexus_broker_requests_total", api).value(), 1U);
     EXPECT_EQ(metrics.counter("nexus_broker_request_errors_total", api).value(), 0U);
     EXPECT_EQ(metrics.counter("nexus_broker_request_bytes_total", api).value(), batch.size());
@@ -610,7 +610,7 @@ TEST(RequestRouter, Metrics_ProduceTopicInexistente_RegistraError) {
     nexus::Buffer out;
     ASSERT_TRUE(run_dispatch(router, nexus::ApiKey::Produce, 0, dec, out).has_value());
 
-    const nexus::Labels api{{"api", "produce"}};
+    const nexus::Labels api{{"api", "produce"}, {"protocol", "native"}};
     EXPECT_EQ(metrics.counter("nexus_broker_requests_total", api).value(), 1U);
     EXPECT_EQ(metrics.counter("nexus_broker_request_errors_total", api).value(), 1U);
 }
@@ -643,7 +643,7 @@ TEST(RequestRouter, Metrics_Fetch_RegistraTraficoYBytesServidos) {
     nexus::Buffer fout;
     ASSERT_TRUE(run_dispatch(router, nexus::ApiKey::Fetch, 0, fdec, fout).has_value());
 
-    const nexus::Labels fetch{{"api", "fetch"}};
+    const nexus::Labels fetch{{"api", "fetch"}, {"protocol", "native"}};
     EXPECT_EQ(metrics.counter("nexus_broker_requests_total", fetch).value(), 1U);
     EXPECT_EQ(metrics.counter("nexus_broker_request_errors_total", fetch).value(), 0U);
     EXPECT_GT(metrics.counter("nexus_broker_request_bytes_total", fetch).value(), 0U);

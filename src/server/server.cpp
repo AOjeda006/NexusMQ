@@ -483,6 +483,7 @@ void Server::run() {
         kafka_broker_.emplace(catalog_.manager(0), config_.node_id, config_.advertised_host,
                               kafka_listener_->local_port());
         kafka_broker_->bind_cluster(main, *partition_router_, catalog_.managers());
+        kafka_broker_->set_metrics(metrics_);  // P5e: métricas Kafka con protocol="kafka".
         kafka_gateway_.emplace(*kafka_broker_);
         main.spawn(kafka_accept_loop(main, *kafka_listener_, *kafka_gateway_));
     }

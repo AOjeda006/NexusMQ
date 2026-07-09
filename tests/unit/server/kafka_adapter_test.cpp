@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include "broker/partition_base.hpp"
+#include "broker/topic.hpp"
 #include "common/bytes.hpp"
 #include "common/task.hpp"
 #include "common/types.hpp"
@@ -18,6 +20,7 @@
 #include "kafka/metadata.hpp"
 #include "kafka/produce.hpp"
 #include "kafka/record_batch.hpp"
+#include "telemetry/metrics.hpp"
 
 namespace {
 
@@ -224,6 +227,71 @@ TEST(KafkaServerBroker, Fetch_UnknownTopic_ReturnsError) {
         sync_wait(broker.fetch(one_partition_fetch("ghost", 0, 0)));
     EXPECT_EQ(fr.topics[0].partitions[0].error_code,
               nexus::kafka::to_wire(nexus::kafka::KafkaError::UnknownTopicOrPartition));
+}
+
+// --- P2 (ADR-0030): guarda cross-protocol nativo/Kafka en una misma partición ---
+
+TEST(KafkaServerBroker, Produce_ReclamaProtocoloKafka) {
+    TempDir dir{"claim_kafka"};
+    nexus::TopicManager topics{dir.path()};
+    ASSERT_TRUE(topics.create_topic("orders", 1).has_value());
+    nexus::KafkaServerBroker broker{topics, 1, "127.0.0.1", 9099};
+
+    const std::vector<std::byte> empty;
+    sync_wait(broker.produce(one_partition_produce("orders", 0, make_kafka_batch(0, 1, empty))));
+    EXPECT_EQ(topics.get("orders")->partition(0)->protocol(), nexus::WireProtocol::Kafka);
+}
+
+TEST(KafkaServerBroker, CrossProtocol_ParticionNativa_RechazaProduceKafka) {
+    TempDir dir{"cross_produce"};
+    nexus::TopicManager topics{dir.path()};
+    ASSERT_TRUE(topics.create_topic("orders", 1).has_value());
+    // Un productor nativo reclama la partición antes de que llegue Kafka.
+    ASSERT_TRUE(topics.get("orders")->partition(0)->claim_protocol(nexus::WireProtocol::Native));
+    nexus::KafkaServerBroker broker{topics, 1, "127.0.0.1", 9099};
+
+    const std::vector<std::byte> empty;
+    const nexus::kafka::ProduceResponse pr = sync_wait(
+        broker.produce(one_partition_produce("orders", 0, make_kafka_batch(0, 1, empty))));
+    EXPECT_EQ(pr.topics[0].partitions[0].error_code,
+              nexus::kafka::to_wire(nexus::kafka::KafkaError::InvalidRequest));
+}
+
+TEST(KafkaServerBroker, CrossProtocol_ParticionNativa_RechazaFetchKafka) {
+    TempDir dir{"cross_fetch"};
+    nexus::TopicManager topics{dir.path()};
+    ASSERT_TRUE(topics.create_topic("orders", 1).has_value());
+    ASSERT_TRUE(topics.get("orders")->partition(0)->claim_protocol(nexus::WireProtocol::Native));
+    nexus::KafkaServerBroker broker{topics, 1, "127.0.0.1", 9099};
+
+    const nexus::kafka::FetchResponse fr =
+        sync_wait(broker.fetch(one_partition_fetch("orders", 0, 0)));
+    EXPECT_EQ(fr.topics[0].partitions[0].error_code,
+              nexus::kafka::to_wire(nexus::kafka::KafkaError::InvalidRequest));
+}
+
+// --- P5e: métricas del plano de datos etiquetadas por protocolo (protocol="kafka") ---
+
+TEST(KafkaServerBroker, Metrics_Produce_RegistraProtocoloKafka) {
+    TempDir dir{"metrics_kafka"};
+    nexus::TopicManager topics{dir.path()};
+    ASSERT_TRUE(topics.create_topic("orders", 1).has_value());
+    nexus::KafkaServerBroker broker{topics, 1, "127.0.0.1", 9099};
+    nexus::MetricsRegistry metrics;
+    broker.set_metrics(metrics);
+
+    const std::vector<std::byte> empty;
+    const std::vector<std::byte> batch = make_kafka_batch(0, 1, empty);
+    sync_wait(broker.produce(one_partition_produce("orders", 0, batch)));
+
+    const nexus::Labels kafka_produce{{"api", "produce"}, {"protocol", "kafka"}};
+    EXPECT_EQ(metrics.counter("nexus_broker_requests_total", kafka_produce).value(), 1U);
+    EXPECT_EQ(metrics.counter("nexus_broker_request_errors_total", kafka_produce).value(), 0U);
+    EXPECT_EQ(metrics.counter("nexus_broker_request_bytes_total", kafka_produce).value(),
+              batch.size());
+    // El plano nativo no se ha tocado: su serie `protocol="native"` no existe aún.
+    const nexus::Labels native_produce{{"api", "produce"}, {"protocol", "native"}};
+    EXPECT_EQ(metrics.counter("nexus_broker_requests_total", native_produce).value(), 0U);
 }
 
 }  // namespace

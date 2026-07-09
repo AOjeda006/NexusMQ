@@ -157,4 +157,33 @@ TEST(Partition, Fetch_TrasProduce_DevuelveBatches) {
     EXPECT_EQ(result->next_offset, partition.high_watermark());
 }
 
+// --- P2 (ADR-0030): reclamo de protocolo por partición (guarda cross-protocol) ---
+
+TEST(Partition, Protocolo_ArrancaSinReclamar) {
+    TempDir dir{"proto_unset"};
+    nexus::Partition partition = open_partition(dir);
+    EXPECT_EQ(partition.protocol(), nexus::WireProtocol::Unset);
+}
+
+TEST(Partition, ClaimProtocol_PrimeraEscritura_ReclamaYPermiteElMismo) {
+    TempDir dir{"proto_claim"};
+    nexus::Partition partition = open_partition(dir);
+
+    ASSERT_TRUE(partition.claim_protocol(nexus::WireProtocol::Native).has_value());
+    EXPECT_EQ(partition.protocol(), nexus::WireProtocol::Native);
+    // Reclamar el mismo protocolo es idempotente (las siguientes escrituras nativas siguen).
+    EXPECT_TRUE(partition.claim_protocol(nexus::WireProtocol::Native).has_value());
+}
+
+TEST(Partition, ClaimProtocol_OtroProtocolo_Rechaza) {
+    TempDir dir{"proto_cross"};
+    nexus::Partition partition = open_partition(dir);
+
+    ASSERT_TRUE(partition.claim_protocol(nexus::WireProtocol::Native).has_value());
+    const nexus::expected<void> cross = partition.claim_protocol(nexus::WireProtocol::Kafka);
+    ASSERT_FALSE(cross.has_value());
+    EXPECT_EQ(cross.error().code(), nexus::ErrorCode::InvalidArgument);
+    EXPECT_EQ(partition.protocol(), nexus::WireProtocol::Native);  // el dueño no cambia
+}
+
 }  // namespace

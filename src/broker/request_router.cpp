@@ -77,6 +77,13 @@ ProduceResponse handle_produce(TopicManager& topics, const ProduceRequest& req) 
         resp.error_code = from_error(batch.error());
         return resp;
     }
+    // P2 (ADR-0030): la primera escritura reclama el protocolo de la partición; un produce nativo
+    // sobre una partición ya escrita por Kafka (o viceversa) se rechaza, pues los formatos de
+    // record son incompatibles y mezclarlos corrompería la lectura del otro protocolo.
+    if (const expected<void> claimed = part->claim_protocol(WireProtocol::Native); !claimed) {
+        resp.error_code = from_error(claimed.error());
+        return resp;
+    }
     const expected<Offset> last = part->produce(*batch);
     if (!last) {
         resp.error_code = from_error(last.error());
@@ -108,6 +115,12 @@ FetchOutcome handle_fetch(TopicManager& topics, const FetchRequest& req) {
     const PartitionBase* part = find_partition(topics, req.topic, req.partition);
     if (part == nullptr) {
         out.error = WireError::UnknownTopicOrPartition;
+        return out;
+    }
+    // P2 (ADR-0030): rechaza una lectura nativa de una partición cuyos records escribió Kafka; sus
+    // bytes no son records nativos, así que devolver un error explícito es mejor que servir basura.
+    if (part->protocol() != WireProtocol::Unset && part->protocol() != WireProtocol::Native) {
+        out.error = WireError::InvalidRequest;
         return out;
     }
     const std::size_t max_bytes =
@@ -238,7 +251,9 @@ MetadataResponse handle_metadata(TopicManager& topics, NodeId node_id, const std
 
 RequestRouter::DataPlaneMetrics RequestRouter::resolve_metrics(MetricsRegistry& metrics,
                                                                std::string_view api) {
-    const Labels labels{{"api", std::string{api}}};
+    // La etiqueta `protocol` distingue el plano nativo del subconjunto Kafka (P5e), que comparte
+    // estas familias con `protocol="kafka"`; así un operador puede agregar por protocolo.
+    const Labels labels{{"api", std::string{api}}, {"protocol", "native"}};
     return DataPlaneMetrics{
         .requests = &metrics.counter("nexus_broker_requests_total", labels),
         .errors = &metrics.counter("nexus_broker_request_errors_total", labels),
@@ -249,13 +264,17 @@ RequestRouter::DataPlaneMetrics RequestRouter::resolve_metrics(MetricsRegistry& 
 
 void RequestRouter::set_metrics(MetricsRegistry& metrics) {
     metrics.describe("nexus_broker_requests_total",
-                     "Peticiones del plano de datos del broker servidas, por tipo (api).");
-    metrics.describe("nexus_broker_request_errors_total",
-                     "Peticiones del plano de datos con error de wire, por tipo (api).");
-    metrics.describe("nexus_broker_request_bytes_total",
-                     "Bytes de payload del plano de datos (producido/servido), por tipo (api).");
+                     "Peticiones del plano de datos del broker servidas, por tipo (api) y "
+                     "protocolo (protocol: native|kafka).");
+    metrics.describe(
+        "nexus_broker_request_errors_total",
+        "Peticiones del plano de datos con error de wire, por tipo (api) y protocolo.");
+    metrics.describe(
+        "nexus_broker_request_bytes_total",
+        "Bytes de payload del plano de datos (producido/servido), por tipo (api) y protocolo.");
     metrics.describe("nexus_broker_request_duration_seconds",
-                     "Latencia de servicio del plano de datos en segundos, por tipo (api).");
+                     "Latencia de servicio del plano de datos en segundos, por tipo (api) y "
+                     "protocolo.");
     produce_metrics_ = resolve_metrics(metrics, "produce");
     fetch_metrics_ = resolve_metrics(metrics, "fetch");
     metrics_ = &metrics;

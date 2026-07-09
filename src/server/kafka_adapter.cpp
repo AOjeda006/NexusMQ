@@ -4,10 +4,12 @@
 
 #include "server/kafka_adapter.hpp"
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -21,6 +23,7 @@
 #include "kafka/record_batch.hpp"
 #include "reactor/cross_core_call.hpp"
 #include "storage/fetch_result.hpp"
+#include "telemetry/metrics.hpp"
 
 namespace nexus {
 
@@ -135,6 +138,12 @@ kafka::ProducePartitionResponse produce_partition(TopicManager& topics, const st
         resp.base_offset = part->log().log_end_offset();  // nada que anexar.
         return resp;
     }
+    // P2 (ADR-0030): reclama el protocolo Kafka de la partición antes de anexar; un produce de
+    // Kafka sobre una partición ya escrita en nativo se rechaza (formatos de record incompatibles).
+    if (const expected<void> claimed = part->claim_protocol(WireProtocol::Kafka); !claimed) {
+        resp.error_code = to_kafka_error(claimed.error().code());
+        return resp;
+    }
     // Envoltorio interno: el blob de Kafka es opaco; solo el `record_count` gobierna los offsets.
     const RecordBatchHeader header{.record_count = *total};
     const RecordBatch envelope{header, std::vector<std::byte>{blob.begin(), blob.end()}};
@@ -155,6 +164,13 @@ kafka::FetchPartitionResponse fetch_partition(TopicManager& topics, const std::s
     PartitionBase* part = find_partition(topics, topic, req.partition);
     if (part == nullptr) {
         resp.error_code = kafka::to_wire(kafka::KafkaError::UnknownTopicOrPartition);
+        return resp;
+    }
+    // P2 (ADR-0030): rechaza una lectura Kafka de una partición escrita en nativo; sus bytes no son
+    // un `RecordBatch` v2, así que un error explícito evita devolver records ilegibles (o cero) en
+    // silencio.
+    if (part->protocol() != WireProtocol::Unset && part->protocol() != WireProtocol::Kafka) {
+        resp.error_code = to_kafka_error(ErrorCode::InvalidArgument);
         return resp;
     }
     const std::size_t max_bytes = req.partition_max_bytes > 0
@@ -216,6 +232,24 @@ TopicManager& KafkaServerBroker::owner_manager(PartitionId partition) noexcept {
     return *topics_by_core_[static_cast<std::size_t>(owner)];
 }
 
+void KafkaServerBroker::record_request(std::string_view api, std::uint64_t bytes, bool had_error,
+                                       std::chrono::steady_clock::time_point start) const {
+    if (metrics_ == nullptr) {
+        return;  // sin cablear (tests que no inyectan métricas): no se registra nada.
+    }
+    // Mismas familias que el plano nativo (P5e), con `protocol="kafka"` para poder agregar por
+    // protocolo. Como la interoperabilidad Kafka no es el camino caliente, se resuelven las series
+    // por llamada (sin cachear), a diferencia del `RequestRouter`.
+    const Labels labels{{"api", std::string{api}}, {"protocol", "kafka"}};
+    metrics_->counter("nexus_broker_requests_total", labels).inc();
+    metrics_->counter("nexus_broker_request_bytes_total", labels).inc(bytes);
+    if (had_error) {
+        metrics_->counter("nexus_broker_request_errors_total", labels).inc();
+    }
+    const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - start;
+    metrics_->histogram("nexus_broker_request_duration_seconds", labels).observe(elapsed.count());
+}
+
 task<kafka::MetadataResponse> KafkaServerBroker::metadata(const kafka::MetadataRequest& req) {
     // Los metadatos están registrados completos en cada núcleo (ADR-0026): se sirven localmente.
     kafka::MetadataResponse resp;
@@ -251,12 +285,16 @@ task<kafka::MetadataResponse> KafkaServerBroker::metadata(const kafka::MetadataR
 }
 
 task<kafka::ProduceResponse> KafkaServerBroker::produce(const kafka::ProduceRequest& req) {
+    const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
     kafka::ProduceResponse resp;
     resp.topics.reserve(req.topics.size());
+    std::uint64_t bytes = 0;
+    bool had_error = false;
     for (const kafka::ProduceTopicData& topic : req.topics) {
         kafka::ProduceTopicResponse topic_resp;
         topic_resp.name = topic.name;
         for (const kafka::ProducePartitionData& data : topic.partitions) {
+            bytes += data.records.size();
             kafka::ProducePartitionResponse part_resp;
             if (partitions_ == nullptr) {
                 part_resp = produce_partition(topics_, topic.name, data);
@@ -266,10 +304,13 @@ task<kafka::ProduceResponse> KafkaServerBroker::produce(const kafka::ProduceRequ
                     *self_, data.index,
                     [&owner, &topic, &data] { return produce_partition(owner, topic.name, data); });
             }
+            had_error =
+                had_error || part_resp.error_code != kafka::to_wire(kafka::KafkaError::None);
             topic_resp.partitions.push_back(std::move(part_resp));
         }
         resp.topics.push_back(std::move(topic_resp));
     }
+    record_request("produce", bytes, had_error, start);
     co_return resp;
 }
 
@@ -299,8 +340,11 @@ task<kafka::ListOffsetsResponse> KafkaServerBroker::list_offsets(
 }
 
 task<kafka::FetchResponse> KafkaServerBroker::fetch(const kafka::FetchRequest& req) {
+    const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
     kafka::FetchResponse resp;
     resp.topics.reserve(req.topics.size());
+    std::uint64_t bytes = 0;
+    bool had_error = false;
     for (const kafka::FetchTopicRequest& topic : req.topics) {
         kafka::FetchTopicResponse topic_resp;
         topic_resp.topic = topic.topic;
@@ -314,10 +358,14 @@ task<kafka::FetchResponse> KafkaServerBroker::fetch(const kafka::FetchRequest& r
                     *self_, part.partition,
                     [&owner, &topic, &part] { return fetch_partition(owner, topic.topic, part); });
             }
+            bytes += part_resp.records.size();
+            had_error =
+                had_error || part_resp.error_code != kafka::to_wire(kafka::KafkaError::None);
             topic_resp.partitions.push_back(std::move(part_resp));
         }
         resp.topics.push_back(std::move(topic_resp));
     }
+    record_request("fetch", bytes, had_error, start);
     co_return resp;
 }
 
