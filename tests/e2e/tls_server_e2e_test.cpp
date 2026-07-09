@@ -278,11 +278,21 @@ TEST(TlsServerE2E, ClienteEnClaro_EsRechazadoPorElServidorTls) {
     const std::string_view plaintext = "no soy un ClientHello TLS";
     ::send(fd, plaintext.data(), plaintext.size(), MSG_NOSIGNAL);
 
-    // El servidor cierra tras el handshake fallido: recv devuelve 0 (EOF) o <0 (reset), nunca datos
-    // de aplicación. Confirma que el plano TLS **rechaza** el texto plano (no degrada a claro).
-    std::array<char, 16> buf{};
+    // El servidor TLS **rechaza** el texto plano de una de dos formas válidas —ambas equivalentes a
+    // «no degrada a claro»—: (a) cierra la conexión sin responder (`recv` → 0/EOF o <0/reset), o
+    // (b) responde con un **alerta fatal TLS** antes de cerrar (un registro cuyo primer byte es el
+    // content-type 0x15 = «alert»; OpenSSL suele emitir `unexpected_message`). Lo que nunca debe
+    // ocurrir es que sirva datos de aplicación. Aceptamos ambas: el modo concreto depende de la
+    // versión de OpenSSL y del entorno, y no forma parte del contrato.
+    constexpr unsigned char kTlsAlertContentType =
+        0x15;  // RFC 8446 §5.1: registro de tipo «alert».
+    std::array<unsigned char, 16> buf{};
     const ssize_t got = ::recv(fd, buf.data(), buf.size(), 0);
-    EXPECT_LE(got, 0);
+    const bool cierre_silencioso = got <= 0;
+    const bool alerta_fatal_tls = got > 0 && buf[0] == kTlsAlertContentType;
+    EXPECT_TRUE(cierre_silencioso || alerta_fatal_tls)
+        << "el servidor TLS no rechazó el texto plano: recv devolvió " << got
+        << " byte(s), primer byte=0x" << std::hex << (got > 0 ? static_cast<int>(buf[0]) : 0);
     ::close(fd);
 
     server->stop();
