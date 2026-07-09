@@ -274,4 +274,94 @@ TEST(TopicManager, CarrierFor_TopicNoReplicado_DevuelveNullptr) {
     EXPECT_EQ(manager.carrier_for("t", 0), nullptr);  // Partition (no replicada): sin portador
 }
 
+// --- P4: validación de nombre de topic centralizada en TopicManager (todas las superficies) ---
+
+TEST(TopicManager, CreateTopic_NombreVacio_DevuelveInvalidArgumentSinCrearFicheros) {
+    TempDir dir{"empty_name"};
+    nexus::TopicManager manager{dir.path()};
+    const nexus::expected<nexus::TopicMetadata> meta = manager.create_topic("", 1);
+    ASSERT_FALSE(meta.has_value());
+    EXPECT_EQ(meta.error().code(), nexus::ErrorCode::InvalidArgument);
+    EXPECT_EQ(manager.topic_count(), 0U);
+    // Regresión del hallazgo P4: un nombre vacío no debe materializar `data_dir/<partición>`
+    // suelta.
+    EXPECT_FALSE(std::filesystem::exists(dir.path() / "0"));
+}
+
+TEST(TopicManager, CreateTopic_NombreConSeparadoresOReservados_DevuelveInvalidArgument) {
+    TempDir dir{"bad_name"};
+    nexus::TopicManager manager{dir.path()};
+    for (const char* bad : {"a/b", "a\\b", ".", "..", "con espacio", "tab\tulado"}) {
+        const nexus::expected<nexus::TopicMetadata> meta = manager.create_topic(bad, 1);
+        ASSERT_FALSE(meta.has_value()) << "aceptó un nombre inválido: " << bad;
+        EXPECT_EQ(meta.error().code(), nexus::ErrorCode::InvalidArgument);
+    }
+    EXPECT_EQ(manager.topic_count(), 0U);
+}
+
+TEST(TopicManager, CreateTopic_NombreDemasiadoLargo_DevuelveInvalidArgument) {
+    TempDir dir{"long_name"};
+    nexus::TopicManager manager{dir.path()};
+    const std::string too_long(nexus::TopicManager::kMaxTopicNameLength + 1, 'a');
+    const nexus::expected<nexus::TopicMetadata> meta = manager.create_topic(too_long, 1);
+    ASSERT_FALSE(meta.has_value());
+    EXPECT_EQ(meta.error().code(), nexus::ErrorCode::InvalidArgument);
+}
+
+TEST(TopicManager, CreateTopic_NombreValidoConGuionPuntoYMayusculas_SeAcepta) {
+    TempDir dir{"ok_name"};
+    nexus::TopicManager manager{dir.path()};
+    EXPECT_TRUE(manager.create_topic("orders.DLQ_v2-2024", 1).has_value());
+}
+
+TEST(TopicManager, ValidateTopicName_AplicaLasReglasDeNombrado) {
+    using nexus::TopicManager;
+    EXPECT_TRUE(TopicManager::validate_topic_name("ok").has_value());
+    EXPECT_FALSE(TopicManager::validate_topic_name("").has_value());
+    EXPECT_FALSE(TopicManager::validate_topic_name("a b").has_value());
+    EXPECT_FALSE(TopicManager::validate_topic_name("a/b").has_value());
+    EXPECT_TRUE(
+        TopicManager::validate_topic_name(std::string(TopicManager::kMaxTopicNameLength, 'x'))
+            .has_value());
+    EXPECT_FALSE(
+        TopicManager::validate_topic_name(std::string(TopicManager::kMaxTopicNameLength + 1, 'x'))
+            .has_value());
+}
+
+// --- P3: delete_topic borra los datos en disco (sin fuga ni resurrección) ---
+
+TEST(TopicManager, DeleteTopic_BorraLosFicherosEnDisco) {
+    TempDir dir{"del_disk"};
+    nexus::TopicManager manager{dir.path()};
+    ASSERT_TRUE(manager.create_topic("t", 3).has_value());
+    nexus::PartitionBase* part = manager.get("t")->partition(0);
+    ASSERT_NE(part, nullptr);
+    nexus::RecordBatchHeader header;
+    header.record_count = 2;
+    const nexus::RecordBatch batch{header, std::vector<std::byte>(8, std::byte{0x5})};
+    ASSERT_TRUE(part->produce(batch).has_value());
+    ASSERT_TRUE(std::filesystem::exists(dir.path() / "t"));
+
+    ASSERT_TRUE(manager.delete_topic("t").has_value());
+    EXPECT_EQ(manager.get("t"), nullptr);
+    // Regresión del hallazgo P3: el directorio del topic y todas sus particiones desaparecen.
+    EXPECT_FALSE(std::filesystem::exists(dir.path() / "t"));
+}
+
+TEST(TopicManager, DeleteTopic_NoResucita_ReDeclararArrancaVacio) {
+    TempDir dir{"del_norez"};
+    nexus::TopicManager manager{dir.path()};
+    ASSERT_TRUE(manager.create_topic("t", 1).has_value());
+    nexus::RecordBatchHeader header;
+    header.record_count = 3;
+    const nexus::RecordBatch batch{header, std::vector<std::byte>(12, std::byte{0x7})};
+    ASSERT_TRUE(manager.get("t")->partition(0)->produce(batch).has_value());
+    EXPECT_EQ(manager.get("t")->partition(0)->high_watermark(), 3);
+
+    ASSERT_TRUE(manager.delete_topic("t").has_value());
+    // Re-declarar el mismo nombre arranca vacío (sin resurrección de los datos "borrados").
+    ASSERT_TRUE(manager.create_topic("t", 1).has_value());
+    EXPECT_EQ(manager.get("t")->partition(0)->high_watermark(), 0);
+}
+
 }  // namespace

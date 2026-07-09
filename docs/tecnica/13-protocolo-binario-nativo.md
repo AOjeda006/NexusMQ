@@ -56,7 +56,7 @@ Sobre este framing se construyen los dos flujos calientes del plano de datos. El
 - **`Produce`** publica un `RecordBatch` en una partición. El batch viaja **intacto** por el log y por la replicación: es la **unidad de escritura y de entrada de Raft** (ADR-0014). La respuesta acarrea el offset asignado y un `errorCode:i16`. La política de `acks` (0/1/quorum) se resuelve sobre el `commitIndex` de Raft de la partición (ver [capítulo 10](./10-replicacion-y-consenso.md)).
 - **`Fetch`** lee registros desde un offset hasta el *high-watermark* de la partición. El blob de records puede ir **comprimido** (LZ4/Zstd, indicado en los 2 bits bajos de `attrs`): el broker lo trata como **opaco** —lo guarda y replica comprimido— y solo el cliente lo descomprime al consumir. El bloque comprimido lleva su tamaño original como prefijo (defensa anti *decompression bomb*).
 
-Las respuestas siempre incluyen el `errorCode:i16` del contrato externo de errores; su taxonomía y la traducción en el borde se tratan en el [capítulo 16](./16-modelo-errores-wire-codes.md).
+Las respuestas siempre incluyen el `errorCode:i16` del contrato externo de errores; su taxonomía y la traducción en el borde se tratan en el [capítulo 16](./16-modelo-errores-wire-codes.md). Las operaciones de administración (`CreateTopic`/`DeleteTopic`) devuelven igualmente su `errorCode:i16`; en particular, `CreateTopic` con un **nombre inválido** (vacío, con espacios o separadores de ruta, `.`/`..`, o de más de 249 caracteres) se rechaza con `InvalidRequest` **sin crear ficheros**, aplicando la misma validación centralizada (`TopicManager::validate_topic_name`) que la API REST.
 
 ## 13.7. Seguridad del transporte
 

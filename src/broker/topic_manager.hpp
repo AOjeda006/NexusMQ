@@ -67,20 +67,43 @@ public:
     TopicManager& operator=(TopicManager&&) = delete;
     ~TopicManager();
 
+    /// Longitud máxima (en bytes) de un nombre de topic; alineada con el límite de Kafka.
+    static constexpr std::size_t kMaxTopicNameLength = 249;
+
+    /// @brief Valida un nombre de topic. **Fuente única** de las reglas de nombrado, reutilizada
+    /// por
+    ///   todas las superficies (protocolo nativo vía `create_topic`, y REST vía `AdminApi`), de
+    ///   modo que ninguna acepte lo que otra rechaza.
+    /// @details Reglas: no vacío; longitud <= `kMaxTopicNameLength`; ni `.` ni `..`; y solo
+    ///   caracteres del juego seguro `[A-Za-z0-9._-]`. Esto excluye espacios, separadores de ruta
+    ///   (`/`, `\`) y bytes de control, que de otro modo crearían ficheros fuera del árbol previsto
+    ///   del topic (p. ej. un nombre vacío materializaba `data_dir/<partición>` en la raíz).
+    /// @return `void` si es válido, o `InvalidArgument` con el motivo.
+    [[nodiscard]] static expected<void> validate_topic_name(std::string_view name);
+
     /// @brief Crea un topic con @p partition_count particiones (abre un log por cada una).
     /// @details Si @p replication_factor > 1, las particiones propias se crean como
     ///   `ReplicatedPartition` (respaldadas por Raft) y se les asocia un `RaftCarrier` que las
     ///   conduce; si es 1, son `Partition` (mono-nodo, *ack* local). En esta fase (pre-D3.5, sin
     ///   transporte inter-nodo) el grupo Raft lo forma **solo** el nodo local (sin peers): votante
     ///   único que se autoconfirma; D3.5 cableará los peers reales del clúster.
-    /// @return Los metadatos del topic, o un error (`InvalidArgument` si ya existe o el conteo es
-    ///   inválido; error de E/S si no se puede abrir algún log o su estado Raft).
+    /// @return Los metadatos del topic, o un error (`InvalidArgument` si el nombre es inválido
+    ///   (`validate_topic_name`), si ya existe o si el conteo es inválido; error de E/S si no se
+    ///   puede abrir algún log o su estado Raft).
     [[nodiscard]] expected<TopicMetadata> create_topic(std::string name,
                                                        std::int32_t partition_count,
                                                        TopicConfig config = {},
                                                        std::int16_t replication_factor = 1);
 
-    /// Borra un topic del registro (los ficheros en disco se conservan). `NotFound` si no existe.
+    /// @brief Borra un topic: lo quita del registro **y elimina sus ficheros en disco**.
+    /// @details Borra los datos (`.log`/`.index` y el estado de Raft) de las particiones que este
+    ///   núcleo posee (`data_dir/<nombre>/<partición>/`, sharding ADR-0026); con el fan-out
+    ///   cross-core, entre todos los núcleos se eliminan todas. Suelta primero el estado en memoria
+    ///   (portadores Raft y el `Topic`, cerrando los descriptores) y luego desenlaza del disco,
+    ///   para no dejar descriptores sobre ficheros ya borrados. Evita la **fuga de disco** y la
+    ///   **resurrección** (re-declarar el nombre arranca vacío).
+    /// @return `void`; `NotFound` si el topic no existe; `IoError` si el borrado en disco de alguna
+    ///   partición propia falla (el topic ya queda des-registrado en memoria).
     [[nodiscard]] expected<void> delete_topic(std::string_view name);
 
     /// @return El topic @p name, o `nullptr` si no existe.

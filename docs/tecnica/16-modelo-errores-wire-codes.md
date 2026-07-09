@@ -48,7 +48,9 @@ El protocolo nativo define un conjunto acotado de códigos `i16` (definidos en
 `src/protocol/error_code.hpp`) que cubren las familias habituales de un broker, por ejemplo:
 
 - **Entrada inválida:** mensaje/batch demasiado grande (`MESSAGE_TOO_LARGE`),
-  petición malformada, versión de API no soportada.
+  petición malformada (`InvalidRequest`) —incluido un **nombre de *topic* inválido** en
+  `CreateTopic`, validado por `TopicManager` (fuente única) e idéntico en REST y en el
+  protocolo nativo—, versión de API no soportada.
 - **Enrutado/topología:** *topic*/partición inexistente, **no soy el líder** de esa
   partición (el cliente debe redirigir al líder vía *metadata*).
 - **Disponibilidad/consistencia:** sin quórum para escribir (postura CP), *timeout* de

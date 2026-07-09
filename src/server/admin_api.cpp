@@ -44,9 +44,11 @@ AdminApi::AdminApi(TopicManager& topics, NodeId node_id, GroupLister group_liste
     : topics_(topics), node_id_(node_id), group_lister_(std::move(group_lister)) {}
 
 task<expected<TopicSummary>> AdminApi::create_topic(const CreateTopicSpec& spec) {
-    if (spec.name.empty()) {
-        co_return make_error(ErrorCode::InvalidArgument,
-                             "el nombre del topic no puede estar vacío");
+    // Validación de nombre centralizada en `TopicManager` (fuente única): REST y protocolo nativo
+    // aplican las mismas reglas. El error tipado se traduce aquí a RFC 7807 (InvalidArgument →
+    // 400).
+    if (const expected<void> valid = TopicManager::validate_topic_name(spec.name); !valid) {
+        co_return std::unexpected{valid.error()};
     }
     TopicConfig config;
     if (spec.segment_bytes > 0) {

@@ -4,9 +4,13 @@
 
 #include "broker/topic_manager.hpp"
 
+#include <algorithm>
 #include <chrono>
+#include <filesystem>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -53,9 +57,36 @@ TopicManager::TopicManager(std::filesystem::path data_dir, int num_cores, int ow
 
 TopicManager::~TopicManager() = default;
 
+expected<void> TopicManager::validate_topic_name(std::string_view name) {
+    if (name.empty()) {
+        return make_error(ErrorCode::InvalidArgument, "el nombre del topic no puede estar vacío");
+    }
+    if (name.size() > kMaxTopicNameLength) {
+        return make_error(ErrorCode::InvalidArgument,
+                          "el nombre del topic excede la longitud máxima (" +
+                              std::to_string(kMaxTopicNameLength) + ")");
+    }
+    if (name == "." || name == "..") {
+        return make_error(ErrorCode::InvalidArgument,
+                          "el nombre del topic no puede ser '.' ni '..'");
+    }
+    const auto is_allowed = [](char ch) noexcept {
+        return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') ||
+               ch == '.' || ch == '_' || ch == '-';
+    };
+    if (!std::ranges::all_of(name, is_allowed)) {
+        return make_error(ErrorCode::InvalidArgument,
+                          "el nombre del topic solo admite [A-Za-z0-9._-]: " + std::string{name});
+    }
+    return {};
+}
+
 expected<TopicMetadata> TopicManager::create_topic(std::string name, std::int32_t partition_count,
                                                    TopicConfig config,
                                                    std::int16_t replication_factor) {
+    if (const expected<void> valid = validate_topic_name(name); !valid) {
+        return std::unexpected(valid.error());
+    }
     if (partition_count < 1) {
         return make_error(ErrorCode::InvalidArgument, "partition_count debe ser >= 1");
     }
@@ -159,11 +190,46 @@ RaftCarrier* TopicManager::carrier_for(std::string_view topic, PartitionId parti
 
 expected<void> TopicManager::delete_topic(std::string_view name) {
     const std::scoped_lock lock{mutex_};
-    const auto it = topics_.find(std::string{name});
+    const std::string key{name};
+    const auto it = topics_.find(key);
     if (it == topics_.end()) {
         return make_error(ErrorCode::NotFound, "topic inexistente");
     }
+    const std::int32_t partition_count = it->second->meta().partition_count;
+
+    // Suelta primero el estado en memoria, en orden: los portadores Raft de este topic (referencian
+    // el `RaftNode` de su partición, que vive en el `Topic`) y luego el propio `Topic`. Así se
+    // cierran los descriptores de los `PartitionLog` antes de desenlazar los ficheros del disco.
+    std::erase_if(replicas_, [name](const std::unique_ptr<ReplicaContext>& ctx) {
+        return ctx->carrier->topic() == name;
+    });
     topics_.erase(it);
+
+    // Elimina del disco las particiones que **este núcleo** posee (sharding ADR-0026); el fan-out
+    // cross-core hace que, entre todos los núcleos, se borren todas. Cada partición es un
+    // directorio `data_dir/<nombre>/<partición>/` con su `.log`/`.index` (y el estado de Raft si es
+    // replicada).
+    std::error_code first_error;
+    for (PartitionId pid = 0; pid < partition_count; ++pid) {
+        if (!owns_partition(pid)) {
+            continue;
+        }
+        std::error_code remove_ec;
+        std::filesystem::remove_all(data_dir_ / key / std::to_string(pid), remove_ec);
+        if (remove_ec && !first_error) {
+            first_error = remove_ec;
+        }
+    }
+    // Quita el directorio del topic si ya quedó vacío. Lo consigue el último núcleo del fan-out en
+    // pasar; mientras otro núcleo conserve sus particiones, `remove` falla con "no vacío" y se
+    // ignora a propósito (best-effort e idempotente).
+    std::error_code ignored;
+    std::filesystem::remove(data_dir_ / key, ignored);
+
+    if (first_error) {
+        return make_error(ErrorCode::IoError,
+                          "no se pudieron borrar los ficheros del topic: " + first_error.message());
+    }
     return {};
 }
 

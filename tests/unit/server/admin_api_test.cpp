@@ -93,6 +93,21 @@ TEST(AdminApi, CreateTopic_NombreVacio_Rechaza) {
     EXPECT_EQ(result.error().code(), nexus::ErrorCode::InvalidArgument);
 }
 
+TEST(AdminApi, CreateTopic_NombreInvalido_Rechaza) {
+    TempDir dir{"badname"};
+    nexus::TopicManager topics{dir.path()};
+    nexus::AdminApi admin{topics, kNodeId};
+
+    // Antes solo se rechazaba el nombre vacío; ahora REST reutiliza las reglas centralizadas de
+    // TopicManager (P4): separadores de ruta, espacios, etc. también se rechazan sin crear
+    // ficheros.
+    const auto result =
+        run_create(admin, nexus::CreateTopicSpec{.name = "a/b", .partition_count = 1});
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code(), nexus::ErrorCode::InvalidArgument);
+    EXPECT_EQ(topics.topic_count(), 0U);
+}
+
 TEST(AdminApi, CreateTopic_Duplicado_Rechaza) {
     TempDir dir{"dup"};
     nexus::TopicManager topics{dir.path()};

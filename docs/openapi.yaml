@@ -130,7 +130,11 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
     delete:
       tags: [topics]
-      summary: Borra un topic.
+      summary: Borra un topic y sus datos en disco.
+      description: >-
+        Elimina el topic del registro y borra sus datos en disco (el `.log`/`.index` de
+        cada partición). Re-declarar el mismo nombre arranca en vacío: no hay resurrección
+        de datos "borrados".
       responses:
         "204": { description: Borrado (sin contenido). }
         "401": { $ref: "#/components/responses/Problem" }

@@ -24,7 +24,7 @@ Bajo `/api/v1`, recursos en plural y verbos HTTP (sin acciones en la URL):
 | `GET /api/v1/topics` | Lista los *topics* (paginado). |
 | `POST /api/v1/topics` | Crea un *topic*; responde `201` con cabecera `Location`. |
 | `GET /api/v1/topics/{name}` | Describe un *topic* (resumen + particiones). |
-| `DELETE /api/v1/topics/{name}` | Borra un *topic*. |
+| `DELETE /api/v1/topics/{name}` | Borra un *topic* **y sus datos en disco** (el `.log`/`.index` de cada partición). |
 | `GET /api/v1/groups` | Lista los grupos de consumidores (paginado). |
 
 Fuera de `/api/v1` y **sin autenticación**, el plano de salud/observabilidad:
@@ -54,6 +54,11 @@ de TLS y la postura de seguridad están en el [capítulo 27](./27-seguridad.md).
 - **Errores RFC 7807:** toda respuesta de error usa el esquema `ProblemDetail`
   (`application/problem+json`), con una **política central** de traducción. Esto da al
   cliente un formato de error uniforme y predecible (códigos `400`/`401`/`404`/`409`/…).
+- **Validación de nombre de *topic*:** `POST /api/v1/topics` con un nombre inválido
+  (vacío, con espacios o separadores de ruta, `.`/`..`, o de más de 249 caracteres)
+  responde `400`. La regla vive en `TopicManager::validate_topic_name` (**fuente única**),
+  de modo que el protocolo binario nativo aplica exactamente la misma validación —traducida
+  a su código de wire— y ninguna superficie acepta lo que otra rechaza.
 
 ## 15.5 Documentación como contrato
 

@@ -20,8 +20,10 @@ ver [capítulo 19](./19-arranque-y-composition-root.md)), el comportamiento del 
 durabilidad se gobierna por **política** (mecanismo vs política): retención
 (`retention.ms`/`retention.bytes`), tamaño de segmento (`segment.bytes`/`segment.ms`),
 compactación, compresión (none/LZ4/Zstd) y política de `fsync` (cada N mensajes / N ms / por
-*commit*). Los **secretos** (p. ej. el de JWT) van por entorno, nunca en la imagen ni en el
-repositorio (ver [capítulo 27](./27-seguridad.md)).
+*commit*). Borrar un *topic* (`DELETE /api/v1/topics/{name}`) elimina sus datos en disco (el
+`.log`/`.index` de todas sus particiones) y **recupera el espacio**; no queda estado que
+"resucite" al re-declarar el nombre. Los **secretos** (p. ej. el de JWT) van por entorno, nunca
+en la imagen ni en el repositorio (ver [capítulo 27](./27-seguridad.md)).
 
 ## 26.3 Observabilidad en operación
 
