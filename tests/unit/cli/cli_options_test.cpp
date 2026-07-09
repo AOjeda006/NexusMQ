@@ -2,6 +2,8 @@
 // en el primer no-flag y los errores de validación (puerto/flag desconocido).
 #include <gtest/gtest.h>
 
+#include <sstream>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -60,6 +62,35 @@ TEST(CliOptions, FlagDesconocido_DevuelveError) {
     const auto parsed = nexus::cli::parse_global_options(args_of({"--verbose"}));
     ASSERT_FALSE(parsed.has_value());
     EXPECT_EQ(parsed.error().code(), nexus::ErrorCode::InvalidArgument);
+}
+
+// --- P5d: --help/-h/help imprimen el uso y salen con código 0 (no "opción desconocida") ---
+
+TEST(CliRun, HelpLargo_ImprimeUsoYSaleCero) {
+    std::ostringstream out;
+    std::ostringstream err;
+    const int rc = nexus::cli::run_cli(args_of({"--help"}), out, err);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.str().find("uso: nexus-cli"), std::string::npos);
+    EXPECT_TRUE(err.str().empty()) << "no debe reportar error: " << err.str();
+}
+
+TEST(CliRun, HelpCortoYComando_ImprimenUsoYSalenCero) {
+    for (const std::string_view flag : {std::string_view{"-h"}, std::string_view{"help"}}) {
+        std::ostringstream out;
+        std::ostringstream err;
+        const std::vector<std::string_view> args{flag};
+        EXPECT_EQ(nexus::cli::run_cli(args, out, err), 0) << "flag: " << flag;
+        EXPECT_NE(out.str().find("uso: nexus-cli"), std::string::npos) << "flag: " << flag;
+    }
+}
+
+TEST(CliRun, HelpTrasFlagsGlobales_SaleCero) {
+    std::ostringstream out;
+    std::ostringstream err;
+    const int rc = nexus::cli::run_cli(args_of({"--host", "h", "--help"}), out, err);
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(out.str().find("uso: nexus-cli"), std::string::npos);
 }
 
 }  // namespace

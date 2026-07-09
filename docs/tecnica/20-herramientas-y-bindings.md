@@ -10,7 +10,9 @@ CLI de administración y diagnóstico. Habla con el **plano de operación** (RES
 el plano de datos: crea/lista/describe/borra *topics*, lista grupos de consumidores y produce/
 consume de forma puntual. Acepta un *token* Bearer (`--token`) cuando el nodo arranca con
 `--jwt-secret`. Es el camino humano equivalente a las llamadas REST del
-[capítulo 15](./15-api-rest-administracion.md).
+[capítulo 15](./15-api-rest-administracion.md). Con `--help`/`-h`/`help` (en cualquier posición)
+imprime el uso y termina con **código 0**; invocada sin argumentos también muestra el uso (con
+código 1), y un comando u opción desconocidos imprimen el uso por *stderr* y terminan con error.
 
 ## 20.2 `nexus-bench`
 

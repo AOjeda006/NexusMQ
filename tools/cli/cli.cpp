@@ -51,6 +51,9 @@ expected<ParsedArgs> parse_global_options(std::span<const std::string_view> args
     std::size_t i = 0;
     while (i < args.size()) {
         const std::string_view arg = args[i];
+        if (arg == "--help" || arg == "-h") {
+            break;  // ayuda: la despacha `run_cli` (help/--help/-h) e imprime el uso con éxito.
+        }
         if (!arg.starts_with("--")) {
             break;  // primer no-flag: empieza el comando.
         }
