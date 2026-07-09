@@ -13,7 +13,6 @@
 #endif
 
 #include <atomic>
-#include <charconv>
 #if !defined(_WIN32)
 #include <csignal>
 #endif
@@ -23,11 +22,10 @@
 #include <iostream>
 #include <span>
 #include <string>
-#include <string_view>
-#include <system_error>
 #include <utility>
 #include <vector>
 
+#include "server/daemon_args.hpp"
 #include "server/server.hpp"
 
 namespace {
@@ -69,64 +67,6 @@ extern "C" void on_signal(int /*signal*/) {
 }
 #endif
 
-/// Convierte @p text a entero; devuelve @p fallback si no es un número decimal completo y válido.
-int parse_int(std::string_view text, int fallback) {
-    int value = fallback;
-    const char* begin = text.data();
-    const char* end = begin + text.size();
-    const std::from_chars_result result = std::from_chars(begin, end, value);
-    if (result.ec != std::errc{} || result.ptr != end) {
-        return fallback;
-    }
-    return value;
-}
-
-/// Parsea "nombre:particiones" (p. ej. "eventos:4"); particiones=1 si se omite o es inválido.
-std::pair<std::string, std::int32_t> parse_topic_spec(std::string_view spec) {
-    const std::size_t colon = spec.find(':');
-    if (colon == std::string_view::npos) {
-        return {std::string{spec}, 1};
-    }
-    const std::string name{spec.substr(0, colon)};
-    const int partitions = parse_int(spec.substr(colon + 1), 1);
-    return {name, partitions > 0 ? partitions : 1};
-}
-
-/// Parsea los argumentos de línea de comandos sobre @p config y @p topics.
-/// @return `true` si todos los argumentos son válidos; `false` si hay uno desconocido (ya
-/// informado).
-bool parse_args(std::span<char*> args, nexus::Server::Config& config,
-                std::vector<std::pair<std::string, std::int32_t>>& topics) {
-    for (std::size_t i = 1; i < args.size(); ++i) {
-        const std::string_view arg{args[i]};
-        const bool has_next = i + 1 < args.size();
-        if (arg == "--port" && has_next) {
-            config.port = static_cast<std::uint16_t>(parse_int(args[++i], config.port));
-        } else if (arg == "--data-dir" && has_next) {
-            config.data_dir = args[++i];
-        } else if (arg == "--host" && has_next) {
-            config.host = args[++i];
-            config.advertised_host = config.host;
-        } else if (arg == "--admin-port" && has_next) {
-            config.admin_port = static_cast<std::uint16_t>(parse_int(args[++i], 0));
-        } else if (arg == "--kafka-port" && has_next) {
-            config.kafka_port = static_cast<std::uint16_t>(parse_int(args[++i], 0));
-        } else if (arg == "--jwt-secret" && has_next) {
-            config.jwt_secret = args[++i];
-        } else if (arg == "--node-id" && has_next) {
-            config.node_id = static_cast<nexus::NodeId>(parse_int(args[++i], config.node_id));
-        } else if (arg == "--topic" && has_next) {
-            topics.push_back(parse_topic_spec(args[++i]));
-        } else {
-            std::cerr << "uso: nexusd [--port N] [--admin-port N] [--kafka-port N] "
-                         "[--data-dir DIR] [--host H] [--node-id N] [--jwt-secret S] "
-                         "[--topic nombre:parts]\n";
-            return false;
-        }
-    }
-    return true;
-}
-
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -134,10 +74,11 @@ int main(int argc, char** argv) {
         nexus::Server::Config config;
         config.port = 9092;
         config.data_dir = "./nexus-data";
-        std::vector<std::pair<std::string, std::int32_t>> topics;
+        std::vector<nexus::DaemonTopicSpec> topics;
 
         const std::span<char*> args{argv, static_cast<std::size_t>(argc)};
-        if (!parse_args(args, config, topics)) {
+        if (!nexus::parse_daemon_args(args, config, topics)) {
+            std::cerr << nexus::kDaemonUsage;
             return EXIT_FAILURE;
         }
 

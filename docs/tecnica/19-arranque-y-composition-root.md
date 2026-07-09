@@ -32,6 +32,8 @@ entorno, nunca horneados (ver [capítulo 27](./27-seguridad.md)). Flags principa
 | `--node-id` | Identificador del nodo en el cluster. |
 | `--topic` | *Topic* inicial, formato `nombre:particiones` (p. ej. `demo:3`). |
 | `--jwt-secret` | Activa la autenticación JWT en `/api/v1/*` (si se omite, REST sin auth). |
+| `--tls-cert` | Cadena de certificado PEM del servidor; con `--tls-key` **activa TLS** en el plano de datos ([ADR-0019](../adr/adr-0019-tls-opcional-openssl-bios.md)). |
+| `--tls-key` | Clave privada PEM del servidor (pareja de `--tls-cert`). |
 
 > Los nombres y valores por defecto son contrato operativo; el catálogo completo de
 > configuración (retención, `segment.bytes`, política de `fsync`, etc.) vive en el

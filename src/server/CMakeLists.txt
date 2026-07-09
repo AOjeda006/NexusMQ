@@ -6,7 +6,8 @@ add_library(nexus-server
   kafka_adapter.cpp
   admin_api.cpp
   admin_router.cpp
-  admin_http.cpp)
+  admin_http.cpp
+  daemon_args.cpp)
 add_library(nexus::server ALIAS nexus-server)
 
 target_include_directories(nexus-server PUBLIC ${PROJECT_SOURCE_DIR}/src)
