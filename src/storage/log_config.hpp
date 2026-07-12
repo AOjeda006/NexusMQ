@@ -7,10 +7,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
 
 namespace nexus {
 
 class EncryptionKey;  // storage/segment_crypto.hpp (forward: solo se guarda un shared_ptr).
+class StorageTier;  // storage/storage_tier.hpp (forward: solo se guarda un puntero no-propietario).
 
 /// @brief Política de `fsync` del log (compromiso durabilidad/latencia). Afinidad: INMUTABLE.
 /// @details Determina cuándo se fuerza la persistencia a disco estable. Tras un fallo, solo lo
@@ -38,6 +40,15 @@ struct LogConfig {
     /// `nullptr`, los segmentos se escriben en claro (comportamiento por defecto). Al crear un
     /// segmento con clave, se cifra con AES-256-GCM; al abrirlo, se descifra de forma transparente.
     std::shared_ptr<const EncryptionKey> encryption_key;
+
+    /// **Almacenamiento por niveles** (ADR-0032): destino de la descarga de segmentos sellados.
+    /// Puntero **no-propietario** (el tier lo posee el composition root, compartido por el nodo);
+    /// si es `nullptr`, no hay tiering y el log se comporta como hoy (degradación limpia). La
+    /// identidad de la partición (`tier_topic`/`tier_partition`) forma la clave de objeto en el
+    /// tier.
+    StorageTier* tier = nullptr;
+    std::string tier_topic;           ///< Nombre del topic (clave de objeto del tier).
+    std::int32_t tier_partition = 0;  ///< Id de partición (clave de objeto del tier).
 };
 
 }  // namespace nexus

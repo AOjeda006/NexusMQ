@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <vector>
@@ -84,7 +85,26 @@ public:
 
     /// @brief Aplica la retención: borra los segmentos sellados más antiguos elegibles por
     ///   tamaño o tiempo, **nunca el activo**; avanza `log_start_offset`.
+    /// @note Opera sobre los segmentos **locales**; los ya descargados al tier (fríos) se conservan
+    ///   ahí (el offload es precisamente para retención larga). No mueve `log_start_offset` por
+    ///   debajo del prefijo frío.
     [[nodiscard]] expected<void> enforce_retention(const RetentionPolicy& policy);
+
+    /// @brief Descarga al *tier* (ADR-0032) los segmentos **sellados** locales y reclama su
+    /// espacio.
+    /// @details Recorre los segmentos sellados del más antiguo al más nuevo (nunca el activo); por
+    ///   cada uno sube `.log` y `.index` al tier (idempotente) y, **solo tras confirmar la
+    ///   subida**, borra los ficheros locales y lo marca como frío. Sube los bytes **tal cual** (si
+    ///   el `.log` está cifrado, sube el ciphertext; interopera con ADR-0031). `log_start_offset`/
+    ///   `log_end_offset` no cambian: los datos siguen legibles (rehidratación transparente en
+    ///   `read`). No-op si no hay tier configurado. Idempotente.
+    /// @return Número de segmentos descargados en esta llamada, o error de tier/E-S (en cuyo caso
+    /// el
+    ///   segmento en curso **no** se reclama: se reintentará).
+    [[nodiscard]] expected<std::size_t> offload_sealed_to_tier();
+
+    /// Número de segmentos descargados al tier (prefijo frío); observabilidad / pruebas.
+    [[nodiscard]] std::size_t tiered_segment_count() const noexcept { return tiered_bases_.size(); }
 
     /// Primer offset disponible en el log (base del primer segmento).
     [[nodiscard]] Offset log_start_offset() const noexcept { return log_start_offset_; }
@@ -99,7 +119,8 @@ public:
 
 private:
     PartitionLog(std::filesystem::path dir, LogConfig cfg,
-                 std::vector<std::unique_ptr<Segment>> segments, Offset log_start, Offset log_end);
+                 std::vector<std::unique_ptr<Segment>> segments, std::vector<Offset> tiered_bases,
+                 Offset log_start, Offset log_end);
 
     [[nodiscard]] Segment* active() noexcept { return segments_.back().get(); }
     [[nodiscard]] expected<void> roll_segment();
@@ -108,13 +129,31 @@ private:
     /// Segmento cuyo rango contiene @p offset (mayor base ≤ offset); nullptr si es menor que todos.
     [[nodiscard]] const Segment* segment_for(Offset offset) const noexcept;
 
+    /// Offset base del primer segmento **local** (frontera entre el prefijo frío y el caliente).
+    [[nodiscard]] Offset first_local_base() const noexcept {
+        return segments_.front()->base_offset();
+    }
+    /// Recalcula `log_start_offset_` = base del primer segmento (frío si lo hay, si no, local).
+    void recompute_log_start() noexcept;
+    /// Lee un fragmento desde el segmento **local** que contiene @p offset (vacío si no hay
+    /// ninguno).
+    [[nodiscard]] expected<FetchResult> read_local(Offset offset, std::size_t max_bytes) const;
+    /// Lee un fragmento de un segmento **frío**: lo rehidrata del tier a un temporal, lo abre y
+    /// lee.
+    [[nodiscard]] expected<FetchResult> read_tiered(Offset offset, std::size_t max_bytes) const;
+    /// Borra del tier los objetos (`.log` + `.index`) del segmento de base @p base.
+    [[nodiscard]] expected<void> remove_tiered(Offset base);
+
     std::filesystem::path dir_;                       ///< Directorio de la partición.
     LogConfig cfg_;                                   ///< Configuración (por valor).
-    std::vector<std::unique_ptr<Segment>> segments_;  ///< Segmentos por offset base.
-    Offset log_start_offset_;                         ///< Primer offset del log.
-    Offset log_end_offset_;                           ///< Próximo offset a asignar.
-    Offset recovery_point_;                           ///< Hasta dónde está sincronizado a disco.
-    std::size_t bytes_since_sync_ = 0;                ///< Bytes escritos desde el último `fsync`.
+    std::vector<std::unique_ptr<Segment>> segments_;  ///< Segmentos **locales** por offset base.
+    std::vector<Offset>
+        tiered_bases_;         ///< Bases de los segmentos **fríos** (tier), prefijo ordenado.
+    Offset log_start_offset_;  ///< Primer offset del log (incluye el prefijo frío).
+    Offset log_end_offset_;    ///< Próximo offset a asignar.
+    Offset recovery_point_;    ///< Hasta dónde está sincronizado a disco.
+    std::size_t bytes_since_sync_ = 0;         ///< Bytes escritos desde el último `fsync`.
+    mutable std::uint64_t rehydrate_seq_ = 0;  ///< Secuencia de dirs temporales de rehidratación.
 };
 
 }  // namespace nexus

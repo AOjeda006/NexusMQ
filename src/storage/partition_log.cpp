@@ -15,6 +15,8 @@
 #include <utility>
 #include <vector>
 
+#include "storage/storage_tier.hpp"
+
 namespace nexus {
 namespace {
 
@@ -37,14 +39,49 @@ namespace {
     return dir / std::format("{:020d}{}", base, ext);
 }
 
+// Clave de objeto del tier (ADR-0032) para el segmento de base @p base y pieza @p kind.
+[[nodiscard]] TierObjectKey tier_key(const LogConfig& cfg, Offset base, SegmentFileKind kind) {
+    return TierObjectKey{.topic = cfg.tier_topic,
+                         .partition = cfg.tier_partition,
+                         .base_offset = base,
+                         .kind = kind};
+}
+
+// Reconstruye el prefijo **frío** (tier) al abrir: lista el tier (autoridad) y descarta las bases
+// que ya existen localmente (offload confirmado pero sin reclamar por un crash: el local manda).
+// Solo cuando hay segmentos locales (el reinicio normal conserva al menos el activo); si el árbol
+// local está vacío, ignora el tier (recuperación de disco perdido queda fuera de alcance).
+[[nodiscard]] expected<std::vector<Offset>> list_cold_prefix(
+    const LogConfig& cfg, const std::vector<std::unique_ptr<Segment>>& segments) {
+    std::vector<Offset> tiered;
+    if (cfg.tier == nullptr || segments.empty()) {
+        return tiered;
+    }
+    auto listed = cfg.tier->list_segment_bases(cfg.tier_topic, cfg.tier_partition);
+    if (!listed) {
+        return std::unexpected(listed.error());
+    }
+    for (const Offset base : *listed) {
+        const bool local = std::ranges::any_of(segments, [base](const std::unique_ptr<Segment>& s) {
+            return s->base_offset() == base;
+        });
+        if (!local) {
+            tiered.push_back(base);
+        }
+    }
+    std::ranges::sort(tiered);
+    return tiered;
+}
+
 }  // namespace
 
 PartitionLog::PartitionLog(std::filesystem::path dir, LogConfig cfg,
-                           std::vector<std::unique_ptr<Segment>> segments, Offset log_start,
-                           Offset log_end)
+                           std::vector<std::unique_ptr<Segment>> segments,
+                           std::vector<Offset> tiered_bases, Offset log_start, Offset log_end)
     : dir_(std::move(dir)),
       cfg_(std::move(cfg)),
       segments_(std::move(segments)),
+      tiered_bases_(std::move(tiered_bases)),
       log_start_offset_(log_start),
       log_end_offset_(log_end),
       recovery_point_(log_end) {}  // lo abierto/recuperado ya está en disco.
@@ -106,7 +143,18 @@ expected<PartitionLog> PartitionLog::open(std::filesystem::path dir, const LogCo
         log_end = *last_valid + 1;
     }
 
-    return PartitionLog{std::move(dir), cfg, std::move(segments), log_start, log_end};
+    // Reconstruye el prefijo **frío** (tier, ADR-0032): el tier es la autoridad de qué segmentos se
+    // descargaron. El prefijo frío extiende `log_start` por debajo del primer segmento local.
+    auto tiered_bases = list_cold_prefix(cfg, segments);
+    if (!tiered_bases) {
+        return std::unexpected(tiered_bases.error());
+    }
+    if (!tiered_bases->empty()) {
+        log_start = std::min(log_start, tiered_bases->front());
+    }
+
+    return PartitionLog{std::move(dir),           cfg,       std::move(segments),
+                        std::move(*tiered_bases), log_start, log_end};
 }
 
 expected<Offset> PartitionLog::append(const RecordBatch& batch) {
@@ -141,6 +189,12 @@ expected<void> PartitionLog::truncate_to(Offset offset) {
     }
     if (offset < log_start_offset_) {
         return make_error(ErrorCode::OutOfRange, "truncate_to por debajo de log_start_offset");
+    }
+    // Nunca dentro del prefijo frío: solo se descargan segmentos sellados (historia comprometida),
+    // y Raft no trunca historia comprometida. Guarda honesta ante un uso imprevisto.
+    if (!tiered_bases_.empty() && offset < first_local_base()) {
+        return make_error(ErrorCode::Unsupported,
+                          "truncate_to dentro de datos ya descargados al tier");
     }
     // Segmento que contiene `offset`: el último con base_offset <= offset.
     const auto upper = std::ranges::upper_bound(
@@ -177,16 +231,28 @@ expected<void> PartitionLog::truncate_prefix_to(Offset offset) {
     if (offset > log_end_offset_) {
         return make_error(ErrorCode::OutOfRange, "truncate_prefix_to por encima de log_end_offset");
     }
-    // Borra los segmentos sellados cuyo rango entero queda por debajo de `offset` (el siguiente
-    // segmento empieza en <= offset). La guarda `size() > 1` preserva siempre el activo.
+    // Primero el prefijo **frío** (tier): borra del tier los segmentos cuyo rango entero queda por
+    // debajo de `offset` (el sucesor —el siguiente frío o el primer local— empieza en <= offset).
+    while (!tiered_bases_.empty()) {
+        const Offset successor = tiered_bases_.size() > 1 ? tiered_bases_[1] : first_local_base();
+        if (successor > offset) {
+            break;  // este segmento frío contiene `offset`: se conserva.
+        }
+        if (const auto removed = remove_tiered(tiered_bases_.front()); !removed) {
+            return std::unexpected(removed.error());
+        }
+        tiered_bases_.erase(tiered_bases_.begin());
+    }
+    // Luego los segmentos locales sellados cuyo rango entero queda por debajo de `offset`. La
+    // guarda `size() > 1` preserva siempre el activo.
     while (segments_.size() > 1 && segments_[1]->base_offset() <= offset) {
         const Offset base = segments_.front()->base_offset();
         segments_.erase(segments_.begin());  // cierra los fd del segmento (RAII).
         std::error_code ec;
         std::filesystem::remove(seg_path(dir_, base, ".log"), ec);
         std::filesystem::remove(seg_path(dir_, base, ".index"), ec);
-        log_start_offset_ = segments_.front()->base_offset();
     }
+    recompute_log_start();
     return {};
 }
 
@@ -194,6 +260,14 @@ expected<void> PartitionLog::reset_to(Offset offset) {
     if (offset < 0) {
         return make_error(ErrorCode::InvalidArgument, "reset_to: offset negativo");
     }
+    // Descarta también el prefijo frío del tier (el seguidor adopta un snapshot: su log divergente,
+    // frío incluido, deja de ser válido).
+    for (const Offset base : tiered_bases_) {
+        if (const auto removed = remove_tiered(base); !removed) {
+            return std::unexpected(removed.error());
+        }
+    }
+    tiered_bases_.clear();
     // Borra todos los segmentos (cierra los fd vía RAII) y luego sus ficheros.
     std::vector<Offset> bases;
     bases.reserve(segments_.size());
@@ -235,8 +309,10 @@ expected<void> PartitionLog::enforce_retention(const RetentionPolicy& policy) {
     }
     const auto now = std::filesystem::file_time_type::clock::now();
 
-    // Borra el segmento más antiguo mientras sea elegible, preservando siempre el activo.
-    while (segments_.size() > 1) {
+    // Borra el segmento local más antiguo mientras sea elegible, preservando siempre el activo. Si
+    // hay prefijo **frío** (tier), no se toca el hot set local: los datos más antiguos ya están en
+    // el tier (retención larga), y borrar un local dejaría un hueco sobre el prefijo frío.
+    while (tiered_bases_.empty() && segments_.size() > 1) {
         const Offset base = segments_.front()->base_offset();
         const auto seg_bytes = static_cast<std::int64_t>(segments_.front()->size_bytes());
 
@@ -291,6 +367,14 @@ const Segment* PartitionLog::segment_for(Offset offset) const noexcept {
     return std::prev(it)->get();
 }
 
+expected<FetchResult> PartitionLog::read_local(Offset offset, std::size_t max_bytes) const {
+    const Segment* seg = segment_for(offset);
+    if (seg == nullptr) {
+        return FetchResult{};  // por debajo del primer segmento local: nada que leer aquí.
+    }
+    return seg->read(offset, max_bytes);
+}
+
 expected<FetchResult> PartitionLog::read(Offset offset, std::size_t max_bytes) const {
     if (offset < log_start_offset_) {
         return make_error(ErrorCode::OutOfRange, "offset por debajo de log_start_offset");
@@ -300,23 +384,70 @@ expected<FetchResult> PartitionLog::read(Offset offset, std::size_t max_bytes) c
 
     Offset cursor = offset;
     while (cursor < log_end_offset_ && result.batches.size() < max_bytes) {
-        const Segment* seg = segment_for(cursor);
-        if (seg == nullptr) {
-            break;
-        }
         const std::size_t remaining = max_bytes - result.batches.size();
-        auto fragment = seg->read(cursor, remaining);
+        // Prefijo frío (tier): rehidratación transparente. Suffix caliente: lectura local directa.
+        auto fragment = (!tiered_bases_.empty() && cursor < first_local_base())
+                            ? read_tiered(cursor, remaining)
+                            : read_local(cursor, remaining);
         if (!fragment) {
             return std::unexpected(fragment.error());
         }
         if (fragment->batches.empty()) {
-            break;  // nada más legible en este segmento desde el cursor.
+            break;  // nada más legible desde el cursor.
         }
         result.batches.append(fragment->batches.as_span());
         result.next_offset = fragment->next_offset;
         cursor = fragment->next_offset;
     }
     return result;
+}
+
+expected<FetchResult> PartitionLog::read_tiered(Offset offset, std::size_t max_bytes) const {
+    // Segmento frío que contiene offset: el de mayor base ≤ offset.
+    const auto it = std::ranges::upper_bound(tiered_bases_, offset);
+    if (it == tiered_bases_.begin()) {
+        return FetchResult{};  // por debajo del prefijo frío (no debería ocurrir).
+    }
+    const Offset base = *std::prev(it);
+
+    // Rehidrata `.log` + `.index` a un directorio temporal único y lo limpia al salir (RAII). Es un
+    // efecto de caché: `read` es lógicamente const (no cambia el estado lógico del log).
+    const std::filesystem::path tmp = dir_ / ".rehydrate" / std::to_string(rehydrate_seq_++);
+    std::error_code ec;
+    std::filesystem::remove_all(tmp, ec);
+    std::filesystem::create_directories(tmp, ec);
+    if (ec) {
+        return make_error(ErrorCode::IoError, "rehidratación: create_directories: " + ec.message());
+    }
+    struct TmpGuard {
+        std::filesystem::path path;
+        explicit TmpGuard(std::filesystem::path p) : path(std::move(p)) {}
+        ~TmpGuard() {
+            std::error_code cleanup;
+            std::filesystem::remove_all(path, cleanup);
+        }
+        TmpGuard(const TmpGuard&) = delete;
+        TmpGuard& operator=(const TmpGuard&) = delete;
+        TmpGuard(TmpGuard&&) = delete;
+        TmpGuard& operator=(TmpGuard&&) = delete;
+    } const guard{tmp};
+
+    if (const auto fetched = cfg_.tier->fetch_file(tier_key(cfg_, base, SegmentFileKind::Log),
+                                                   seg_path(tmp, base, ".log"));
+        !fetched) {
+        return std::unexpected(fetched.error());
+    }
+    if (const auto fetched = cfg_.tier->fetch_file(tier_key(cfg_, base, SegmentFileKind::Index),
+                                                   seg_path(tmp, base, ".index"));
+        !fetched) {
+        return std::unexpected(fetched.error());
+    }
+
+    auto seg = Segment::open(tmp, base, cfg_.index_interval_bytes, cfg_.encryption_key.get());
+    if (!seg) {
+        return std::unexpected(seg.error());
+    }
+    return seg->read(offset, max_bytes);  // el FetchResult copia los bytes; sobrevive al temporal.
 }
 
 expected<void> PartitionLog::roll_segment() {
@@ -332,6 +463,56 @@ expected<void> PartitionLog::roll_segment() {
     }
     segments_.push_back(std::make_unique<Segment>(std::move(*seg)));
     return {};
+}
+
+void PartitionLog::recompute_log_start() noexcept {
+    log_start_offset_ =
+        tiered_bases_.empty() ? segments_.front()->base_offset() : tiered_bases_.front();
+}
+
+expected<void> PartitionLog::remove_tiered(Offset base) {
+    if (const auto removed = cfg_.tier->remove(tier_key(cfg_, base, SegmentFileKind::Log));
+        !removed) {
+        return removed;
+    }
+    if (const auto removed = cfg_.tier->remove(tier_key(cfg_, base, SegmentFileKind::Index));
+        !removed) {
+        return removed;
+    }
+    return {};
+}
+
+expected<std::size_t> PartitionLog::offload_sealed_to_tier() {
+    if (cfg_.tier == nullptr) {
+        return std::size_t{0};  // sin tier: no-op (comportamiento por defecto).
+    }
+    std::size_t offloaded = 0;
+    // Los sellados locales son todos menos el activo (`segments_.back()`); del más antiguo al más
+    // nuevo, preservando la contigüidad del prefijo frío.
+    while (segments_.size() > 1) {
+        const Offset base = segments_.front()->base_offset();
+        // Sube `.log` y `.index` (idempotente y atómico). Si falla, NO se reclama: se reintenta.
+        if (const auto put = cfg_.tier->put_file(tier_key(cfg_, base, SegmentFileKind::Log),
+                                                 seg_path(dir_, base, ".log"));
+            !put) {
+            return std::unexpected(put.error());
+        }
+        if (const auto put = cfg_.tier->put_file(tier_key(cfg_, base, SegmentFileKind::Index),
+                                                 seg_path(dir_, base, ".index"));
+            !put) {
+            return std::unexpected(put.error());
+        }
+        // Subida confirmada: ahora sí, reclama el espacio local (cierra los fd vía RAII).
+        segments_.erase(segments_.begin());
+        std::error_code ec;
+        std::filesystem::remove(seg_path(dir_, base, ".log"), ec);
+        std::filesystem::remove(seg_path(dir_, base, ".index"), ec);
+        tiered_bases_.push_back(base);  // el prefijo frío queda ordenado (bases crecientes).
+        ++offloaded;
+    }
+    recompute_log_start();  // inocuo: los datos siguen legibles, el prefijo frío avanza el
+                            // arranque.
+    return offloaded;
 }
 
 }  // namespace nexus

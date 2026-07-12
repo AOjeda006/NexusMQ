@@ -18,9 +18,11 @@
 #include "common/record.hpp"
 #include "common/types.hpp"
 #include "io/file.hpp"
+#include "storage/local_storage_tier.hpp"
 #include "storage/log_config.hpp"
 #include "storage/retention.hpp"
 #include "storage/segment_crypto.hpp"
+#include "storage/storage_tier.hpp"
 
 namespace {
 
@@ -647,6 +649,181 @@ TEST(PartitionLogEncrypted, SinClave_EscribeEnClaro_ComoHoy) {
     std::array<std::byte, nexus::kEncSegmentHeaderSize> head{};
     ASSERT_TRUE(log->read_at(head, 0).has_value());
     EXPECT_FALSE(nexus::is_encrypted_segment_header(head));  // sin cabecera de cifrado: en claro
+}
+
+// --- Almacenamiento por niveles (tiered storage, ADR-0032) ---
+
+// Config de segmentos pequeños con un tier de destino y la identidad de la partición.
+nexus::LogConfig tiered_small_segments(nexus::StorageTier& tier, const char* topic = "t",
+                                       std::int32_t partition = 0) {
+    nexus::LogConfig cfg = small_segments();
+    cfg.tier = &tier;
+    cfg.tier_topic = topic;
+    cfg.tier_partition = partition;
+    return cfg;
+}
+
+TEST(PartitionLogTiered, OffloadSealed_DescargaLosSelladosYReclamaLocal) {
+    const TempDir data("tier_offload_data");
+    const TempDir obj("tier_offload_obj");
+    nexus::LocalStorageTier tier(obj.path());
+
+    auto plog = nexus::PartitionLog::open(data.path(), tiered_small_segments(tier));
+    ASSERT_TRUE(plog.has_value());
+    for (int i = 0; i < 6; ++i) {
+        ASSERT_TRUE(plog->append(make_batch(1, 40)).has_value());
+    }
+    ASSERT_EQ(plog->segment_count(), 3U);  // 2 sellados + activo
+
+    const auto offloaded = plog->offload_sealed_to_tier();
+    ASSERT_TRUE(offloaded.has_value());
+    EXPECT_EQ(*offloaded, 2U);                    // los dos sellados
+    EXPECT_EQ(plog->segment_count(), 1U);         // solo queda el activo local
+    EXPECT_EQ(plog->tiered_segment_count(), 2U);  // dos en el tier (prefijo frío)
+
+    // Reclamación: los `.log` locales de los sellados ya no están; el activo (base 4) sí.
+    EXPECT_FALSE(std::filesystem::exists(seg_log_path(data.path(), 0)));
+    EXPECT_FALSE(std::filesystem::exists(seg_log_path(data.path(), 2)));
+    EXPECT_TRUE(std::filesystem::exists(seg_log_path(data.path(), 4)));
+
+    // El rango del log no cambia: los datos siguen presentes (fríos + calientes).
+    EXPECT_EQ(plog->log_start_offset(), 0);
+    EXPECT_EQ(plog->log_end_offset(), 6);
+    expect_readable_and_decodes(*plog);  // lectura transparente (rehidrata los fríos)
+}
+
+TEST(PartitionLogTiered, OffloadSealed_SinTier_EsNoOp) {
+    const TempDir data("tier_noop");
+    auto plog = three_segments(data.path());
+    const auto offloaded = plog.offload_sealed_to_tier();
+    ASSERT_TRUE(offloaded.has_value());
+    EXPECT_EQ(*offloaded, 0U);
+    EXPECT_EQ(plog.segment_count(), 3U);
+    EXPECT_EQ(plog.tiered_segment_count(), 0U);
+}
+
+TEST(PartitionLogTiered, OffloadSealed_SegundaLlamada_EsIdempotente) {
+    const TempDir data("tier_idem_data");
+    const TempDir obj("tier_idem_obj");
+    nexus::LocalStorageTier tier(obj.path());
+
+    auto plog = nexus::PartitionLog::open(data.path(), tiered_small_segments(tier));
+    ASSERT_TRUE(plog.has_value());
+    for (int i = 0; i < 6; ++i) {
+        ASSERT_TRUE(plog->append(make_batch(1, 40)).has_value());
+    }
+    ASSERT_TRUE(plog->offload_sealed_to_tier().has_value());
+    const auto again = plog->offload_sealed_to_tier();  // ya no hay sellados locales.
+    ASSERT_TRUE(again.has_value());
+    EXPECT_EQ(*again, 0U);
+    EXPECT_EQ(plog->tiered_segment_count(), 2U);
+    expect_readable_and_decodes(*plog);
+}
+
+TEST(PartitionLogTiered, Read_TrasOffload_RehidrataYDevuelveTodo) {
+    const TempDir data("tier_read_data");
+    const TempDir obj("tier_read_obj");
+    nexus::LocalStorageTier tier(obj.path());
+
+    auto plog = nexus::PartitionLog::open(data.path(), tiered_small_segments(tier));
+    ASSERT_TRUE(plog.has_value());
+    for (int i = 0; i < 6; ++i) {
+        ASSERT_TRUE(plog->append(make_batch(1, 40)).has_value());
+    }
+    ASSERT_TRUE(plog->offload_sealed_to_tier().has_value());
+
+    // Una sola lectura amplia cruza el prefijo frío y el suffix caliente: los 6 batches.
+    const auto fr = plog->read(0, 100000);
+    ASSERT_TRUE(fr.has_value());
+    EXPECT_EQ(fr->batches.size(), 6U * 76U);
+    EXPECT_EQ(fr->next_offset, 6);
+}
+
+TEST(PartitionLogTiered, Reopen_TrasOffload_ReconstruyeElPrefijoFrioDesdeElTier) {
+    const TempDir data("tier_reopen_data");
+    const TempDir obj("tier_reopen_obj");
+    nexus::LocalStorageTier tier(obj.path());
+
+    nexus::Offset start = 0;
+    nexus::Offset end = 0;
+    {
+        auto plog = nexus::PartitionLog::open(data.path(), tiered_small_segments(tier));
+        ASSERT_TRUE(plog.has_value());
+        for (int i = 0; i < 6; ++i) {
+            ASSERT_TRUE(plog->append(make_batch(1, 40)).has_value());
+        }
+        ASSERT_TRUE(plog->offload_sealed_to_tier().has_value());
+        start = plog->log_start_offset();
+        end = plog->log_end_offset();
+    }
+    // Reabrir con el mismo tier reconstruye el prefijo frío (el tier es la autoridad).
+    auto reopened = nexus::PartitionLog::open(data.path(), tiered_small_segments(tier));
+    ASSERT_TRUE(reopened.has_value());
+    EXPECT_EQ(reopened->log_start_offset(), start);
+    EXPECT_EQ(reopened->log_end_offset(), end);
+    EXPECT_EQ(reopened->tiered_segment_count(), 2U);
+    expect_readable_and_decodes(*reopened);  // sigue leyéndose todo, frío incluido
+}
+
+TEST(PartitionLogTiered, TruncatePrefix_TrasOffload_BorraElPrefijoFrioDelTier) {
+    const TempDir data("tier_trunc_data");
+    const TempDir obj("tier_trunc_obj");
+    nexus::LocalStorageTier tier(obj.path());
+
+    auto plog = nexus::PartitionLog::open(data.path(), tiered_small_segments(tier));
+    ASSERT_TRUE(plog.has_value());
+    for (int i = 0; i < 6; ++i) {
+        ASSERT_TRUE(plog->append(make_batch(1, 40)).has_value());
+    }
+    ASSERT_TRUE(plog->offload_sealed_to_tier().has_value());
+    ASSERT_EQ(plog->tiered_segment_count(), 2U);
+
+    // Recorta el prefijo por encima del primer segmento frío (base 0, rango [0,1]): se elimina del
+    // tier; el segundo frío (base 2) contiene el offset 2 y se conserva.
+    ASSERT_TRUE(plog->truncate_prefix_to(2).has_value());
+    EXPECT_EQ(plog->tiered_segment_count(), 1U);
+    EXPECT_EQ(plog->log_start_offset(), 2);
+    EXPECT_FALSE(
+        tier.contains(nexus::TierObjectKey{"t", 0, 0, nexus::SegmentFileKind::Log}).value());
+    EXPECT_TRUE(
+        tier.contains(nexus::TierObjectKey{"t", 0, 2, nexus::SegmentFileKind::Log}).value());
+}
+
+TEST(PartitionLogTiered, OffloadYRead_Cifrado_SubeCiphertextYDescifraAlRehidratar) {
+    if (!nexus::encryption_available()) {
+        GTEST_SKIP() << "sin OpenSSL";
+    }
+    const TempDir data("tier_enc_data");
+    const TempDir obj("tier_enc_obj");
+    nexus::LocalStorageTier tier(obj.path());
+    const auto key = plog_test_key();
+
+    nexus::LogConfig cfg = tiered_small_segments(tier);
+    cfg.encryption_key = key;
+
+    auto plog = nexus::PartitionLog::open(data.path(), cfg);
+    ASSERT_TRUE(plog.has_value());
+    for (int i = 0; i < 6; ++i) {
+        ASSERT_TRUE(plog->append(make_batch(1, 40)).has_value());
+    }
+    ASSERT_TRUE(plog->offload_sealed_to_tier().has_value());
+    // Los segmentos cifrados son mayores (cabecera de segmento + de bloque) y rotan más a menudo,
+    // así que hay varios sellados; basta con que se descargara al menos uno.
+    ASSERT_GT(plog->tiered_segment_count(), 0U);
+
+    // El objeto del tier es el `.log` cifrado tal cual: empieza por la cabecera de cifrado NXSEG1.
+    const TempDir peek("tier_enc_peek");
+    const auto local = peek.path() / "seg0.log";
+    ASSERT_TRUE(tier.fetch_file(nexus::TierObjectKey{"t", 0, 0, nexus::SegmentFileKind::Log}, local)
+                    .has_value());
+    auto raw = nexus::File::open(local.string(), nexus::File::Mode::ReadOnly);
+    ASSERT_TRUE(raw.has_value());
+    std::array<std::byte, nexus::kEncSegmentHeaderSize> head{};
+    ASSERT_TRUE(raw->read_at(head, 0).has_value());
+    EXPECT_TRUE(nexus::is_encrypted_segment_header(head));
+
+    // Lectura transparente: rehidrata y descifra con la clave del log.
+    expect_readable_and_decodes(*plog);
 }
 
 }  // namespace

@@ -105,8 +105,13 @@ expected<TopicMetadata> TopicManager::create_topic(std::string name, std::int32_
     meta.created_at_ms = now_ms();
 
     auto topic = std::make_unique<Topic>(meta);
+    // El tiering (ADR-0032) se cablea en el composition root; aquí queda desactivado (tier nullptr
+    // = comportamiento por defecto). B4 propaga el `StorageTier` y la identidad por partición.
     const LogConfig log_cfg{.segment_bytes = config.segment_bytes,
-                            .encryption_key = encryption_key_};
+                            .encryption_key = encryption_key_,
+                            .tier = nullptr,
+                            .tier_topic = name,
+                            .tier_partition = 0};
     const bool replicated = replication_factor > 1;
     // Portadores acumulados aparte: solo se confían a `replicas_` si el topic se crea entero (si
     // una partición falla, `new_replicas` se destruye —portadores antes que `topic`— sin tocar el
