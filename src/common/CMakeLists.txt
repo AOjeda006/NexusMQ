@@ -7,6 +7,7 @@ add_library(nexus-common
   bytes.cpp
   record.cpp
   record_codec.cpp
+  control_record.cpp
   compression.cpp
   varint.cpp
   sha256.cpp
