@@ -56,6 +56,7 @@ add_executable(nexus-tests
   unit/broker/replicated_partition_test.cpp
   unit/broker/consumer_group_test.cpp
   unit/broker/group_coordinator_test.cpp
+  unit/broker/transaction_coordinator_test.cpp
   unit/broker/topic_test.cpp
   unit/broker/topic_manager_test.cpp
   unit/broker/topic_catalog_test.cpp
