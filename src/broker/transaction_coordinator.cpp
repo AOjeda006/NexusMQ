@@ -4,6 +4,8 @@
 #include "broker/transaction_coordinator.hpp"
 
 #include <algorithm>
+#include <limits>
+#include <string>
 #include <utility>
 
 namespace nexus {
@@ -38,6 +40,36 @@ namespace {
 TransactionCoordinator::TransactionCoordinator(Epoch coordinator_epoch,
                                                std::chrono::milliseconds txn_timeout)
     : coordinator_epoch_(coordinator_epoch), txn_timeout_(txn_timeout) {}
+
+ProducerIdentity TransactionCoordinator::init_producer_id(MonoTime now,
+                                                          const std::string& transactional_id) {
+    const auto it = identities_.find(transactional_id);
+    if (it == identities_.end()) {
+        const ProducerIdentity id{.producer_id = next_producer_id_++, .producer_epoch = 0};
+        identities_.emplace(transactional_id, id);
+        return id;
+    }
+    ProducerIdentity& id = it->second;
+    // Fencing del zombie: si la encarnación anterior dejó una transacción abierta, se aborta para
+    // no dejar el LSO bloqueado (sus datos quedarán descartados por el marcador de abort).
+    if (const auto txn = txns_.find(id.producer_id);
+        txn != txns_.end() && txn->second.state == TransactionState::Ongoing) {
+        enter_prepare(txn->second, ControlRecordType::Abort, now);
+    }
+    if (id.producer_epoch == std::numeric_limits<std::int16_t>::max()) {
+        // Época agotada: identidad nueva (producer_id fresco) con época 0.
+        id = ProducerIdentity{.producer_id = next_producer_id_++, .producer_epoch = 0};
+    } else {
+        ++id.producer_epoch;
+    }
+    return id;
+}
+
+const ProducerIdentity* TransactionCoordinator::producer_identity(
+    const std::string& transactional_id) const {
+    const auto it = identities_.find(transactional_id);
+    return it == identities_.end() ? nullptr : &it->second;
+}
 
 expected<void> TransactionCoordinator::begin(MonoTime now, ProducerId producer_id,
                                              std::int16_t epoch) {

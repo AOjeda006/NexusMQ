@@ -67,6 +67,16 @@ struct MarkerWrite {
     TopicPartition partition;
 };
 
+/// @brief Identidad de un productor transaccional: su id y su época de fencing. INMUTABLE.
+/// @details La devuelve `init_producer_id` (InitProducerId/initTransactions): fija con quién habla
+/// el
+///   coordinador y con qué época, que el productor arrastra en cada batch/petición para el fencing.
+struct ProducerIdentity {
+    ProducerId producer_id = -1;       ///< Identificador asignado al productor.
+    std::int16_t producer_epoch = -1;  ///< Época vigente (sube en cada reinicialización).
+    bool operator==(const ProducerIdentity&) const = default;
+};
+
 /// @brief Coordinador de transacciones: FSM síncrona **sin E/S** del 2PC multi-partición
 /// (ADR-0033).
 /// @details Afinidad: REACTOR-LOCAL. Al estilo de `RaftNode`/`GroupCoordinator` (ADR-0015): consume
@@ -92,6 +102,22 @@ public:
     ///   ahora la llevan, de modo que las particiones fencing a los del coordinador anterior.
     void set_coordinator_epoch(Epoch epoch) noexcept { coordinator_epoch_ = epoch; }
     [[nodiscard]] Epoch coordinator_epoch() const noexcept { return coordinator_epoch_; }
+
+    /// @brief InitProducerId (initTransactions): asigna o **rota** la identidad de
+    ///   @p transactional_id.
+    /// @details Un `transactional_id` **nuevo** recibe un `producer_id` fresco con época 0; uno
+    ///   **existente** conserva su `producer_id` y **sube la época** (fencing del zombie: la
+    ///   encarnación anterior quedará expulsada por época obsoleta). Si esa encarnación tenía una
+    ///   transacción **abierta**, se **aborta** (se encolan sus marcadores) para no dejar el LSO
+    ///   bloqueado. Al agotarse la época (`INT16_MAX`) se asigna un `producer_id` nuevo con época
+    ///   0.
+    [[nodiscard]] ProducerIdentity init_producer_id(MonoTime now,
+                                                    const std::string& transactional_id);
+
+    /// Identidad vigente de @p transactional_id, o `nullptr` si nunca se inicializó
+    /// (observabilidad).
+    [[nodiscard]] const ProducerIdentity* producer_identity(
+        const std::string& transactional_id) const;
 
     /// @brief Abre (o reabre) la transacción del productor @p producer_id con época @p epoch.
     /// @details Una época **inferior** a la registrada es `Fenced`; una **superior** (o un estado
@@ -150,6 +176,9 @@ private:
 
     Epoch coordinator_epoch_;
     std::chrono::milliseconds txn_timeout_;
+    ProducerId next_producer_id_ = 0;  ///< Asignación monótona de `producer_id`.
+    std::unordered_map<std::string, ProducerIdentity>
+        identities_;  ///< transactional.id → identidad.
     std::unordered_map<ProducerId, TransactionMetadata> txns_;
     std::vector<MarkerWrite> pending_markers_;
 };

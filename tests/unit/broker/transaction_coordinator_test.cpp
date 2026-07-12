@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <string>
 #include <vector>
 
 #include "common/control_record.hpp"
@@ -223,6 +224,72 @@ TEST(TransactionCoordinator, ResumePending_IgnoraTransaccionesConcluidas) {
     coord.set_coordinator_epoch(2);
     coord.resume_pending();
     EXPECT_TRUE(coord.take_pending_markers().empty());
+}
+
+// --- init_producer_id (InitProducerId / fencing) --------------------------
+
+TEST(TransactionCoordinator, InitProducerId_Nuevo_AsignaEpoca0) {
+    TransactionCoordinator coord{1};
+    const nexus::MonoTime t0{};
+    const nexus::ProducerIdentity id = coord.init_producer_id(t0, "app-1");
+    EXPECT_EQ(id.producer_epoch, 0);
+    EXPECT_GE(id.producer_id, 0);
+}
+
+TEST(TransactionCoordinator, InitProducerId_DistintosIds_ProducerIdsDistintos) {
+    TransactionCoordinator coord{1};
+    const nexus::MonoTime t0{};
+    const nexus::ProducerIdentity a = coord.init_producer_id(t0, "app-1");
+    const nexus::ProducerIdentity b = coord.init_producer_id(t0, "app-2");
+    EXPECT_NE(a.producer_id, b.producer_id);
+}
+
+TEST(TransactionCoordinator, InitProducerId_Existente_ConservaIdYSubeEpoca) {
+    TransactionCoordinator coord{1};
+    const nexus::MonoTime t0{};
+    const nexus::ProducerIdentity first = coord.init_producer_id(t0, "app-1");
+    const nexus::ProducerIdentity second = coord.init_producer_id(t0, "app-1");
+    EXPECT_EQ(second.producer_id, first.producer_id);
+    EXPECT_EQ(second.producer_epoch, first.producer_epoch + 1);
+
+    const nexus::ProducerIdentity* current = coord.producer_identity("app-1");
+    ASSERT_NE(current, nullptr);
+    EXPECT_EQ(*current, second);
+}
+
+TEST(TransactionCoordinator, InitProducerId_AbortaTransaccionEnCursoDelZombie) {
+    TransactionCoordinator coord{1};
+    const nexus::MonoTime t0{};
+    const nexus::ProducerIdentity id = coord.init_producer_id(t0, "app-1");
+    ASSERT_TRUE(coord.begin(t0, id.producer_id, id.producer_epoch).has_value());
+    ASSERT_TRUE(
+        coord.add_partitions(t0, id.producer_id, id.producer_epoch, {tp("t", 0)}).has_value());
+
+    // El productor reinicia (nueva encarnación): su transacción abierta se aborta.
+    const nexus::ProducerIdentity reborn = coord.init_producer_id(t0, "app-1");
+    EXPECT_EQ(reborn.producer_epoch, id.producer_epoch + 1);
+    EXPECT_EQ(coord.find(id.producer_id)->state, TransactionState::PrepareAbort);
+    const std::vector<MarkerWrite> markers = coord.take_pending_markers();
+    ASSERT_EQ(markers.size(), 1U);
+    EXPECT_EQ(markers[0].decision, ControlRecordType::Abort);
+    EXPECT_EQ(markers[0].producer_epoch, id.producer_epoch);  // marcador con la época vieja
+}
+
+TEST(TransactionCoordinator, TrasReinit_LaEpocaViejaEsFenced) {
+    TransactionCoordinator coord{1};
+    const nexus::MonoTime t0{};
+    const nexus::ProducerIdentity id = coord.init_producer_id(t0, "app-1");      // epoch 0
+    const nexus::ProducerIdentity reborn = coord.init_producer_id(t0, "app-1");  // epoch 1
+    ASSERT_TRUE(coord.begin(t0, reborn.producer_id, reborn.producer_epoch).has_value());
+    // La encarnación vieja (época 0) queda expulsada.
+    const auto r = coord.begin(t0, id.producer_id, id.producer_epoch);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().code(), nexus::ErrorCode::Fenced);
+}
+
+TEST(TransactionCoordinator, ProducerIdentity_DesconocidoEsNullptr) {
+    const TransactionCoordinator coord{1};
+    EXPECT_EQ(coord.producer_identity("fantasma"), nullptr);
 }
 
 }  // namespace
