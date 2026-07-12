@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "common/error.hpp"
 #include "common/types.hpp"
@@ -95,6 +96,15 @@ public:
 
     /// @brief Borra @p key del tier. **Idempotente**: no falla si no existe. `IoError` ante fallo.
     [[nodiscard]] virtual expected<void> remove(const TierObjectKey& key) = 0;
+
+    /// @brief Lista los offsets base de los segmentos (`.log`) de (@p topic, @p partition) en el
+    ///   tier, **ordenados** ascendentemente (base de la recuperación al reabrir).
+    /// @details El tier es la **autoridad** de qué segmentos están descargados: al reabrir, el
+    ///   `PartitionLog` reconstruye su prefijo frío listando el tier (sin manifiesto local que
+    ///   pueda desincronizarse). Vacío si la partición no tiene objetos. `IoError` ante fallo del
+    ///   backend (no ante «prefijo inexistente», que es simplemente vacío).
+    [[nodiscard]] virtual expected<std::vector<Offset>> list_segment_bases(
+        std::string_view topic, std::int32_t partition) const = 0;
 };
 
 }  // namespace nexus

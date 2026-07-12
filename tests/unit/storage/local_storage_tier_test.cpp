@@ -10,12 +10,14 @@
 #include <vector>
 
 #include "common/error.hpp"
+#include "common/types.hpp"
 #include "storage/storage_tier.hpp"
 
 namespace {
 
 using nexus::ErrorCode;
 using nexus::LocalStorageTier;
+using nexus::Offset;
 using nexus::SegmentFileKind;
 using nexus::TierObjectKey;
 
@@ -209,6 +211,54 @@ TEST(LocalStorageTier, ClavesDeParticionesDistintas_NoColisionan) {
     // Borrar A no afecta a B ni al índice.
     EXPECT_TRUE(tier.contains(key_b).value());
     EXPECT_TRUE(tier.contains(key_idx).value());
+}
+
+TEST(LocalStorageTier, ListSegmentBases_ParticionSinObjetos_DevuelveVacio) {
+    const TempDir root("list_vacio");
+    const LocalStorageTier tier(root.path() / "tier");
+    const auto bases = tier.list_segment_bases("events", 0);
+    ASSERT_TRUE(bases.has_value());
+    EXPECT_TRUE(bases->empty());
+}
+
+TEST(LocalStorageTier, ListSegmentBases_VariosSegmentos_DevuelveBasesOrdenadas) {
+    const TempDir root("list_orden");
+    const auto object_dir = root.path() / "tier";
+    const auto source = root.path() / "seg.log";
+    write_file(source, sample_bytes(8));
+
+    LocalStorageTier tier(object_dir);
+    // Se suben desordenados a propósito.
+    for (const Offset base : {200, 0, 100}) {
+        ASSERT_TRUE(tier.put_file(TierObjectKey{"events", 5, base, SegmentFileKind::Log}, source)
+                        .has_value());
+        ASSERT_TRUE(tier.put_file(TierObjectKey{"events", 5, base, SegmentFileKind::Index}, source)
+                        .has_value());
+    }
+
+    const auto bases = tier.list_segment_bases("events", 5);
+    ASSERT_TRUE(bases.has_value());
+    EXPECT_EQ(*bases, (std::vector<Offset>{0, 100, 200}));  // ordenados; el .index no duplica.
+}
+
+TEST(LocalStorageTier, ListSegmentBases_AislaCadaParticion) {
+    const TempDir root("list_aisla");
+    const auto object_dir = root.path() / "tier";
+    const auto source = root.path() / "seg.log";
+    write_file(source, sample_bytes(8));
+
+    LocalStorageTier tier(object_dir);
+    ASSERT_TRUE(
+        tier.put_file(TierObjectKey{"events", 0, 0, SegmentFileKind::Log}, source).has_value());
+    ASSERT_TRUE(
+        tier.put_file(TierObjectKey{"events", 1, 50, SegmentFileKind::Log}, source).has_value());
+
+    const auto p0 = tier.list_segment_bases("events", 0);
+    const auto p1 = tier.list_segment_bases("events", 1);
+    ASSERT_TRUE(p0.has_value());
+    ASSERT_TRUE(p1.has_value());
+    EXPECT_EQ(*p0, (std::vector<Offset>{0}));
+    EXPECT_EQ(*p1, (std::vector<Offset>{50}));
 }
 
 }  // namespace

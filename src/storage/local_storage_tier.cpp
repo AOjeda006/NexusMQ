@@ -4,11 +4,16 @@
 
 #include "storage/local_storage_tier.hpp"
 
+#include <algorithm>
+#include <charconv>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 namespace nexus {
 namespace {
@@ -103,6 +108,40 @@ expected<void> LocalStorageTier::remove(const TierObjectKey& key) {
         return std::unexpected(fs_error(ec, "remove"));
     }
     return {};
+}
+
+expected<std::vector<Offset>> LocalStorageTier::list_segment_bases(std::string_view topic,
+                                                                   std::int32_t partition) const {
+    const std::filesystem::path prefix =
+        object_dir_ / std::string{topic} / std::to_string(partition);
+    std::vector<Offset> bases;
+
+    std::error_code ec;
+    if (!std::filesystem::exists(prefix, ec)) {
+        return bases;  // prefijo inexistente: partición sin objetos (no es error).
+    }
+    std::filesystem::directory_iterator it(prefix, ec);
+    if (ec) {
+        return std::unexpected(fs_error(ec, "directory_iterator"));
+    }
+    for (const std::filesystem::directory_iterator end; it != end; it.increment(ec)) {
+        if (ec) {
+            return std::unexpected(fs_error(ec, "directory_iterator"));
+        }
+        if (it->path().extension() != ".log") {
+            continue;  // solo los `.log` marcan un segmento; el `.index` lo acompaña.
+        }
+        const std::string stem = it->path().stem().string();
+        Offset base = 0;
+        const auto* first = stem.data();
+        const auto* last = stem.data() + stem.size();
+        const auto [ptr, parse_ec] = std::from_chars(first, last, base);
+        if (parse_ec == std::errc{} && ptr == last && base >= 0) {
+            bases.push_back(base);
+        }
+    }
+    std::ranges::sort(bases);
+    return bases;
 }
 
 }  // namespace nexus

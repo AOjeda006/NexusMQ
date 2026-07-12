@@ -7,8 +7,11 @@
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
+#include <string_view>
+#include <vector>
 
 #include "common/error.hpp"
+#include "common/types.hpp"
 #include "storage/storage_tier.hpp"
 
 namespace nexus {
@@ -39,6 +42,8 @@ public:
     [[nodiscard]] expected<bool> contains(const TierObjectKey& key) const override;
     [[nodiscard]] expected<std::uint64_t> object_size(const TierObjectKey& key) const override;
     [[nodiscard]] expected<void> remove(const TierObjectKey& key) override;
+    [[nodiscard]] expected<std::vector<Offset>> list_segment_bases(
+        std::string_view topic, std::int32_t partition) const override;
 
     /// Raíz del directorio objeto (observabilidad / pruebas).
     [[nodiscard]] const std::filesystem::path& object_dir() const noexcept { return object_dir_; }
