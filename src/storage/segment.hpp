@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 
 #include "common/error.hpp"
 #include "common/record.hpp"
@@ -14,6 +15,7 @@
 #include "io/file.hpp"
 #include "storage/fetch_result.hpp"
 #include "storage/index.hpp"
+#include "storage/segment_crypto.hpp"
 
 namespace nexus {
 
@@ -38,14 +40,22 @@ public:
     /// @brief Crea un segmento nuevo (ficheros `.log`/`.index` vacíos) en @p dir.
     /// @param base_offset Offset del primer record que albergará (ancla del índice).
     /// @param index_interval_bytes Densidad del índice disperso (bytes entre anclas).
+    /// @param key Si no es `nullptr`, cifra el segmento (ADR-0031): deriva una DEK, escribe la
+    ///   cabecera de cifrado al inicio del `.log` y sella cada batch con AES-256-GCM. Si es
+    ///   `nullptr`, el segmento es en claro (comportamiento por defecto).
     [[nodiscard]] static expected<Segment> create(const std::filesystem::path& dir,
                                                   Offset base_offset,
-                                                  std::size_t index_interval_bytes);
+                                                  std::size_t index_interval_bytes,
+                                                  const EncryptionKey* key = nullptr);
 
     /// @brief Abre un segmento existente (no valida CRC: eso es `recover`).
+    /// @param key Clave maestra para descifrar (si el `.log` está cifrado). Autodetecta cifrado vs.
+    ///   claro por la cabecera: un `.log` cifrado sin @p key da `Unsupported`; uno en claro se abre
+    ///   ignorando @p key (permite logs mixtos con degradación limpia).
     [[nodiscard]] static expected<Segment> open(const std::filesystem::path& dir,
                                                 Offset base_offset,
-                                                std::size_t index_interval_bytes);
+                                                std::size_t index_interval_bytes,
+                                                const EncryptionKey* key = nullptr);
 
     /// @brief Añade @p batch al final del `.log` e indexa su posición.
     /// @details No fuerza durabilidad por batch (la política de `fsync` es de M5); escribe
@@ -93,8 +103,21 @@ public:
     [[nodiscard]] std::size_t size_bytes() const noexcept { return size_bytes_; }
     [[nodiscard]] State state() const noexcept { return state_; }
 
+    [[nodiscard]] bool is_encrypted() const noexcept { return cipher_.has_value(); }
+
 private:
-    Segment(Offset base_offset, File log, SparseIndex index, std::size_t size_bytes);
+    /// Cabecera de un bloque en disco leída sin descifrar (para recorrer el `.log`).
+    struct BlockHeader {
+        Offset base_offset = 0;         ///< Offset base del batch del bloque.
+        std::int32_t record_count = 0;  ///< Número de records del batch.
+        std::size_t on_disk_size =
+            0;  ///< Bytes del bloque en disco (cabecera + cuerpo/ciphertext).
+
+        [[nodiscard]] Offset last_offset() const noexcept { return base_offset + record_count - 1; }
+    };
+
+    Segment(Offset base_offset, File log, SparseIndex index, std::size_t size_bytes,
+            std::optional<SegmentCipher> cipher, std::size_t data_start);
 
     /// Byte donde empieza el batch con `base_offset == target`; `InvalidArgument` si no es
     /// frontera.
@@ -102,10 +125,23 @@ private:
     /// Reconstruye el `.index` recorriendo los batches actuales del `.log`.
     [[nodiscard]] expected<void> rebuild_index();
 
+    /// Tamaño de la cabecera on-disk de un bloque (cifrado o en claro).
+    [[nodiscard]] std::size_t block_header_size() const noexcept;
+    /// Lee la cabecera del bloque en @p position sin descifrar (para recorrer). `nullopt` si no hay
+    /// cabecera completa/consistente (cola *torn* o fin); error solo ante fallo de E/S.
+    [[nodiscard]] expected<std::optional<BlockHeader>> peek_block(std::size_t position) const;
+    /// Lee el bloque en @p position, lo descifra si procede y anexa el **plaintext** del batch a
+    /// @p out. `Corrupt` si la autenticación/tamaño falla (manipulación); error de E/S si falla.
+    [[nodiscard]] expected<void> load_block(std::size_t position, std::size_t on_disk_size,
+                                            Buffer& out) const;
+
     Offset base_offset_;      ///< Offset base del segmento.
     File log_;                ///< Fichero `.log` (RAII).
     SparseIndex index_;       ///< Índice disperso `.index` (RAII).
-    std::size_t size_bytes_;  ///< Bytes escritos en el `.log`.
+    std::size_t size_bytes_;  ///< Bytes del `.log` (incluye la cabecera de cifrado si la hay).
+    std::optional<SegmentCipher> cipher_;  ///< Cifrador del segmento (vacío = en claro).
+    std::size_t data_start_ =
+        0;  ///< Primer byte de datos del `.log` (tras la cabecera de cifrado).
     State state_ = State::Active;
 };
 

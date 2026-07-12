@@ -2,10 +2,13 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "common/bytes.hpp"
@@ -13,8 +16,17 @@
 #include "common/record.hpp"
 #include "common/types.hpp"
 #include "io/file.hpp"
+#include "storage/segment_crypto.hpp"
 
 namespace {
+
+// KEK de prueba (64 hex = 256 bits); solo para tests, jamás una clave real.
+nexus::EncryptionKey test_key() {
+    auto key = nexus::EncryptionKey::from_hex(
+        "0f0e0d0c0b0a09080706050403020100fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0");
+    EXPECT_TRUE(key.has_value());
+    return std::move(*key);
+}
 
 // Crea (y limpia con RAII) un directorio temporal único para un segmento.
 class TempDir {
@@ -288,6 +300,174 @@ TEST(Segment, TruncateThenAppend_ContinuaDesdeElCorte) {
     const auto off = seg.append(make_batch(6, 1, 10));  // reanuda en el offset del corte
     ASSERT_TRUE(off.has_value());
     EXPECT_EQ(*off, 6);
+}
+
+// --- Segmento cifrado (ADR-0031) ---
+
+// Segmento cifrado con 4 batches de 3 records (offsets 0..2, 3..5, 6..8, 9..11).
+nexus::Segment filled_encrypted_segment(const std::filesystem::path& dir,
+                                        const nexus::EncryptionKey& key) {
+    auto seg = nexus::Segment::create(dir, /*base_offset=*/0, /*interval=*/64, &key);
+    EXPECT_TRUE(seg.has_value());
+    for (const nexus::Offset base : {0, 3, 6, 9}) {
+        EXPECT_TRUE(seg->append(make_batch(base, 3, 10)).has_value());
+    }
+    return std::move(*seg);
+}
+
+TEST(SegmentEncrypted, RoundTrip_LeeYDescifraDesdeOffsetMedio) {
+    if (!nexus::encryption_available()) {
+        GTEST_SKIP() << "sin OpenSSL";
+    }
+    const TempDir dir("enc_rt");
+    const auto key = test_key();
+    const auto seg = filled_encrypted_segment(dir.path(), key);
+    EXPECT_TRUE(seg.is_encrypted());
+
+    const auto fr = seg.read(4, 100000);
+    ASSERT_TRUE(fr.has_value());
+    const auto first = nexus::RecordBatch::decode(fr->batches.as_span());
+    ASSERT_TRUE(first.has_value());
+    EXPECT_EQ(first->header().base_offset, 3);  // el batch que contiene el offset 4
+    EXPECT_EQ(fr->next_offset, 12);
+}
+
+TEST(SegmentEncrypted, DatosEnDisco_NoSonPlaintext) {
+    if (!nexus::encryption_available()) {
+        GTEST_SKIP() << "sin OpenSSL";
+    }
+    const TempDir dir("enc_disk");
+    const auto key = test_key();
+    {
+        auto seg = filled_encrypted_segment(dir.path(), key);
+        ASSERT_TRUE(seg.seal().has_value());
+    }
+    auto log = nexus::File::open(log_path(dir.path()), nexus::File::Mode::ReadOnly);
+    ASSERT_TRUE(log.has_value());
+    std::array<std::byte, nexus::kEncSegmentHeaderSize> head{};
+    ASSERT_TRUE(log->read_at(head, 0).has_value());
+    EXPECT_TRUE(nexus::is_encrypted_segment_header(head));  // cabecera de cifrado presente
+    // Los bytes de datos NO decodifican como un batch en claro (son ciphertext).
+    std::vector<std::byte> raw(46);
+    ASSERT_TRUE(log->read_at(raw, nexus::kEncSegmentHeaderSize).has_value());
+    EXPECT_FALSE(nexus::RecordBatch::decode(nexus::ByteSpan{raw}).has_value());
+}
+
+TEST(SegmentEncrypted, SealYReopenConClave_LeeDescifrado) {
+    if (!nexus::encryption_available()) {
+        GTEST_SKIP() << "sin OpenSSL";
+    }
+    const TempDir dir("enc_reopen");
+    const auto key = test_key();
+    {
+        auto seg = filled_encrypted_segment(dir.path(), key);
+        ASSERT_TRUE(seg.seal().has_value());
+    }
+    auto reopened = nexus::Segment::open(dir.path(), 0, 64, &key);
+    ASSERT_TRUE(reopened.has_value());
+    EXPECT_TRUE(reopened->is_encrypted());
+    const auto fr = reopened->read(0, 100000);
+    ASSERT_TRUE(fr.has_value());
+    const auto first = nexus::RecordBatch::decode(fr->batches.as_span());
+    ASSERT_TRUE(first.has_value());
+    EXPECT_EQ(first->header().base_offset, 0);
+    EXPECT_EQ(fr->next_offset, 12);
+}
+
+TEST(SegmentEncrypted, OpenSinClave_DevuelveUnsupported) {
+    if (!nexus::encryption_available()) {
+        GTEST_SKIP() << "sin OpenSSL";
+    }
+    const TempDir dir("enc_nokey");
+    const auto key = test_key();
+    {
+        auto seg = filled_encrypted_segment(dir.path(), key);
+        ASSERT_TRUE(seg.seal().has_value());
+    }
+    const auto reopened = nexus::Segment::open(dir.path(), 0, 64, /*key=*/nullptr);
+    ASSERT_FALSE(reopened.has_value());
+    EXPECT_EQ(reopened.error().code(), nexus::ErrorCode::Unsupported);
+}
+
+TEST(SegmentEncrypted, ByteAlteradoEnCiphertext_LecturaDevuelveCorrupt) {
+    if (!nexus::encryption_available()) {
+        GTEST_SKIP() << "sin OpenSSL";
+    }
+    const TempDir dir("enc_tamper");
+    const auto key = test_key();
+    {
+        auto seg = filled_encrypted_segment(dir.path(), key);
+        ASSERT_TRUE(seg.seal().has_value());
+    }
+    // Altera un byte del ciphertext del primer bloque (cabecera 32 + cabecera de bloque 46 + 5).
+    {
+        auto log = nexus::File::open(log_path(dir.path()), nexus::File::Mode::ReadWrite);
+        ASSERT_TRUE(log.has_value());
+        const std::size_t pos = nexus::kEncSegmentHeaderSize + nexus::kEncBlockHeaderSize + 5;
+        std::array<std::byte, 1> one{};
+        ASSERT_TRUE(log->read_at(one, pos).has_value());
+        one[0] ^= std::byte{0xFF};
+        ASSERT_TRUE(log->write_at(one, pos).has_value());
+        ASSERT_TRUE(log->sync().has_value());
+    }
+    auto seg = nexus::Segment::open(dir.path(), 0, 64, &key);
+    ASSERT_TRUE(seg.has_value());
+    const auto fr = seg->read(0, 100000);
+    ASSERT_FALSE(fr.has_value());  // fallo autenticado, no datos corruptos silenciosos
+    EXPECT_EQ(fr.error().code(), nexus::ErrorCode::Corrupt);
+}
+
+TEST(SegmentEncrypted, RecoverColaTorn_TruncaYDevuelveUltimoValido) {
+    if (!nexus::encryption_available()) {
+        GTEST_SKIP() << "sin OpenSSL";
+    }
+    const TempDir dir("enc_torn");
+    const auto key = test_key();
+    std::size_t valid_bytes = 0;
+    {
+        auto seg = nexus::Segment::create(dir.path(), 0, 64, &key);
+        ASSERT_TRUE(seg.has_value());
+        ASSERT_TRUE(seg->append(make_batch(0, 3, 10)).has_value());  // 0..2
+        ASSERT_TRUE(seg->append(make_batch(3, 3, 10)).has_value());  // 3..5
+        ASSERT_TRUE(seg->seal().has_value());
+        valid_bytes = seg->size_bytes();
+    }
+    {
+        auto log = nexus::File::open(log_path(dir.path()), nexus::File::Mode::ReadWrite);
+        ASSERT_TRUE(log.has_value());
+        const std::vector<std::byte> garbage(20, std::byte{0x7F});
+        ASSERT_TRUE(log->write_at(garbage, valid_bytes).has_value());
+        ASSERT_TRUE(log->sync().has_value());
+    }
+    auto seg = nexus::Segment::open(dir.path(), 0, 64, &key);
+    ASSERT_TRUE(seg.has_value());
+    const auto last = seg->recover();
+    ASSERT_TRUE(last.has_value());
+    EXPECT_EQ(*last, 5);                        // último offset válido
+    EXPECT_EQ(seg->size_bytes(), valid_bytes);  // truncó la basura
+    const auto fr = seg->read(0, 100000);
+    ASSERT_TRUE(fr.has_value());
+    EXPECT_EQ(fr->next_offset, 6);
+}
+
+TEST(SegmentEncrypted, TruncateThenAppend_ContinuaDesdeElCorte) {
+    if (!nexus::encryption_available()) {
+        GTEST_SKIP() << "sin OpenSSL";
+    }
+    const TempDir dir("enc_trunc");
+    const auto key = test_key();
+    auto seg = filled_encrypted_segment(dir.path(), key);
+    ASSERT_TRUE(seg.truncate_to(6).has_value());  // descarta b2 (6..8) y b3 (9..11)
+    const auto off = seg.append(make_batch(6, 1, 10));
+    ASSERT_TRUE(off.has_value());
+    EXPECT_EQ(*off, 6);
+    // Lo re-escrito se lee y descifra correctamente.
+    const auto fr = seg.read(6, 100000);
+    ASSERT_TRUE(fr.has_value());
+    const auto batch = nexus::RecordBatch::decode(fr->batches.as_span());
+    ASSERT_TRUE(batch.has_value());
+    EXPECT_EQ(batch->header().base_offset, 6);
+    EXPECT_EQ(fr->next_offset, 7);
 }
 
 }  // namespace
