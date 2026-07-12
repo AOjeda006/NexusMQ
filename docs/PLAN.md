@@ -61,31 +61,33 @@ configurar, el broker se comporta como hoy. Árbol **siempre compilable y en ver
 
 ## Estado actual
 
-Hito A en curso. Arranque completado (entorno verificado, parto en verde: 789/789 en `linux-gcc`).
-**Siguiente:** primer commit del Hito A = primitiva cripto (`EncryptionKey`/`SegmentCipher`) con
-TDD rojo→verde. Aún sin código nuevo commiteado.
+**Hito A (cifrado en reposo) COMPLETO** salvo la regeneración del PDF y el commit de docs (A5 en
+curso). A1–A4 commiteados y pusheados; 823/823 tests verdes en `linux-gcc` y `linux-clang`, 39
+tests de cifrado verdes bajo ASan; smoke e2e confirma `.log` con magic `NXSEG1` cuando se pasa la
+KEK por entorno. ADR-0031 escrito e indexado; caps. 02/09/19/25/26/27/28/30 + `protocol.md` +
+`README` actualizados. **Siguiente:** regenerar PDF, puerta de calidad final, commit+push de A5;
+luego Hito B (tiered storage, ADR-0032).
 
 ## Checklist
 
 ### Hito A — Cifrado en reposo (ADR-0031)
-- [ ] **A1 · Primitiva cripto** — `segment_crypto.{hpp,cpp}`: `EncryptionKey` (from_hex/bytes,
+- [x] **A1 · Primitiva cripto** — `segment_crypto.{hpp,cpp}`: `EncryptionKey` (from_hex/bytes,
   HKDF-SHA256 → DEK), `SegmentCipher` (AES-256-GCM seal/open por bloque, nonce aleatorio),
-  `encryption_available()`. CMake enlaza `OpenSSL::Crypto` bajo `NEXUS_HAVE_OPENSSL`. Criterio:
-  tests unitarios rojo→verde de round-trip, tag-mismatch→Corrupt, HKDF determinista, nonces
-  distintos; `GTEST_SKIP` si no hay OpenSSL. Verde en gcc+clang+ASan.
-- [ ] **A2 · Framing del segmento** — `Segment::create/open` aceptan `const EncryptionKey*`
+  `encryption_available()`. CMake enlaza `OpenSSL::Crypto` bajo `NEXUS_HAVE_OPENSSL`. Verde en
+  gcc+clang+ASan.
+- [x] **A2 · Framing del segmento** — `Segment::create/open` aceptan `const EncryptionKey*`
   (default null = plano). Cabecera de segmento + bloques cifrados; `data_start_`; read/recover/
-  position_of/rebuild_index sobre bloques. Criterio: los 789 tests siguen verdes (plano intacto) +
-  nuevos tests de segmento cifrado (round-trip, seal/reopen, recover cola torn, truncate+append).
-- [ ] **A3 · Detección de manipulación + durabilidad** — tests: 1 byte alterado en ciphertext →
-  fallo autenticado (no datos silenciosos); reinicio recupera y descifra; property-based del formato
-  de bloque; invariante no-reutilización de nonce. Verde bajo ASan.
-- [ ] **A4 · Plumbing daemon** — `LogConfig` lleva `shared_ptr<const EncryptionKey>`; flag
-  `--encryption-key` / env `NEXUS_ENCRYPTION_KEY`; propagación topic_manager→PartitionLog→Segment.
-  Criterio: e2e sin clave = comportamiento de hoy; con clave, datos en disco cifrados.
-- [ ] **A5 · Docs + ADR + PDF** — ADR-0031 + índice; caps. 09/25/26/27 + `30`; `docs/protocol.md`
-  (formato on-disk); README (no-objetivos, conteo ADR). Regenerar PDF. Puerta de calidad completa
-  (gcc, clang, ASan, format, tidy) verde. Commit + push.
+  position_of/rebuild_index sobre bloques. Camino plano byte-idéntico; nuevos tests de segmento
+  cifrado.
+- [x] **A3 · Detección de manipulación + durabilidad** — tests: 1 byte alterado → fallo autenticado;
+  reinicio recupera y descifra; property-based (round-trip + tamper-sweep); invariante
+  no-reutilización de nonce. Verde bajo ASan.
+- [x] **A4 · Plumbing daemon** — `LogConfig` lleva `shared_ptr<const EncryptionKey>`; flag
+  `--encryption-key` / env `NEXUS_ENCRYPTION_KEY`; propagación topic_catalog→topic_manager→
+  PartitionLog→Segment. e2e sin clave = comportamiento de hoy; con clave, `.log` con magic `NXSEG1`.
+- [~] **A5 · Docs + ADR + PDF** — ADR-0031 + índice ✔; caps. 02/09/19/25/26/27/28/30 ✔;
+  `docs/protocol.md` ✔; README (no-objetivos, conteo ADR) ✔. **Pendiente:** regenerar PDF, puerta de
+  calidad final (gcc, clang, ASan, format, tidy), commit + push.
 
 ### Hito B — Tiered storage (ADR-0032)
 - [ ] **B1 · Puerto `StorageTier`** + DTOs (interfaz + degradación limpia).

@@ -29,6 +29,9 @@ del diseño de brokers (la que usa Redpanda), no la de hace una década.
   **gateway REST** para administración y un **subconjunto Kafka-compatible** ya implementado
   (listener en `--kafka-port`, interop `kcat`; ADR-0029).
 - **Capa de *ingress* en dos modos:** cliente nativo directo al líder (primario) + proxy/REST (opt-in).
+- **Cifrado en reposo opcional.** El log en disco puede cifrarse con **AES-256-GCM** (AEAD por bloque
+  de escritura, DEK por segmento derivada de una KEK de entorno; ADR-0031), reutilizando la misma
+  dependencia OpenSSL que TLS. Sin clave, el log se escribe en claro (degradación limpia).
 
 La solución son **15 librerías `nexus-*`** (núcleo) más los ejecutables (`nexusd`, `nexus-cli`,
 `nexus-bench`, `nexus-loadgen`), las *tools* de soporte y las pruebas. Ver el
@@ -80,7 +83,7 @@ La documentación técnica **final** vive en **[`docs/`](docs/)**:
 - **[`docs/tecnica/`](docs/tecnica/)** — la documentación técnica completa (30 capítulos en 7 partes:
   visión, arquitectura, contratos, implementación, calidad, operación y decisiones). Empieza por su
   [índice de lectura](docs/tecnica/README.md). Es la **fuente de verdad** del *qué* y el *porqué*.
-- **[`docs/adr/`](docs/adr/)** — los 29 *Architecture Decision Records* (**ADR-0001..0029**), uno por
+- **[`docs/adr/`](docs/adr/)** — los 31 *Architecture Decision Records* (**ADR-0001..0031**), uno por
   fichero, con su [índice](docs/adr/README.md).
 - **[`docs/diagramas/`](docs/diagramas/)** — los 23 diagramas (Mermaid) de arquitectura, runtime,
   almacenamiento, consenso, protocolos, ingress y operación.

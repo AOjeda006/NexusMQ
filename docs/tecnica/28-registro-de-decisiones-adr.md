@@ -20,7 +20,7 @@ En NexusMQ esto produce una **cadena de reemplazo** visible en el backend de I/O
 
 Cada eslabón cae cuando una premisa se demuestra falsa: ADR-0021 asumía que el backend «no era verificable en este entorno»; resultó que el contenedor **sí** podía instalar el cross-compiler MinGW-w64 (ADR-0022), y finalmente se **ejecutó** en una máquina Windows real (ADR-0023). La cadena documenta esa progresión sin reescribir el pasado.
 
-## 28.3 Índice de los 29 ADR
+## 28.3 Índice de los 31 ADR
 
 | ADR | Título | Estado | Fecha |
 |-----|--------|--------|-------|
@@ -53,10 +53,12 @@ Cada eslabón cae cuando una premisa se demuestra falsa: ADR-0021 asumía que el
 | [0027](../adr/adr-0027-modo-proxy-upstream-pool.md) | Cableado del modo proxy — *pool* de conexiones aguas arriba por reactor | aceptado | 2026-06-25 |
 | [0028](../adr/adr-0028-port-completo-nexusd-windows.md) | Port completo de `nexusd` a Windows (backend, afinidad y señales) | aceptado | 2026-06-27 |
 | [0029](../adr/adr-0029-adaptador-kafka-async-cross-core.md) | Adaptador Kafka asíncrono cross-core sobre el broker vivo | aceptado | 2026-06-28 |
+| [0030](../adr/adr-0030-particion-mono-protocolo.md) | Partición mono-protocolo — guarda cross-protocol nativo/Kafka | aceptado | 2026-07-09 |
+| [0031](../adr/adr-0031-cifrado-en-reposo-aes-gcm.md) | Cifrado en reposo del log con AES-256-GCM y framing AEAD por bloque | aceptado | 2026-07-12 |
 
 ## 28.4 ADR agrupados por tema
 
-Los 29 ADR cubren ocho áreas. Cada grupo se resume en una frase; los números enlazan al fichero correspondiente en [`../adr/`](../adr/).
+Los 31 ADR cubren ocho áreas. Cada grupo se resume en una frase; los números enlazan al fichero correspondiente en [`../adr/`](../adr/).
 
 ### Plataforma e I/O
 
@@ -72,9 +74,9 @@ Definen el corazón distribuido: **Raft por partición** con postura **CP** (PAC
 
 ### Protocolo
 
-[0004](../adr/adr-0004-protocolo-binario-propio-gateway-rest.md), [0029](../adr/adr-0029-adaptador-kafka-async-cross-core.md).
+[0004](../adr/adr-0004-protocolo-binario-propio-gateway-rest.md), [0029](../adr/adr-0029-adaptador-kafka-async-cross-core.md), [0030](../adr/adr-0030-particion-mono-protocolo.md).
 
-Establecen el plano de datos: un **protocolo binario propio** (con *gateway* REST para administración) y, como *stretch*, un **subconjunto Kafka** servido por un adaptador asíncrono que interopera en vivo con `kcat`.
+Establecen el plano de datos: un **protocolo binario propio** (con *gateway* REST para administración) y, como *stretch*, un **subconjunto Kafka** servido por un adaptador asíncrono que interopera en vivo con `kcat`, con una **guarda mono-protocolo** que impide mezclar records nativos y Kafka en una misma partición.
 
 ### Concurrencia
 
@@ -84,9 +86,9 @@ La tesis arquitectónica: **shared-nothing thread-per-core** (un reactor *pinned
 
 ### Ingress y seguridad
 
-[0006](../adr/adr-0006-ingress-dos-modos.md), [0018](../adr/adr-0018-rest-admin-puerto-adaptador.md), [0019](../adr/adr-0019-tls-opcional-openssl-bios.md), [0027](../adr/adr-0027-modo-proxy-upstream-pool.md).
+[0006](../adr/adr-0006-ingress-dos-modos.md), [0018](../adr/adr-0018-rest-admin-puerto-adaptador.md), [0019](../adr/adr-0019-tls-opcional-openssl-bios.md), [0027](../adr/adr-0027-modo-proxy-upstream-pool.md), [0031](../adr/adr-0031-cifrado-en-reposo-aes-gcm.md).
 
-El borde del sistema: *ingress* en dos modos (nativo directo y proxy *opt-in*), REST admin desacoplado por **puerto/adaptador** (DIP), TLS/mTLS opcional con puente de BIOs de memoria sobre el proactor, y el *pool* de conexiones aguas arriba por reactor que cablea el modo proxy.
+El borde del sistema y la protección de datos: *ingress* en dos modos (nativo directo y proxy *opt-in*), REST admin desacoplado por **puerto/adaptador** (DIP), TLS/mTLS opcional con puente de BIOs de memoria sobre el proactor, el *pool* de conexiones aguas arriba por reactor que cablea el modo proxy, y el **cifrado en reposo** del log (AES-256-GCM opcional con DEK por segmento y framing AEAD por bloque), que reutiliza la misma dependencia OpenSSL que TLS.
 
 ### Observabilidad
 

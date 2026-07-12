@@ -15,7 +15,11 @@
 - **Exactly-once transaccional entre particiones.** Sí se contempla **productor
   idempotente** (*effectively-once* por partición); no hay transacciones multi-partición.
 - **Tiered storage** a almacenamiento de objetos (idea futura, inspirada en Pulsar).
-- **Multi-tenancy y ACLs avanzadas**; **cifrado en reposo** (solo en tránsito, TLS).
+- **Multi-tenancy y ACLs avanzadas** no se abordan en las fases actuales.
+- **Rotación de la clave maestra (KEK) de cifrado en reposo.** El cifrado en reposo **sí** está
+  implementado (AES-256-GCM opcional, [ADR-0031](../adr/adr-0031-cifrado-en-reposo-aes-gcm.md)); lo
+  que queda como trabajo futuro es la **rotación** de la KEK (re-cifrado en caliente). El formato ya
+  reserva *salt* e identificadores por segmento para soportarla.
 - **Dashboard gráfico propio**: la observabilidad se expone vía Prometheus/CLI; un panel
   Grafana es opcional y *self-hosted*.
 - **HLC y ordenación causal entre particiones.** El orden es por **offset** dentro de una

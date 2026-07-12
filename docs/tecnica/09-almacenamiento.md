@@ -72,3 +72,32 @@ El storage ofrece **mecanismo** (append, read, fsync); la **política** (retenci
 durabilidad, compresión) es configurable y externa (`LogConfig`). Bajo Raft, este mismo log
 es el **WAL** de la partición y lo envuelve `RaftLog` (ver
 [capítulo 10](./10-replicacion-y-consenso.md)).
+
+## 9.6 Cifrado en reposo (opcional)
+
+El log puede persistirse **cifrado** con **AEAD AES-256-GCM**, de forma opcional y con
+**degradación limpia** ([ADR-0031](../adr/adr-0031-cifrado-en-reposo-aes-gcm.md), vía OpenSSL como
+en TLS). Si `LogConfig` no lleva clave, el `.log` se escribe **en claro**, byte a byte como hasta
+ahora; si la lleva, cada `RecordBatch` (unidad de escritura, §9.3) se cifra como **un bloque**
+independiente —nunca por registro—. El cifrado vive confinado en `segment_crypto` y en el framing
+de `Segment`; el resto del motor (índice, retención, recuperación, Raft) no cambia.
+
+- **Jerarquía de claves.** La **KEK** (clave maestra de 256 bits) llega por entorno/config y jamás
+  se persiste; deriva por **HKDF-SHA256(KEK, salt aleatoria por segmento)** una **DEK** distinta por
+  segmento. Acotar cada clave a un segmento aísla el radio de daño y mantiene el número de cifrados
+  por clave muy por debajo del límite de colisión de nonces.
+- **Formato on-disk.** El `.log` cifrado empieza por una **cabecera de segmento** (32 bytes: magic
+  `NXSEG1` + identificadores de KDF/cipher + *flags* + *salt*), que permite **autodetectar**
+  cifrado vs. claro al abrir (logs mixtos admitidos). Cada bloque es
+  `version | flags | base_offset | record_count | ct_len | nonce(12) | tag(16) | ciphertext`. Los
+  metadatos de traversal (`base_offset`/`record_count`/`ct_len`) viajan **en claro pero
+  autenticados** (AAD del GCM): el log se **recorre y localiza por offset sin descifrar** (el índice
+  disperso y la lectura por offset siguen funcionando); solo las claves/valores de los registros van
+  en el ciphertext.
+- **Nonce e integridad.** Cada bloque toma un **nonce aleatorio de 96 bits** —robusto ante el ciclo
+  truncar→re-append del WAL de Raft (§9.4, [capítulo 10](./10-replicacion-y-consenso.md)); la
+  reutilización de nonce con la misma clave es la **invariante nº 1**—. El **tag GCM** autentica
+  cada bloque: cualquier byte alterado (ciphertext o metadatos) produce un fallo **autenticado**
+  (`Corrupt`), nunca datos corruptos silenciosos. El CRC32C del batch se conserva **dentro** del
+  plaintext como defensa en profundidad. Configuración y operación de la KEK: ver
+  [capítulo 26](./26-configuracion-y-operacion.md) y [capítulo 27](./27-seguridad.md).

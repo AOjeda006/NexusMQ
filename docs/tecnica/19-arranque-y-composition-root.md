@@ -34,6 +34,7 @@ entorno, nunca horneados (ver [capítulo 27](./27-seguridad.md)). Flags principa
 | `--jwt-secret` | Activa la autenticación JWT en `/api/v1/*` (si se omite, REST sin auth). |
 | `--tls-cert` | Cadena de certificado PEM del servidor; con `--tls-key` **activa TLS** en el plano de datos ([ADR-0019](../adr/adr-0019-tls-opcional-openssl-bios.md)). |
 | `--tls-key` | Clave privada PEM del servidor (pareja de `--tls-cert`). |
+| `--encryption-key` | KEK (256 bits, 64 hex) del **cifrado en reposo** del log; preferible por env `NEXUS_ENCRYPTION_KEY` (no aparece en `ps`). Si se omite, log en claro ([ADR-0031](../adr/adr-0031-cifrado-en-reposo-aes-gcm.md)). |
 
 > Los nombres y valores por defecto son contrato operativo; el catálogo completo de
 > configuración (retención, `segment.bytes`, política de `fsync`, etc.) vive en el

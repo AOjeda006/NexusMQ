@@ -150,7 +150,9 @@ Para acotar el proyecto y evitar la dispersión —el riesgo número uno de un p
 - **Exactly-once transaccional entre particiones.** Sí se contempla **productor idempotente**
   (*effectively-once* por partición).
 - **Tiered storage** a almacenamiento de objetos (idea futura, inspirada en Pulsar).
-- **Multi-tenancy y ACLs avanzadas; cifrado en reposo.**
+- **Multi-tenancy y ACLs avanzadas.** (El **cifrado en reposo** del log **sí** está implementado —
+  AES-256-GCM opcional, [ADR-0031](../adr/adr-0031-cifrado-en-reposo-aes-gcm.md); lo que queda fuera
+  es la rotación de la clave maestra.)
 - **Dashboard gráfico propio.** La observabilidad se expone vía Prometheus/CLI; un panel Grafana es
   opcional y *self-hosted*.
 - **Despliegue de pago en cloud.** El proyecto se **orienta** a Azure/AWS por diseño (imagen Docker,

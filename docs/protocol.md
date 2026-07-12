@@ -122,3 +122,10 @@ Ver [`src/common/compression.hpp`](../src/common/compression.hpp).
 El plano de datos puede terminar **TLS 1.3** (y **mTLS** intra-clúster) por delante del framing
 (ADR-0019); el protocolo binario es idéntico, cifrado o en claro. Ver
 [`src/ingress/tls.hpp`](../src/ingress/tls.hpp).
+
+El **cifrado en reposo** (log en disco, AES-256-GCM, ADR-0031) es un plano **ortogonal** a este
+protocolo: actúa sobre el `.log` del segmento, no sobre la trama de wire, así que el batch viaja
+por la red exactamente igual esté el log cifrado o en claro. Su formato on-disk (cabecera de
+segmento `NXSEG1` + framing AEAD por bloque) se documenta en la §9.6 de la
+[documentación técnica](tecnica/09-almacenamiento.md); el layout vive en
+[`src/storage/segment_crypto.hpp`](../src/storage/segment_crypto.hpp).

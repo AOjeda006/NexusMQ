@@ -25,6 +25,13 @@ compactación, compresión (none/LZ4/Zstd) y política de `fsync` (cada N mensaj
 "resucite" al re-declarar el nombre. Los **secretos** (p. ej. el de JWT) van por entorno, nunca
 en la imagen ni en el repositorio (ver [capítulo 27](./27-seguridad.md)).
 
+**Cifrado en reposo (opcional).** La KEK de 256 bits se pasa como **64 dígitos hex** por
+`NEXUS_ENCRYPTION_KEY` (preferido: no aparece en `ps`) o `--encryption-key HEX` (el flag tiene
+prioridad); sin ella, el log se escribe en claro. Si la clave es inválida, el arranque **aborta**
+(no degrada en silencio). La KEK **nunca** se persiste ni se commitea; su gestión (generación,
+custodia, rotación) es responsabilidad del operador vía gestor de secretos. Ver
+[capítulo 9](./09-almacenamiento.md) y [ADR-0031](../adr/adr-0031-cifrado-en-reposo-aes-gcm.md).
+
 ## 26.3 Observabilidad en operación
 
 - **Métricas:** `GET /metrics` (Prometheus) — throughput, latencias por percentil, *lag* de
@@ -41,7 +48,9 @@ en la imagen ni en el repositorio (ver [capítulo 27](./27-seguridad.md)).
 - **Arranque/parada:** `docker compose up --build` (local). El apagado atiende
   `SIGTERM`/`SIGINT` y **drena** el trabajo en curso antes de salir.
 - **Backup:** un *snapshot* de `--data-dir` por nodo. **Restore:** arrancar desde ese
-  `data.dir`.
+  `data.dir`. Si el log está **cifrado** (ADR-0031), el backup contiene solo ciphertext: hay que
+  restaurar el nodo con **la misma KEK**; sin ella los segmentos son ilegibles (perder la KEK =
+  perder los datos).
 - **Recuperación tras *crash*:** automática al arrancar (validación de CRC + truncado de la
   cola *torn*); el nodo queda listo en pocos segundos (ver
   [capítulo 9](./09-almacenamiento.md)).

@@ -47,6 +47,11 @@ para DNS estable (`nexusmq-0.nexusmq`, etc.), que es como las réplicas se descu
 - **3 réplicas**, `securityContext` no-root (`runAsUser/Group/fsGroup 65532`).
 - **Probes** *liveness*/*readiness* contra el puerto de operación (`/healthz`, `/readyz`).
 - Se asumen **límites de CPU/memoria** por pod y un nodo con soporte de **io_uring**.
+- **Secretos por entorno**, nunca en la imagen: el secreto de JWT y —si se activa el cifrado en
+  reposo ([ADR-0031](../adr/adr-0031-cifrado-en-reposo-aes-gcm.md))— la **KEK** se inyectan como
+  `Secret` montado en `NEXUS_ENCRYPTION_KEY` (`--encryption-key` la expondría en la línea de
+  proceso). La KEK debe ser **la misma** en toda réplica y a lo largo de reinicios/restores, o los
+  segmentos cifrados quedan ilegibles (ver [capítulo 26](./26-configuracion-y-operacion.md)).
 
 `docker-compose` es para local/dev; Kubernetes, cuando se necesita escala, *self-healing* y
 orquestación real.

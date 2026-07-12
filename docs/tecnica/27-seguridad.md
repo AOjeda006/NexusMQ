@@ -44,8 +44,32 @@ válidos (ver [capítulo 16](./16-modelo-errores-wire-codes.md)).
 - **Mensajes de error sin detalles internos** hacia el exterior (códigos de wire / RFC 7807),
   para no filtrar información sensible.
 
-## 27.5 Fuera de alcance
+## 27.5 Cifrado en reposo (log)
 
-- **Cifrado en reposo** queda fuera de alcance (solo en tránsito).
+- **AEAD AES-256-GCM sobre el log**, opcional y con **degradación limpia**
+  ([ADR-0031](../adr/adr-0031-cifrado-en-reposo-aes-gcm.md), ver [capítulo 9](./09-almacenamiento.md)).
+  Sin clave configurada, o sin OpenSSL, el broker escribe el log **en claro** y se comporta como
+  hasta ahora; con clave, cada `RecordBatch` se persiste cifrado. Reutiliza la dependencia OpenSSL
+  ya presente para TLS (`NEXUS_HAVE_OPENSSL`).
+- **KEK por entorno/config, jamás en el repo.** La clave maestra (256 bits) llega por
+  `NEXUS_ENCRYPTION_KEY` (preferido, no aparece en `ps`) o `--encryption-key HEX`; si es inválida,
+  el arranque **aborta** en vez de degradar en silencio a texto plano. La KEK no se persiste: solo
+  deriva, vía **HKDF-SHA256** con una *salt* aleatoria por segmento, una **DEK** distinta por
+  segmento (acota el radio de daño y el número de cifrados por clave).
+- **Granularidad por bloque de escritura** (= un `RecordBatch`), nunca por record. **Nonce
+  aleatorio de 96 bits por bloque** (robusto ante el ciclo truncar→re-append del log Raft; la
+  reutilización de un nonce con la misma clave sería catastrófica en GCM: es la **invariante nº 1**).
+  El **tag GCM** autentica cada bloque y sus metadatos de traversal en claro (`base_offset`/
+  `record_count`), de modo que la lectura por offset funciona **sin descifrar** y toda manipulación
+  se detecta al abrir.
+- **Gestión de la KEK a cargo del operador** (gestor de secretos externo). Perderla = perder los
+  datos; filtrarla = perder la confidencialidad. La **rotación de claves** es trabajo futuro
+  documentado (ver [capítulo 30](./30-limitaciones-y-trabajo-futuro.md)); el formato ya reserva
+  *salt* e identificadores por segmento para soportarla.
+
+## 27.6 Fuera de alcance
+
 - **Multi-tenancy y ACLs avanzadas** no se abordan en las fases actuales (ver
   [capítulo 30](./30-limitaciones-y-trabajo-futuro.md)).
+- **Rotación de la clave maestra** de cifrado en reposo (el formato está preparado; la operación
+  de re-cifrado queda como evolución futura).
