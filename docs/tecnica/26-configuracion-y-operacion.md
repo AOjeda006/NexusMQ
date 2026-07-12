@@ -32,6 +32,16 @@ prioridad); sin ella, el log se escribe en claro. Si la clave es inválida, el a
 custodia, rotación) es responsabilidad del operador vía gestor de secretos. Ver
 [capítulo 9](./09-almacenamiento.md) y [ADR-0031](../adr/adr-0031-cifrado-en-reposo-aes-gcm.md).
 
+**Almacenamiento por niveles (opcional).** Con `--tier-dir RUTA` (o `NEXUS_TIER_DIR`) el broker
+**descarga los segmentos sellados fríos** a ese directorio objeto y reclama el disco local, sirviendo
+las lecturas frías por rehidratación transparente (ver [capítulo 9](./09-almacenamiento.md),
+[ADR-0032](../adr/adr-0032-tiered-storage-puerto-y-tier-local.md)). Sin el flag, el broker no
+descarga nada y se comporta como hasta ahora. El directorio del tier debe ser un almacén **durable y
+distinto del disco de datos** (un montaje de objetos, un volumen compartido; en producción, el punto
+de evolución hacia S3): es la copia autoritativa de los segmentos fríos, así que su pérdida es pérdida
+de datos. Si el log va cifrado (ADR-0031), el tier guarda el **ciphertext tal cual** —basta la misma
+KEK para leerlo, la clave nunca viaja al tier—.
+
 ## 26.3 Observabilidad en operación
 
 - **Métricas:** `GET /metrics` (Prometheus) — throughput, latencias por percentil, *lag* de
@@ -50,7 +60,8 @@ custodia, rotación) es responsabilidad del operador vía gestor de secretos. Ve
 - **Backup:** un *snapshot* de `--data-dir` por nodo. **Restore:** arrancar desde ese
   `data.dir`. Si el log está **cifrado** (ADR-0031), el backup contiene solo ciphertext: hay que
   restaurar el nodo con **la misma KEK**; sin ella los segmentos son ilegibles (perder la KEK =
-  perder los datos).
+  perder los datos). Con **tiered storage** (ADR-0032), el backup debe cubrir **también** el
+  `--tier-dir`: los segmentos fríos ya no están en `--data-dir` y el tier es su copia autoritativa.
 - **Recuperación tras *crash*:** automática al arrancar (validación de CRC + truncado de la
   cola *torn*); el nodo queda listo en pocos segundos (ver
   [capítulo 9](./09-almacenamiento.md)).

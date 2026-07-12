@@ -32,6 +32,10 @@ del diseño de brokers (la que usa Redpanda), no la de hace una década.
 - **Cifrado en reposo opcional.** El log en disco puede cifrarse con **AES-256-GCM** (AEAD por bloque
   de escritura, DEK por segmento derivada de una KEK de entorno; ADR-0031), reutilizando la misma
   dependencia OpenSSL que TLS. Sin clave, el log se escribe en claro (degradación limpia).
+- **Almacenamiento por niveles opcional.** Con `--tier-dir` el broker **descarga los segmentos
+  sellados fríos** a un puerto `StorageTier` (adaptador local por defecto, listo para S3), reclama el
+  disco local y **rehidrata** de forma transparente al leerlos (ADR-0032); interopera con el cifrado.
+  Sin el flag, no descarga nada (degradación limpia).
 
 La solución son **15 librerías `nexus-*`** (núcleo) más los ejecutables (`nexusd`, `nexus-cli`,
 `nexus-bench`, `nexus-loadgen`), las *tools* de soporte y las pruebas. Ver el
@@ -83,9 +87,9 @@ La documentación técnica **final** vive en **[`docs/`](docs/)**:
 - **[`docs/tecnica/`](docs/tecnica/)** — la documentación técnica completa (30 capítulos en 7 partes:
   visión, arquitectura, contratos, implementación, calidad, operación y decisiones). Empieza por su
   [índice de lectura](docs/tecnica/README.md). Es la **fuente de verdad** del *qué* y el *porqué*.
-- **[`docs/adr/`](docs/adr/)** — los 31 *Architecture Decision Records* (**ADR-0001..0031**), uno por
+- **[`docs/adr/`](docs/adr/)** — los 32 *Architecture Decision Records* (**ADR-0001..0032**), uno por
   fichero, con su [índice](docs/adr/README.md).
-- **[`docs/diagramas/`](docs/diagramas/)** — los 23 diagramas (Mermaid) de arquitectura, runtime,
+- **[`docs/diagramas/`](docs/diagramas/)** — los 24 diagramas (Mermaid) de arquitectura, runtime,
   almacenamiento, consenso, protocolos, ingress y operación.
 - Contratos **as-built**: [`protocol.md`](docs/protocol.md) (protocolo binario),
   [`kafka.md`](docs/kafka.md) (subset Kafka), [`openapi.yaml`](docs/openapi.yaml) (REST admin) y

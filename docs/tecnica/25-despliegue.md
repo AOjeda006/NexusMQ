@@ -52,6 +52,11 @@ para DNS estable (`nexusmq-0.nexusmq`, etc.), que es como las réplicas se descu
   `Secret` montado en `NEXUS_ENCRYPTION_KEY` (`--encryption-key` la expondría en la línea de
   proceso). La KEK debe ser **la misma** en toda réplica y a lo largo de reinicios/restores, o los
   segmentos cifrados quedan ilegibles (ver [capítulo 26](./26-configuracion-y-operacion.md)).
+- **Tiered storage** (opcional, [ADR-0032](../adr/adr-0032-tiered-storage-puerto-y-tier-local.md)):
+  si se activa con `--tier-dir`/`NEXUS_TIER_DIR`, el directorio del tier debe apuntar a un almacén
+  **durable independiente del PVC de datos** —hoy un volumen (p. ej. un PVC compartido o un montaje
+  de objetos), mañana un bucket S3 sobre el mismo puerto `StorageTier`—, porque es la copia
+  autoritativa de los segmentos fríos. Sin el flag, no se descarga nada.
 
 `docker-compose` es para local/dev; Kubernetes, cuando se necesita escala, *self-healing* y
 orquestación real.

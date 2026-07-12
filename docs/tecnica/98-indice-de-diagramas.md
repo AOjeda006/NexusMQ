@@ -27,6 +27,7 @@
 |---|--------|------|---------|
 | 8 | Layout del log (segmentos `.log`/`.index`, RecordBatch v2) | tabla/ASCII | [08-layout-log.md](../diagramas/08-layout-log.md) |
 | 9 | Retención y compactación | flow | [09-retencion-compactacion.md](../diagramas/09-retencion-compactacion.md) |
+| 24 | Almacenamiento por niveles (tiered storage) | graph/sequence | [24-tiered-storage.md](../diagramas/24-tiered-storage.md) |
 
 ## Consenso (Raft por partición)
 

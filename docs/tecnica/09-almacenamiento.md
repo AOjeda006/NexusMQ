@@ -101,3 +101,38 @@ de `Segment`; el resto del motor (índice, retención, recuperación, Raft) no c
   (`Corrupt`), nunca datos corruptos silenciosos. El CRC32C del batch se conserva **dentro** del
   plaintext como defensa en profundidad. Configuración y operación de la KEK: ver
   [capítulo 26](./26-configuracion-y-operacion.md) y [capítulo 27](./27-seguridad.md).
+
+## 9.7 Almacenamiento por niveles (opcional)
+
+Para retención larga a bajo coste, el log puede **descargar** sus segmentos sellados fríos a un
+almacén de objetos barato y **rehidratarlos de forma transparente** al leerlos —el patrón *tiered
+storage* de Kafka/Pulsar—, de forma opcional y con **degradación limpia**
+([ADR-0032](../adr/adr-0032-tiered-storage-puerto-y-tier-local.md)). Sin `--tier-dir`, el prefijo
+frío está siempre vacío y el comportamiento es byte-idéntico al de hoy. El diseño se ilustra en el
+[diagrama 24](../diagramas/24-tiered-storage.md).
+
+- **Puerto orientado a fichero.** El motor depende de un puerto `StorageTier` (DIP), no de una nube
+  concreta: `put_file` / `fetch_file` / `contains` / `object_size` / `remove` / `list_segment_bases`
+  sobre una **clave de objeto** determinista `TierObjectKey` (`<topic>/<partition>/<base:020>.<ext>`).
+  Un segmento **es** un fichero, así que descargar y rehidratar son copias, sin cargar segmentos en
+  RAM. El adaptador por defecto `LocalStorageTier` copia a un **directorio objeto** local (coste
+  cero); un adaptador S3 futuro implementaría el mismo contrato tras `find_package`.
+- **Descargar sellados, reclamar solo tras confirmar.** `offload_sealed_to_tier` sube los segmentos
+  **sellados** (nunca el activo), del más antiguo al más nuevo, y **solo tras confirmar** la subida
+  (atómica e idempotente) borra los ficheros locales y marca el segmento como frío. Un fallo del
+  tier deja el segmento local y se reintenta; nunca se pierde un dato por reclamación prematura. Con
+  un tier configurado, cada **rotación** de segmento dispara la descarga (best-effort).
+- **El tier es la autoridad; sin manifiesto.** Al reabrir, el `PartitionLog` reconstruye su **prefijo
+  frío** listando el tier (`list_segment_bases`), sin un fichero manifiesto que pudiera
+  desincronizarse. Las bases que también existen localmente (offload confirmado pero sin reclamar por
+  un *crash*) se descartan: el segmento local es autoritativo. La **contigüidad** del log (sin huecos)
+  permite reconstruir el rango de cada segmento frío solo con las bases ordenadas.
+- **Lectura transparente e interoperación.** `read` sirve el *suffix* caliente localmente y, para un
+  offset del prefijo frío, **rehidrata** el segmento (baja `.log` + `.index` a un temporal, lo abre
+  —descifrándolo si procede, §9.6— y sirve el fragmento) con limpieza **RAII**. El rango del log
+  (`logStart`/`logEnd`) **no cambia** al descargar. El tier guarda el **ciphertext tal cual** (bytes
+  opacos): la clave nunca sale del broker. Las operaciones de Raft son *tier-conscientes* —el
+  truncado de compactación/snapshot borra del tier los segmentos que descarta, el truncado normal
+  rechaza reescribir dentro del prefijo frío (historia comprometida) y la retención no toca el *hot
+  set* mientras haya prefijo frío—. Configuración: ver
+  [capítulo 26](./26-configuracion-y-operacion.md).

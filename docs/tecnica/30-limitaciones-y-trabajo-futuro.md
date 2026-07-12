@@ -14,7 +14,13 @@
   [ADR-0029](../adr/adr-0029-adaptador-kafka-async-cross-core.md)).
 - **Exactly-once transaccional entre particiones.** Sí se contempla **productor
   idempotente** (*effectively-once* por partición); no hay transacciones multi-partición.
-- **Tiered storage** a almacenamiento de objetos (idea futura, inspirada en Pulsar).
+- **Adaptador S3 real y offload asíncrono del tiered storage.** El **tiered storage sí** está
+  implementado (puerto `StorageTier` + adaptador local, offload de segmentos sellados y rehidratación
+  transparente, [ADR-0032](../adr/adr-0032-tiered-storage-puerto-y-tier-local.md)); lo que queda como
+  trabajo futuro es un **adaptador S3** sobre el mismo puerto (tras `find_package`), la **descarga
+  asíncrona** en un hilo de mantenimiento (hoy es síncrona en la rotación), una **caché de
+  rehidratación** persistente (hoy se baja el segmento entero por lectura fría) y la recuperación
+  ante **pérdida del disco local**.
 - **Multi-tenancy y ACLs avanzadas** no se abordan en las fases actuales.
 - **Rotación de la clave maestra (KEK) de cifrado en reposo.** El cifrado en reposo **sí** está
   implementado (AES-256-GCM opcional, [ADR-0031](../adr/adr-0031-cifrado-en-reposo-aes-gcm.md)); lo
@@ -44,8 +50,8 @@
 
 - **Ampliar el subset Kafka** hacia más *API keys* y versiones según demanda real de
   herramientas del ecosistema.
-- **Tiered storage**: descargar segmentos sellados a almacenamiento de objetos para
-  retención larga a bajo coste.
+- **Adaptador S3 del tiered storage** sobre el puerto `StorageTier` ya existente (ADR-0032),
+  más offload asíncrono y caché de rehidratación, para retención larga a bajo coste en la nube.
 - **Lecturas desde *followers*** (*opt-in*, con garantías documentadas) para repartir la
   carga de lectura sin romper la postura CP.
 - **Pre-vote / leadership transfer / learners** de Raft (de la tesis de Ongaro) para

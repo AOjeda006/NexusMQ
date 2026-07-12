@@ -42,3 +42,4 @@ con las secciones **Contexto · Decisión · Consecuencias · Alternativas consi
 | [0029](adr-0029-adaptador-kafka-async-cross-core.md) | Adaptador Kafka asíncrono cross-core sobre el broker vivo | aceptado | 2026-06-28 |
 | [0030](adr-0030-particion-mono-protocolo.md) | Partición mono-protocolo — guarda cross-protocol nativo/Kafka | aceptado | 2026-07-09 |
 | [0031](adr-0031-cifrado-en-reposo-aes-gcm.md) | Cifrado en reposo del log con AES-256-GCM y framing AEAD por bloque | aceptado | 2026-07-12 |
+| [0032](adr-0032-tiered-storage-puerto-y-tier-local.md) | Almacenamiento por niveles — puerto `StorageTier` y tier local | aceptado | 2026-07-12 |

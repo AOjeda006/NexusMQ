@@ -41,10 +41,15 @@ traducen en el borde (ver [capítulo 16](./16-modelo-errores-wire-codes.md)).
 ## nexus-storage
 **Responsabilidad:** motor de log append-only (Fase 1).
 **Tipos clave:** `PartitionLog`, `Segment`, `Index` (`IndexEntry`), `LogConfig`, `Retention`,
-`LogCompactor`, `FetchResult`.
-**Afinidad:** **REACTOR-LOCAL** (pertenece al reactor dueño de la partición).
+`LogCompactor`, `FetchResult`; cifrado opcional (`SegmentCipher`, `EncryptionKey`;
+[ADR-0031](../adr/adr-0031-cifrado-en-reposo-aes-gcm.md)); tiering opcional (`StorageTier`,
+`LocalStorageTier`, `TierObjectKey`; [ADR-0032](../adr/adr-0032-tiered-storage-puerto-y-tier-local.md)).
+**Afinidad:** **REACTOR-LOCAL** (pertenece al reactor dueño de la partición); `StorageTier` es un
+puerto no-propietario que posee el *composition root* y comparte el nodo.
 **Invariantes:** `logEndOffset` es monótono; la retención nunca borra el segmento activo;
-cada `RecordBatch` está protegido por CRC32C verificado al leer/recuperar.
+cada `RecordBatch` está protegido por CRC32C verificado al leer/recuperar; con tiering, solo se
+descargan segmentos sellados y el disco local se reclama **solo tras confirmar** la subida (el tier
+es la autoridad del prefijo frío, sin manifiesto local).
 
 ## nexus-reactor
 **Responsabilidad:** modelo de ejecución *thread-per-core* y coordinación entre núcleos.

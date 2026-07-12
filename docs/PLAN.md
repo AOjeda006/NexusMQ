@@ -61,12 +61,21 @@ configurar, el broker se comporta como hoy. Árbol **siempre compilable y en ver
 
 ## Estado actual
 
-**Hito A (cifrado en reposo) COMPLETO** salvo la regeneración del PDF y el commit de docs (A5 en
-curso). A1–A4 commiteados y pusheados; 823/823 tests verdes en `linux-gcc` y `linux-clang`, 39
-tests de cifrado verdes bajo ASan; smoke e2e confirma `.log` con magic `NXSEG1` cuando se pasa la
-KEK por entorno. ADR-0031 escrito e indexado; caps. 02/09/19/25/26/27/28/30 + `protocol.md` +
-`README` actualizados. **Siguiente:** regenerar PDF, puerta de calidad final, commit+push de A5;
-luego Hito B (tiered storage, ADR-0032).
+**Hito A (cifrado en reposo) COMPLETO y cerrado** (A1–A5 commiteados y pusheados). Puerta de
+calidad verde: gcc 823/823, clang/libc++ 823/823, ASan 823/823, clang-format limpio, clang-tidy sin
+hallazgos en el código nuevo (solo deuda de base preexistente, fuera de alcance). ADR-0031 +
+caps. 02/09/19/25/26/27/28/30 + `protocol.md` + `README` + PDF regenerado.
+
+**Hito B (tiered storage, ADR-0032) COMPLETO y cerrado** (B1–B5). Código commiteado/pusheado
+(001c6c0→b86b4a6): puerto `StorageTier` + `TierObjectKey`, `LocalStorageTier` (directorio objeto,
+copia atómica), `list_segment_bases`, integración en `PartitionLog` (offload/reclamar/lectura
+transparente/reopen/interop cifrado), wiring del composition-root + `--tier-dir`/`NEXUS_TIER_DIR` +
+offload-on-roll. Puerta de calidad verde: gcc 858/858, clang/libc++ 858/858, ASan 858/858,
+clang-format limpio, clang-tidy sin hallazgos nuevos (solo deuda de base preexistente). B5: ADR-0032
++ caps. 09/18/25/26/28/30 + README + diagrama 24 + índice de diagramas + PDF regenerado.
+
+**Hito C (exactly-once multi-partición, ADR-0033 + ADR-0034) EN CURSO.** Siguiente: C1 = codec de
+control records COMMIT/ABORT.
 
 ## Checklist
 
@@ -85,17 +94,18 @@ luego Hito B (tiered storage, ADR-0032).
 - [x] **A4 · Plumbing daemon** — `LogConfig` lleva `shared_ptr<const EncryptionKey>`; flag
   `--encryption-key` / env `NEXUS_ENCRYPTION_KEY`; propagación topic_catalog→topic_manager→
   PartitionLog→Segment. e2e sin clave = comportamiento de hoy; con clave, `.log` con magic `NXSEG1`.
-- [~] **A5 · Docs + ADR + PDF** — ADR-0031 + índice ✔; caps. 02/09/19/25/26/27/28/30 ✔;
-  `docs/protocol.md` ✔; README (no-objetivos, conteo ADR) ✔. **Pendiente:** regenerar PDF, puerta de
-  calidad final (gcc, clang, ASan, format, tidy), commit + push.
+- [x] **A5 · Docs + ADR + PDF** — ADR-0031 + índice ✔; caps. 02/09/19/25/26/27/28/30 ✔;
+  `docs/protocol.md` ✔; README ✔; PDF regenerado; puerta de calidad final verde; commiteado/pusheado.
 
 ### Hito B — Tiered storage (ADR-0032)
-- [ ] **B1 · Puerto `StorageTier`** + DTOs (interfaz + degradación limpia).
-- [ ] **B2 · Impl. local** (directorio objeto) + metadatos de segmentos en tier.
-- [ ] **B3 · Ciclo sellar→offload→reclamar→leer** transparente; idempotencia; reclamación solo tras
-  confirmación; interop con cifrado (offload ciphertext).
-- [ ] **B4 · Plumbing + métricas** (observabilidad del tier) + config/política.
-- [ ] **B5 · Docs + ADR + diagrama + PDF** (09/25/26/12 + `30`). Puerta de calidad (incl. ASan).
+- [x] **B1 · Puerto `StorageTier`** + `TierObjectKey` (interfaz + clave de objeto determinista).
+- [x] **B2 · Impl. local** `LocalStorageTier` (directorio objeto, copia atómica temp+rename).
+- [x] **B3 · Ciclo sellar→offload→reclamar→leer** transparente; `list_segment_bases` (tier=autoridad);
+  reclamación solo tras confirmación; reopen; interop con cifrado (offload ciphertext tal cual).
+- [x] **B4 · Plumbing** composition-root (`Server`→`TopicCatalog`→`TopicManager`→`LogConfig`) +
+  `--tier-dir`/`NEXUS_TIER_DIR` + offload-on-roll + ops destructivas *tier-conscientes*.
+- [x] **B5 · Docs + ADR-0032 + diagrama 24 + PDF** (caps. 09/18/25/26/28/30 + README + índice de
+  diagramas). Puerta de calidad verde (gcc/clang/ASan 858, format, tidy).
 
 ### Hito C — Exactly-once multi-partición (ADR-0033 + ADR-0034)
 - [ ] **C1 · Codec de control records** COMMIT/ABORT (record type versionado) + property-based.
