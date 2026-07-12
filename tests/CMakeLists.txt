@@ -103,6 +103,7 @@ add_executable(nexus-tests
   unit/cluster/raft_transport_test.cpp
   unit/cluster/raft_transport_loopback_test.cpp
   sim/raft_sim_test.cpp
+  sim/transaction_sim_test.cpp
   unit/client/dead_letter_test.cpp
   unit/kafka/codec_test.cpp
   unit/kafka/messages_test.cpp

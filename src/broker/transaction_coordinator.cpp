@@ -47,6 +47,7 @@ ProducerIdentity TransactionCoordinator::init_producer_id(MonoTime now,
     if (it == identities_.end()) {
         const ProducerIdentity id{.producer_id = next_producer_id_++, .producer_epoch = 0};
         identities_.emplace(transactional_id, id);
+        current_epoch_[id.producer_id] = id.producer_epoch;
         return id;
     }
     ProducerIdentity& id = it->second;
@@ -62,6 +63,7 @@ ProducerIdentity TransactionCoordinator::init_producer_id(MonoTime now,
     } else {
         ++id.producer_epoch;
     }
+    current_epoch_[id.producer_id] = id.producer_epoch;
     return id;
 }
 
@@ -73,17 +75,23 @@ const ProducerIdentity* TransactionCoordinator::producer_identity(
 
 expected<void> TransactionCoordinator::begin(MonoTime now, ProducerId producer_id,
                                              std::int16_t epoch) {
+    // Fencing autoritativo: una época inferior a la vigente del productor queda expulsada, aunque
+    // su transacción anterior ya hubiera concluido.
+    if (const auto ce = current_epoch_.find(producer_id);
+        ce != current_epoch_.end() && epoch < ce->second) {
+        return make_error(ErrorCode::Fenced, "begin: época obsoleta");
+    }
     if (const auto it = txns_.find(producer_id); it != txns_.end()) {
         const TransactionMetadata& cur = it->second;
-        if (epoch < cur.producer_epoch) {
-            return make_error(ErrorCode::Fenced, "begin: época obsoleta");
-        }
         if (epoch == cur.producer_epoch && cur.state != TransactionState::CompleteCommit &&
             cur.state != TransactionState::CompleteAbort) {
             return make_error(ErrorCode::InvalidArgument, "begin: ya hay una transacción en curso");
         }
         // epoch > cur (nueva encarnación) o transacción anterior concluida: se reemplaza.
     }
+    // begin con época explícita (sin init) también fija la época vigente.
+    auto& current = current_epoch_[producer_id];
+    current = std::max(current, epoch);
     txns_[producer_id] = TransactionMetadata{.producer_id = producer_id,
                                              .producer_epoch = epoch,
                                              .state = TransactionState::Ongoing,
@@ -96,6 +104,10 @@ expected<void> TransactionCoordinator::begin(MonoTime now, ProducerId producer_i
 
 expected<TransactionMetadata*> TransactionCoordinator::require(ProducerId producer_id,
                                                                std::int16_t epoch) {
+    if (const auto ce = current_epoch_.find(producer_id);
+        ce != current_epoch_.end() && epoch < ce->second) {
+        return make_error(ErrorCode::Fenced, "época obsoleta");
+    }
     const auto it = txns_.find(producer_id);
     if (it == txns_.end()) {
         return make_error(ErrorCode::NotFound, "transacción inexistente");

@@ -179,6 +179,10 @@ private:
     ProducerId next_producer_id_ = 0;  ///< Asignación monótona de `producer_id`.
     std::unordered_map<std::string, ProducerIdentity>
         identities_;  ///< transactional.id → identidad.
+    /// Época **autoritativa** vigente por `producer_id` (fencing): sube en cada `init_producer_id`
+    /// y sobrevive a que la transacción concluya, de modo que una época vieja queda expulsada
+    /// aunque su metadata haya alcanzado un estado `Complete*`.
+    std::unordered_map<ProducerId, std::int16_t> current_epoch_;
     std::unordered_map<ProducerId, TransactionMetadata> txns_;
     std::vector<MarkerWrite> pending_markers_;
 };
