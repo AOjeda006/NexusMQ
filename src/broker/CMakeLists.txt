@@ -12,6 +12,7 @@ add_library(nexus-broker
   offset_manager.cpp
   group_catalog.cpp
   transaction_coordinator.cpp
+  partition_txn_index.cpp
   request_router.cpp)
 add_library(nexus::broker ALIAS nexus-broker)
 
