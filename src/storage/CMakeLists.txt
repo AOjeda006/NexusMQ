@@ -4,6 +4,7 @@ add_library(nexus-storage
   index.cpp
   segment.cpp
   segment_crypto.cpp
+  storage_tier.cpp
   partition_log.cpp
   log_compactor.cpp)
 add_library(nexus::storage ALIAS nexus-storage)
