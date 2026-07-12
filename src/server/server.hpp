@@ -40,6 +40,7 @@
 #include "server/admin_api.hpp"
 #include "server/admin_router.hpp"
 #include "server/kafka_adapter.hpp"
+#include "storage/local_storage_tier.hpp"  // LocalStorageTier: tier local de segmentos (ADR-0032)
 #include "telemetry/metrics.hpp"
 
 namespace nexus {
@@ -124,6 +125,12 @@ public:
         ///   escriben cifrados con AES-256-GCM; nula (o build sin OpenSSL) = en claro (por
         ///   defecto).
         std::shared_ptr<const EncryptionKey> encryption_key;
+        /// @brief Directorio raíz del **almacenamiento por niveles** (tiered storage, ADR-0032).
+        /// @details Si no está vacío, el broker descarga los segmentos sellados a un `object dir`
+        ///   local bajo esta raíz (`LocalStorageTier`) y los rehidrata de forma transparente al
+        ///   leer; vacío = sin tiering (por defecto). Interopera con el cifrado (sube el ciphertext
+        ///   tal cual). Un tier de objetos (S3) sería un adaptador futuro del mismo puerto.
+        std::filesystem::path tier_dir;
         /// @brief Configuración del **modo proxy** del plano de datos (ADR-0006/0027).
         /// @details Modo **secundario y opt-in**: si `upstreams` no está vacío, el servidor
         /// **releva**
@@ -244,6 +251,10 @@ private:
     /// Declarado **antes** que `pool_` y `catalog_` para destruirse **después** (las corrutinas
     /// emisoras del pool y los portadores del catálogo lo referencian).
     std::vector<std::unique_ptr<RaftTransport>> raft_transports_;
+    /// Almacén por niveles (ADR-0032): tier local de segmentos, poblado si `config.tier_dir` no
+    /// está vacío (`nullptr` = sin tiering). Declarado **antes** que `catalog_` para destruirse
+    /// **después**: los `PartitionLog` del catálogo guardan un `StorageTier*` no-propietario a él.
+    std::unique_ptr<LocalStorageTier> tier_;
     /// Catálogo de topics fragmentado por núcleo (ADR-0026): un `TopicManager` por reactor. El del
     /// núcleo 0 atiende las conexiones; el plano de datos enruta cada partición a su dueño.
     TopicCatalog catalog_;

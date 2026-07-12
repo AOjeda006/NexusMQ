@@ -28,6 +28,7 @@ class RaftCarrier;
 class RaftMessageSink;
 class MetricsRegistry;
 class EncryptionKey;  // storage/segment_crypto.hpp (forward: solo un shared_ptr por manager).
+class StorageTier;    // storage/storage_tier.hpp (forward: puntero no-propietario por manager).
 
 /// @brief Estado por réplica de una partición replicada (Raft): su portador, almacén durable y
 ///   sumidero. Definido en el `.cpp` (la cabecera solo lo declara). Afinidad: REACTOR-LOCAL.
@@ -58,10 +59,15 @@ public:
     ///   `ReplicaContext` incompleto en la cabecera (pimpl).
     /// @param compaction Política de compactación del log de Raft (umbral de entradas aplicadas)
     ///   que se pasa a cada `RaftCarrier`; por defecto desactivada (umbral 0).
+    /// @param encryption_key KEK de cifrado en reposo (ADR-0031); `nullptr` = logs en claro.
+    /// @param tier Almacén por niveles (ADR-0032); puntero **no-propietario** (lo posee el
+    ///   *composition root*, compartido por el nodo). `nullptr` = sin tiering (por defecto). Se
+    ///   propaga al `LogConfig` de cada partición con su identidad (topic + id).
     explicit TopicManager(std::filesystem::path data_dir, int num_cores = 1, int owner_core = 0,
                           NodeId node_id = 0, RaftConfig raft_config = {},
                           std::vector<NodeId> voter_peers = {}, CompactionPolicy compaction = {},
-                          std::shared_ptr<const EncryptionKey> encryption_key = nullptr) noexcept;
+                          std::shared_ptr<const EncryptionKey> encryption_key = nullptr,
+                          StorageTier* tier = nullptr) noexcept;
     TopicManager(const TopicManager&) = delete;
     TopicManager& operator=(const TopicManager&) = delete;
     TopicManager(TopicManager&&) = delete;
@@ -167,6 +173,7 @@ private:
     std::vector<NodeId> voter_peers_;  ///< Los demás votantes del grupo Raft (resto del clúster).
     CompactionPolicy compaction_;      ///< Política de compactación que se pasa a cada portador.
     std::shared_ptr<const EncryptionKey> encryption_key_;  ///< KEK de cifrado en reposo (o nulo).
+    StorageTier* tier_ = nullptr;  ///< Tier de almacenamiento por niveles (no-propietario; o nulo).
     mutable std::mutex mutex_;
     std::unordered_map<std::string, std::unique_ptr<Topic>> topics_;
     /// Sumidero de Raft compartido por los portadores de este núcleo (reenvía al transporte real,

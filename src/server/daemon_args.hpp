@@ -22,8 +22,10 @@ using DaemonTopicSpec = std::pair<std::string, std::int32_t>;
 inline constexpr std::string_view kDaemonUsage =
     "uso: nexusd [--port N] [--admin-port N] [--kafka-port N] [--data-dir DIR] [--host H] "
     "[--node-id N] [--jwt-secret S] [--tls-cert FILE] [--tls-key FILE] [--encryption-key HEX] "
-    "[--topic nombre:parts]\n"
-    "  cifrado en reposo: preferir la variable de entorno NEXUS_ENCRYPTION_KEY (64 hex) al flag.\n";
+    "[--tier-dir DIR] [--topic nombre:parts]\n"
+    "  cifrado en reposo: preferir la variable de entorno NEXUS_ENCRYPTION_KEY (64 hex) al flag.\n"
+    "  tiered storage: --tier-dir DIR (o la variable de entorno NEXUS_TIER_DIR) activa la descarga "
+    "de segmentos sellados a ese directorio objeto local.\n";
 
 /// @brief Parsea los argumentos de `nexusd` sobre @p config y @p topics.
 /// @param args  argv completo (incluye `argv[0]`, que se ignora).

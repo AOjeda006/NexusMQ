@@ -44,11 +44,14 @@ public:
     ///   (y de ahí a cada `RaftCarrier`). Por defecto desactivada (umbral 0).
     /// @param encryption_key KEK de cifrado en reposo (ADR-0031); se propaga a cada `TopicManager`
     ///   (y de ahí al `LogConfig` de cada partición). `nullptr` = logs en claro (por defecto).
+    /// @param tier Almacén por niveles (ADR-0032); puntero **no-propietario** compartido por el
+    ///   nodo. Se propaga a cada `TopicManager`. `nullptr` = sin tiering (por defecto).
     explicit TopicCatalog(const std::filesystem::path& data_dir, int num_cores = 1,
                           NodeId node_id = 0, RaftConfig raft_config = {},
                           const std::vector<NodeId>& voter_peers = {},
                           CompactionPolicy compaction = {},
-                          const std::shared_ptr<const EncryptionKey>& encryption_key = nullptr);
+                          const std::shared_ptr<const EncryptionKey>& encryption_key = nullptr,
+                          StorageTier* tier = nullptr);
     TopicCatalog(const TopicCatalog&) = delete;
     TopicCatalog& operator=(const TopicCatalog&) = delete;
     TopicCatalog(TopicCatalog&&) = delete;

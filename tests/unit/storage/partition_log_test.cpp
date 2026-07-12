@@ -670,14 +670,14 @@ TEST(PartitionLogTiered, OffloadSealed_DescargaLosSelladosYReclamaLocal) {
 
     auto plog = nexus::PartitionLog::open(data.path(), tiered_small_segments(tier));
     ASSERT_TRUE(plog.has_value());
+    // 6 batches → 3 segmentos (2 sellados + activo). La política de tiering descarga los sellados
+    // en cada rotación; una llamada explícita extra es idempotente (no queda nada por descargar).
     for (int i = 0; i < 6; ++i) {
         ASSERT_TRUE(plog->append(make_batch(1, 40)).has_value());
     }
-    ASSERT_EQ(plog->segment_count(), 3U);  // 2 sellados + activo
-
     const auto offloaded = plog->offload_sealed_to_tier();
     ASSERT_TRUE(offloaded.has_value());
-    EXPECT_EQ(*offloaded, 2U);                    // los dos sellados
+    EXPECT_EQ(*offloaded, 0U);                    // ya descargados al rotar: nada más que hacer
     EXPECT_EQ(plog->segment_count(), 1U);         // solo queda el activo local
     EXPECT_EQ(plog->tiered_segment_count(), 2U);  // dos en el tier (prefijo frío)
 
@@ -690,6 +690,22 @@ TEST(PartitionLogTiered, OffloadSealed_DescargaLosSelladosYReclamaLocal) {
     EXPECT_EQ(plog->log_start_offset(), 0);
     EXPECT_EQ(plog->log_end_offset(), 6);
     expect_readable_and_decodes(*plog);  // lectura transparente (rehidrata los fríos)
+}
+
+TEST(PartitionLogTiered, AutoOffload_AlRotar_DescargaSinLlamadaExplicita) {
+    const TempDir data("tier_auto_data");
+    const TempDir obj("tier_auto_obj");
+    nexus::LocalStorageTier tier(obj.path());
+
+    auto plog = nexus::PartitionLog::open(data.path(), tiered_small_segments(tier));
+    ASSERT_TRUE(plog.has_value());
+    // Política de tiering: cada rotación descarga los sellados. Sin llamar offload explícitamente.
+    for (int i = 0; i < 6; ++i) {
+        ASSERT_TRUE(plog->append(make_batch(1, 40)).has_value());
+    }
+    EXPECT_GT(plog->tiered_segment_count(), 0U);  // las rotaciones ya descargaron
+    EXPECT_EQ(plog->segment_count(), 1U);         // solo el activo queda local
+    expect_readable_and_decodes(*plog);           // y todo se sigue leyendo
 }
 
 TEST(PartitionLogTiered, OffloadSealed_SinTier_EsNoOp) {

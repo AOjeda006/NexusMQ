@@ -96,4 +96,13 @@ TEST(DaemonArgs, EncryptionKey_SeGuardaComoHexDeEntrada) {
     EXPECT_EQ(config.encryption_key, nullptr);  // el parser no construye la clave.
 }
 
+TEST(DaemonArgs, TierDir_SeGuardaComoRaizDelTier) {
+    const Argv argv{"nexusd", "--tier-dir", "/var/lib/nexus-tier"};
+    nexus::Server::Config config;
+    std::vector<nexus::DaemonTopicSpec> topics;
+
+    ASSERT_TRUE(nexus::parse_daemon_args(argv.span(), config, topics));
+    EXPECT_EQ(config.tier_dir, "/var/lib/nexus-tier");
+}
+
 }  // namespace

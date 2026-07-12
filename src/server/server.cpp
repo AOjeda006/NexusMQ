@@ -66,6 +66,14 @@ Server::Config resolve_config(Server::Config config) {
     return config;
 }
 
+/// @brief Construye el tier local (ADR-0032) si `tier_dir` no está vacío; si no, `nullptr`.
+[[nodiscard]] std::unique_ptr<LocalStorageTier> make_tier(const Server::Config& config) {
+    if (config.tier_dir.empty()) {
+        return nullptr;  // sin tiering (comportamiento por defecto).
+    }
+    return std::make_unique<LocalStorageTier>(config.tier_dir);
+}
+
 #ifdef NEXUS_HAVE_OPENSSL
 /// @brief Sirve una conexión **cifrada**: envuelve el socket aceptado en una `TlsConnection`,
 ///   completa el handshake TLS y entra en el bucle de servicio sobre el flujo cifrado.
@@ -177,8 +185,9 @@ task<void> kafka_accept_loop(Reactor& reactor, Listener& listener, kafka::KafkaG
 Server::Server(Config config, ReactorPool::ProactorFactory proactor_factory)
     : config_(resolve_config(std::move(config))),
       peers_(config_.peers),
+      tier_(make_tier(config_)),
       catalog_(config_.data_dir, config_.num_reactors, config_.node_id, config_.raft_config,
-               peers_.node_ids(), config_.compaction, config_.encryption_key),
+               peers_.node_ids(), config_.compaction, config_.encryption_key, tier_.get()),
       group_catalog_(config_.num_reactors),
       proactor_factory_(proactor_factory ? std::move(proactor_factory) : make_default_proactor) {
     // Valida el plano de control en construcción: si io_uring no está disponible, la factoría por

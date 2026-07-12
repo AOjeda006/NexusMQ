@@ -47,7 +47,8 @@ std::int64_t now_ms() {
 TopicManager::TopicManager(std::filesystem::path data_dir, int num_cores, int owner_core,
                            NodeId node_id, RaftConfig raft_config, std::vector<NodeId> voter_peers,
                            CompactionPolicy compaction,
-                           std::shared_ptr<const EncryptionKey> encryption_key) noexcept
+                           std::shared_ptr<const EncryptionKey> encryption_key,
+                           StorageTier* tier) noexcept
     : data_dir_(std::move(data_dir)),
       num_cores_(num_cores < 1 ? 1 : num_cores),
       owner_core_(owner_core < 0 || owner_core >= num_cores_ ? 0 : owner_core),
@@ -55,7 +56,8 @@ TopicManager::TopicManager(std::filesystem::path data_dir, int num_cores, int ow
       raft_config_(raft_config),
       voter_peers_(std::move(voter_peers)),
       compaction_(compaction),
-      encryption_key_(std::move(encryption_key)) {}
+      encryption_key_(std::move(encryption_key)),
+      tier_(tier) {}
 
 TopicManager::~TopicManager() = default;
 
@@ -105,13 +107,13 @@ expected<TopicMetadata> TopicManager::create_topic(std::string name, std::int32_
     meta.created_at_ms = now_ms();
 
     auto topic = std::make_unique<Topic>(meta);
-    // El tiering (ADR-0032) se cablea en el composition root; aquí queda desactivado (tier nullptr
-    // = comportamiento por defecto). B4 propaga el `StorageTier` y la identidad por partición.
-    const LogConfig log_cfg{.segment_bytes = config.segment_bytes,
-                            .encryption_key = encryption_key_,
-                            .tier = nullptr,
-                            .tier_topic = name,
-                            .tier_partition = 0};
+    // Tiering (ADR-0032): el `StorageTier` (no-propietario) y la identidad por partición se
+    // propagan al `LogConfig`. `tier_ == nullptr` = sin tiering (comportamiento por defecto).
+    // `tier_partition` se fija por partición en el bucle.
+    LogConfig log_cfg{.segment_bytes = config.segment_bytes,
+                      .encryption_key = encryption_key_,
+                      .tier = tier_,
+                      .tier_topic = name};
     const bool replicated = replication_factor > 1;
     // Portadores acumulados aparte: solo se confían a `replicas_` si el topic se crea entero (si
     // una partición falla, `new_replicas` se destruye —portadores antes que `topic`— sin tocar el
@@ -122,6 +124,7 @@ expected<TopicMetadata> TopicManager::create_topic(std::string name, std::int32_
             continue;
         }
         const std::filesystem::path dir = data_dir_ / name / std::to_string(pid);
+        log_cfg.tier_partition = pid;  // identidad de la partición para las claves del tier.
         expected<PartitionLog> log = PartitionLog::open(dir, log_cfg);
         if (!log) {
             return std::unexpected(log.error());

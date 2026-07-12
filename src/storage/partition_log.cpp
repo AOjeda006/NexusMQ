@@ -462,6 +462,14 @@ expected<void> PartitionLog::roll_segment() {
         return std::unexpected(seg.error());
     }
     segments_.push_back(std::make_unique<Segment>(std::move(*seg)));
+
+    // Política de tiering (ADR-0032): tras rotar, descarga los sellados al tier. Es **best-effort**
+    // y no aborta la rotación: si el tier falla, los segmentos siguen locales y se reintentan en la
+    // próxima rotación (offload idempotente). Con el tier local es una copia de fichero síncrona;
+    // el offload asíncrono queda como trabajo futuro.
+    if (cfg_.tier != nullptr) {
+        [[maybe_unused]] const auto offloaded = offload_sealed_to_tier();
+    }
     return {};
 }
 

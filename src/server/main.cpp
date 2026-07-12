@@ -57,6 +57,17 @@ namespace {
     return {};
 }
 
+/// @brief Resuelve el directorio del tiered storage (ADR-0032): el flag `--tier-dir` o, si no, la
+///   variable de entorno `NEXUS_TIER_DIR`. Vacío = sin tiering (por defecto).
+void resolve_tier_dir(nexus::Server::Config& config) {
+    if (!config.tier_dir.empty()) {
+        return;  // el flag tiene prioridad.
+    }
+    if (const char* env = std::getenv("NEXUS_TIER_DIR"); env != nullptr && *env != '\0') {
+        config.tier_dir = env;
+    }
+}
+
 /// Servidor activo, para el manejador de señales (solo lo despierta: async-signal-safe). Global a
 /// propósito: un manejador de señales POSIX no recibe contexto y debe alcanzarlo por aquí.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -113,6 +124,7 @@ int main(int argc, char** argv) {
                       << "\n";
             return EXIT_FAILURE;
         }
+        resolve_tier_dir(config);
 
         nexus::Server server{std::move(config)};
         for (auto& [name, partitions] : topics) {
