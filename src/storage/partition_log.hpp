@@ -33,7 +33,8 @@ class PartitionLog {
 public:
     /// @brief Abre (o crea) el log de la partición en @p dir según @p cfg.
     /// @details Crea el directorio si no existe; si está vacío, crea el primer segmento en 0.
-    [[nodiscard]] static expected<PartitionLog> open(std::filesystem::path dir, LogConfig cfg);
+    [[nodiscard]] static expected<PartitionLog> open(std::filesystem::path dir,
+                                                     const LogConfig& cfg);
 
     /// @brief Añade @p batch al final del log, rotando el segmento activo si está lleno.
     /// @details Asigna al batch el offset base autoritativo (`log_end_offset()`); el CRC no

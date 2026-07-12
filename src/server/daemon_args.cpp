@@ -63,6 +63,8 @@ bool parse_daemon_args(std::span<char* const> args, Server::Config& config,
             config.tls.cert_chain = args[++i];
         } else if (arg == "--tls-key" && has_next) {
             config.tls.private_key = args[++i];
+        } else if (arg == "--encryption-key" && has_next) {
+            config.encryption_key_hex = args[++i];
         } else if (arg == "--node-id" && has_next) {
             config.node_id = static_cast<NodeId>(parse_int(args[++i], config.node_id));
         } else if (arg == "--topic" && has_next) {

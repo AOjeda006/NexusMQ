@@ -42,10 +42,13 @@ public:
     ///   = votante único. Se propaga a cada `TopicManager`.
     /// @param compaction Política de compactación del log de Raft; se propaga a cada `TopicManager`
     ///   (y de ahí a cada `RaftCarrier`). Por defecto desactivada (umbral 0).
+    /// @param encryption_key KEK de cifrado en reposo (ADR-0031); se propaga a cada `TopicManager`
+    ///   (y de ahí al `LogConfig` de cada partición). `nullptr` = logs en claro (por defecto).
     explicit TopicCatalog(const std::filesystem::path& data_dir, int num_cores = 1,
                           NodeId node_id = 0, RaftConfig raft_config = {},
                           const std::vector<NodeId>& voter_peers = {},
-                          CompactionPolicy compaction = {});
+                          CompactionPolicy compaction = {},
+                          const std::shared_ptr<const EncryptionKey>& encryption_key = nullptr);
     TopicCatalog(const TopicCatalog&) = delete;
     TopicCatalog& operator=(const TopicCatalog&) = delete;
     TopicCatalog(TopicCatalog&&) = delete;

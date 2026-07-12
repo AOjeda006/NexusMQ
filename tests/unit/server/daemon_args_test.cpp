@@ -85,4 +85,15 @@ TEST(DaemonArgs, FlagSinValor_Rechaza) {
     EXPECT_FALSE(nexus::parse_daemon_args(argv.span(), config, topics));
 }
 
+TEST(DaemonArgs, EncryptionKey_SeGuardaComoHexDeEntrada) {
+    const std::string hex(64, 'a');
+    const Argv argv{"nexusd", "--encryption-key", hex};
+    nexus::Server::Config config;
+    std::vector<nexus::DaemonTopicSpec> topics;
+
+    ASSERT_TRUE(nexus::parse_daemon_args(argv.span(), config, topics));
+    EXPECT_EQ(config.encryption_key_hex, hex);  // el composition root lo resuelve en la KEK.
+    EXPECT_EQ(config.encryption_key, nullptr);  // el parser no construye la clave.
+}
+
 }  // namespace

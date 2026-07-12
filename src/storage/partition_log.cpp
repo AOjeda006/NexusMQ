@@ -43,13 +43,13 @@ PartitionLog::PartitionLog(std::filesystem::path dir, LogConfig cfg,
                            std::vector<std::unique_ptr<Segment>> segments, Offset log_start,
                            Offset log_end)
     : dir_(std::move(dir)),
-      cfg_(cfg),
+      cfg_(std::move(cfg)),
       segments_(std::move(segments)),
       log_start_offset_(log_start),
       log_end_offset_(log_end),
       recovery_point_(log_end) {}  // lo abierto/recuperado ya está en disco.
 
-expected<PartitionLog> PartitionLog::open(std::filesystem::path dir, LogConfig cfg) {
+expected<PartitionLog> PartitionLog::open(std::filesystem::path dir, const LogConfig& cfg) {
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
     if (ec) {
@@ -81,8 +81,9 @@ expected<PartitionLog> PartitionLog::open(std::filesystem::path dir, LogConfig c
     Offset log_start = 0;
     Offset log_end = 0;
 
+    const EncryptionKey* key = cfg.encryption_key.get();
     if (bases.empty()) {
-        auto seg = Segment::create(dir, /*base_offset=*/0, cfg.index_interval_bytes);
+        auto seg = Segment::create(dir, /*base_offset=*/0, cfg.index_interval_bytes, key);
         if (!seg) {
             return std::unexpected(seg.error());
         }
@@ -90,7 +91,7 @@ expected<PartitionLog> PartitionLog::open(std::filesystem::path dir, LogConfig c
     } else {
         segments.reserve(bases.size());
         for (const Offset base : bases) {
-            auto seg = Segment::open(dir, base, cfg.index_interval_bytes);
+            auto seg = Segment::open(dir, base, cfg.index_interval_bytes, key);
             if (!seg) {
                 return std::unexpected(seg.error());
             }
@@ -109,7 +110,7 @@ expected<PartitionLog> PartitionLog::open(std::filesystem::path dir, LogConfig c
 }
 
 expected<Offset> PartitionLog::append(const RecordBatch& batch) {
-    if (active()->size_bytes() > 0 && active()->is_full(cfg_.segment_bytes)) {
+    if (!active()->is_empty() && active()->is_full(cfg_.segment_bytes)) {
         if (const auto rolled = roll_segment(); !rolled) {
             return std::unexpected(rolled.error());
         }
@@ -206,7 +207,7 @@ expected<void> PartitionLog::reset_to(Offset offset) {
         std::filesystem::remove(seg_path(dir_, base, ".index"), ec);
     }
     // Crea un segmento nuevo y vacío en la base del snapshot.
-    auto seg = Segment::create(dir_, offset, cfg_.index_interval_bytes);
+    auto seg = Segment::create(dir_, offset, cfg_.index_interval_bytes, cfg_.encryption_key.get());
     if (!seg) {
         return std::unexpected(seg.error());
     }
@@ -324,7 +325,8 @@ expected<void> PartitionLog::roll_segment() {
     }
     recovery_point_ = log_end_offset_;  // el segmento sellado queda durable hasta aquí.
     bytes_since_sync_ = 0;
-    auto seg = Segment::create(dir_, log_end_offset_, cfg_.index_interval_bytes);
+    auto seg = Segment::create(dir_, log_end_offset_, cfg_.index_interval_bytes,
+                               cfg_.encryption_key.get());
     if (!seg) {
         return std::unexpected(seg.error());
     }

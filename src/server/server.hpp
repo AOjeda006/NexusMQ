@@ -102,7 +102,7 @@ public:
         struct TlsConfig {
             std::filesystem::path cert_chain;   ///< Cadena de certificado del servidor (PEM).
             std::filesystem::path private_key;  ///< Clave privada del servidor (PEM).
-            std::filesystem::path client_ca;  ///< CA del cert de cliente (PEM); vacío = sin mTLS.
+            std::filesystem::path client_ca;    ///< CA del cert de cliente (PEM); vacío = sin mTLS.
 
             /// @brief ¿Se ha solicitado TLS? (certificado y clave presentes).
             [[nodiscard]] bool enabled() const noexcept {
@@ -111,6 +111,19 @@ public:
         };
         /// Configuración TLS del plano de datos (ADR-0019); ver `TlsConfig`.
         TlsConfig tls;
+        /// @brief KEK de **cifrado en reposo** en hexadecimal (64 dígitos = 256 bits), como
+        ///   **entrada** del *composition root* (ADR-0031).
+        /// @details Si no está vacía, el `main` la resuelve en `encryption_key`. Preferir la
+        /// variable
+        ///   de entorno `NEXUS_ENCRYPTION_KEY` frente al flag `--encryption-key`: el flag deja la
+        ///   clave visible en la línea de comandos (`ps`), la variable de entorno no.
+        std::string encryption_key_hex;
+        /// @brief KEK de cifrado en reposo **resuelta** (ADR-0031); la construye el *composition
+        ///   root* desde `encryption_key_hex`/entorno.
+        /// @details Si no es nula **y** el broker se compiló con OpenSSL, los logs de partición se
+        ///   escriben cifrados con AES-256-GCM; nula (o build sin OpenSSL) = en claro (por
+        ///   defecto).
+        std::shared_ptr<const EncryptionKey> encryption_key;
         /// @brief Configuración del **modo proxy** del plano de datos (ADR-0006/0027).
         /// @details Modo **secundario y opt-in**: si `upstreams` no está vacío, el servidor
         /// **releva**

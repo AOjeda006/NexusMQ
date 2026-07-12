@@ -20,6 +20,7 @@
 #include <cstdlib>
 #include <exception>
 #include <iostream>
+#include <memory>
 #include <span>
 #include <string>
 #include <utility>
@@ -27,8 +28,34 @@
 
 #include "server/daemon_args.hpp"
 #include "server/server.hpp"
+#include "storage/segment_crypto.hpp"
 
 namespace {
+
+/// @brief Resuelve la KEK de cifrado en reposo (ADR-0031) sobre @p config.
+/// @details Toma la clave del flag `--encryption-key` o, preferido, de la variable de entorno
+///   `NEXUS_ENCRYPTION_KEY` (no expone la clave en `ps`); el flag tiene prioridad. Si hay clave, la
+///   valida y construye; si es inválida (o el broker no tiene OpenSSL), devuelve el error para
+///   **abortar el arranque** en vez de degradar en silencio a texto plano. Sin clave, no hace nada
+///   (logs en claro, comportamiento por defecto). Limpia el hex de la config tras resolverlo.
+[[nodiscard]] nexus::expected<void> resolve_encryption_key(nexus::Server::Config& config) {
+    std::string hex = config.encryption_key_hex;
+    config.encryption_key_hex.clear();
+    if (hex.empty()) {
+        if (const char* env = std::getenv("NEXUS_ENCRYPTION_KEY"); env != nullptr) {
+            hex = env;
+        }
+    }
+    if (hex.empty()) {
+        return {};  // sin cifrado: logs en claro.
+    }
+    auto key = nexus::EncryptionKey::from_hex(hex);
+    if (!key) {
+        return std::unexpected(key.error());
+    }
+    config.encryption_key = std::make_shared<const nexus::EncryptionKey>(*key);
+    return {};
+}
 
 /// Servidor activo, para el manejador de señales (solo lo despierta: async-signal-safe). Global a
 /// propósito: un manejador de señales POSIX no recibe contexto y debe alcanzarlo por aquí.
@@ -79,6 +106,11 @@ int main(int argc, char** argv) {
         const std::span<char*> args{argv, static_cast<std::size_t>(argc)};
         if (!nexus::parse_daemon_args(args, config, topics)) {
             std::cerr << nexus::kDaemonUsage;
+            return EXIT_FAILURE;
+        }
+        if (const nexus::expected<void> resolved = resolve_encryption_key(config); !resolved) {
+            std::cerr << "clave de cifrado en reposo inválida: " << resolved.error().message()
+                      << "\n";
             return EXIT_FAILURE;
         }
 

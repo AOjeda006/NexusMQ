@@ -46,14 +46,16 @@ std::int64_t now_ms() {
 
 TopicManager::TopicManager(std::filesystem::path data_dir, int num_cores, int owner_core,
                            NodeId node_id, RaftConfig raft_config, std::vector<NodeId> voter_peers,
-                           CompactionPolicy compaction) noexcept
+                           CompactionPolicy compaction,
+                           std::shared_ptr<const EncryptionKey> encryption_key) noexcept
     : data_dir_(std::move(data_dir)),
       num_cores_(num_cores < 1 ? 1 : num_cores),
       owner_core_(owner_core < 0 || owner_core >= num_cores_ ? 0 : owner_core),
       node_id_(node_id),
       raft_config_(raft_config),
       voter_peers_(std::move(voter_peers)),
-      compaction_(compaction) {}
+      compaction_(compaction),
+      encryption_key_(std::move(encryption_key)) {}
 
 TopicManager::~TopicManager() = default;
 
@@ -103,7 +105,8 @@ expected<TopicMetadata> TopicManager::create_topic(std::string name, std::int32_
     meta.created_at_ms = now_ms();
 
     auto topic = std::make_unique<Topic>(meta);
-    const LogConfig log_cfg{.segment_bytes = config.segment_bytes};
+    const LogConfig log_cfg{.segment_bytes = config.segment_bytes,
+                            .encryption_key = encryption_key_};
     const bool replicated = replication_factor > 1;
     // Portadores acumulados aparte: solo se confían a `replicas_` si el topic se crea entero (si
     // una partición falla, `new_replicas` se destruye —portadores antes que `topic`— sin tocar el

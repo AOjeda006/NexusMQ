@@ -99,6 +99,10 @@ public:
         return size_bytes_ >= segment_bytes;
     }
 
+    /// @brief ¿Está el segmento sin datos? (solo la cabecera de cifrado, si la hay). Distingue un
+    ///   segmento recién creado de uno con batches, con independencia del cifrado.
+    [[nodiscard]] bool is_empty() const noexcept { return size_bytes_ == data_start_; }
+
     [[nodiscard]] Offset base_offset() const noexcept { return base_offset_; }
     [[nodiscard]] std::size_t size_bytes() const noexcept { return size_bytes_; }
     [[nodiscard]] State state() const noexcept { return state_; }

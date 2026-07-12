@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <format>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -19,6 +20,7 @@
 #include "io/file.hpp"
 #include "storage/log_config.hpp"
 #include "storage/retention.hpp"
+#include "storage/segment_crypto.hpp"
 
 namespace {
 
@@ -543,6 +545,108 @@ TEST(PartitionLog, TruncateTo_ReabreYPreservaElCorte) {
     auto reopened = nexus::PartitionLog::open(dir.path(), small_segments());
     ASSERT_TRUE(reopened.has_value());
     EXPECT_EQ(reopened->log_end_offset(), 3);
+}
+
+// --- Cifrado en reposo del log (ADR-0031) ---
+
+std::shared_ptr<const nexus::EncryptionKey> plog_test_key() {
+    auto key = nexus::EncryptionKey::from_hex(
+        "1112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f30");
+    EXPECT_TRUE(key.has_value());
+    return std::make_shared<const nexus::EncryptionKey>(std::move(*key));
+}
+
+nexus::LogConfig encrypted_small_segments(std::shared_ptr<const nexus::EncryptionKey> key) {
+    nexus::LogConfig cfg = small_segments();
+    cfg.encryption_key = std::move(key);
+    return cfg;
+}
+
+// Lee todo el log offset a offset y verifica que cada batch decodifica con base_offset esperado.
+void expect_readable_and_decodes(nexus::PartitionLog& plog) {
+    nexus::Offset cursor = plog.log_start_offset();
+    while (cursor < plog.log_end_offset()) {
+        const auto fr = plog.read(cursor, 100000);
+        ASSERT_TRUE(fr.has_value());
+        const auto batch = nexus::RecordBatch::decode(fr->batches.as_span());
+        ASSERT_TRUE(batch.has_value());
+        EXPECT_EQ(batch->header().base_offset, cursor);
+        cursor = batch->last_offset() + 1;
+    }
+    EXPECT_EQ(cursor, plog.log_end_offset());
+}
+
+TEST(PartitionLogEncrypted, RotaLeeYReabreDescifrado) {
+    if (!nexus::encryption_available()) {
+        GTEST_SKIP() << "sin OpenSSL";
+    }
+    const TempDir dir("enc_roundtrip");
+    const auto key = plog_test_key();
+    nexus::Offset end = 0;
+    {
+        auto plog = nexus::PartitionLog::open(dir.path(), encrypted_small_segments(key));
+        ASSERT_TRUE(plog.has_value());
+        for (int i = 0; i < 6; ++i) {
+            ASSERT_TRUE(plog->append(make_batch(1, 40)).has_value());
+        }
+        EXPECT_GT(plog->segment_count(), 1U);  // rotó (segmentos cifrados)
+        end = plog->log_end_offset();
+        expect_readable_and_decodes(*plog);
+    }
+    // Durabilidad: reabrir con la clave recupera y descifra.
+    auto reopened = nexus::PartitionLog::open(dir.path(), encrypted_small_segments(key));
+    ASSERT_TRUE(reopened.has_value());
+    EXPECT_EQ(reopened->log_end_offset(), end);
+    expect_readable_and_decodes(*reopened);
+}
+
+TEST(PartitionLogEncrypted, DatosEnDisco_TienenCabeceraDeCifrado) {
+    if (!nexus::encryption_available()) {
+        GTEST_SKIP() << "sin OpenSSL";
+    }
+    const TempDir dir("enc_magic");
+    const auto key = plog_test_key();
+    {
+        auto plog = nexus::PartitionLog::open(dir.path(), encrypted_small_segments(key));
+        ASSERT_TRUE(plog.has_value());
+        ASSERT_TRUE(plog->append(make_batch(1, 40)).has_value());
+    }
+    auto log = nexus::File::open(seg_log_path(dir.path(), 0), nexus::File::Mode::ReadOnly);
+    ASSERT_TRUE(log.has_value());
+    std::array<std::byte, nexus::kEncSegmentHeaderSize> head{};
+    ASSERT_TRUE(log->read_at(head, 0).has_value());
+    EXPECT_TRUE(nexus::is_encrypted_segment_header(head));
+}
+
+TEST(PartitionLogEncrypted, ReabrirSinClave_DevuelveUnsupported) {
+    if (!nexus::encryption_available()) {
+        GTEST_SKIP() << "sin OpenSSL";
+    }
+    const TempDir dir("enc_nokey");
+    const auto key = plog_test_key();
+    {
+        auto plog = nexus::PartitionLog::open(dir.path(), encrypted_small_segments(key));
+        ASSERT_TRUE(plog.has_value());
+        ASSERT_TRUE(plog->append(make_batch(1, 40)).has_value());
+    }
+    // Sin clave: un log cifrado no se puede abrir (degradación segura, no en claro accidental).
+    const auto reopened = nexus::PartitionLog::open(dir.path(), small_segments());
+    ASSERT_FALSE(reopened.has_value());
+    EXPECT_EQ(reopened.error().code(), nexus::ErrorCode::Unsupported);
+}
+
+TEST(PartitionLogEncrypted, SinClave_EscribeEnClaro_ComoHoy) {
+    const TempDir dir("plain");
+    {
+        auto plog = nexus::PartitionLog::open(dir.path(), small_segments());
+        ASSERT_TRUE(plog.has_value());
+        ASSERT_TRUE(plog->append(make_batch(1, 40)).has_value());
+    }
+    auto log = nexus::File::open(seg_log_path(dir.path(), 0), nexus::File::Mode::ReadOnly);
+    ASSERT_TRUE(log.has_value());
+    std::array<std::byte, nexus::kEncSegmentHeaderSize> head{};
+    ASSERT_TRUE(log->read_at(head, 0).has_value());
+    EXPECT_FALSE(nexus::is_encrypted_segment_header(head));  // sin cabecera de cifrado: en claro
 }
 
 }  // namespace

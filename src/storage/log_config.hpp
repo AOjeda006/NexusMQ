@@ -6,8 +6,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 
 namespace nexus {
+
+class EncryptionKey;  // storage/segment_crypto.hpp (forward: solo se guarda un shared_ptr).
 
 /// @brief Política de `fsync` del log (compromiso durabilidad/latencia). Afinidad: INMUTABLE.
 /// @details Determina cuándo se fuerza la persistencia a disco estable. Tras un fallo, solo lo
@@ -31,6 +34,10 @@ struct LogConfig {
     FsyncPolicy fsync_policy = FsyncPolicy::Interval;
     /// Bytes entre `fsync` bajo `FsyncPolicy::Interval`.
     std::size_t fsync_interval_bytes = 1UL * 1024 * 1024;
+    /// Clave maestra de **cifrado en reposo** (ADR-0031). Compartida por todo el broker; si es
+    /// `nullptr`, los segmentos se escriben en claro (comportamiento por defecto). Al crear un
+    /// segmento con clave, se cifra con AES-256-GCM; al abrirlo, se descifra de forma transparente.
+    std::shared_ptr<const EncryptionKey> encryption_key;
 };
 
 }  // namespace nexus

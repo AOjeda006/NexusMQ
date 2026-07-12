@@ -27,6 +27,7 @@ namespace nexus {
 class RaftCarrier;
 class RaftMessageSink;
 class MetricsRegistry;
+class EncryptionKey;  // storage/segment_crypto.hpp (forward: solo un shared_ptr por manager).
 
 /// @brief Estado por réplica de una partición replicada (Raft): su portador, almacén durable y
 ///   sumidero. Definido en el `.cpp` (la cabecera solo lo declara). Afinidad: REACTOR-LOCAL.
@@ -59,8 +60,8 @@ public:
     ///   que se pasa a cada `RaftCarrier`; por defecto desactivada (umbral 0).
     explicit TopicManager(std::filesystem::path data_dir, int num_cores = 1, int owner_core = 0,
                           NodeId node_id = 0, RaftConfig raft_config = {},
-                          std::vector<NodeId> voter_peers = {},
-                          CompactionPolicy compaction = {}) noexcept;
+                          std::vector<NodeId> voter_peers = {}, CompactionPolicy compaction = {},
+                          std::shared_ptr<const EncryptionKey> encryption_key = nullptr) noexcept;
     TopicManager(const TopicManager&) = delete;
     TopicManager& operator=(const TopicManager&) = delete;
     TopicManager(TopicManager&&) = delete;
@@ -165,6 +166,7 @@ private:
     RaftConfig raft_config_;  ///< Parámetros de Raft de las particiones replicadas.
     std::vector<NodeId> voter_peers_;  ///< Los demás votantes del grupo Raft (resto del clúster).
     CompactionPolicy compaction_;      ///< Política de compactación que se pasa a cada portador.
+    std::shared_ptr<const EncryptionKey> encryption_key_;  ///< KEK de cifrado en reposo (o nulo).
     mutable std::mutex mutex_;
     std::unordered_map<std::string, std::unique_ptr<Topic>> topics_;
     /// Sumidero de Raft compartido por los portadores de este núcleo (reenvía al transporte real,
