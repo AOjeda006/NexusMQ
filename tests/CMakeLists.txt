@@ -27,6 +27,7 @@ add_executable(nexus-tests
   unit/io/io_uring_backend_test.cpp
   unit/storage/index_test.cpp
   unit/storage/segment_test.cpp
+  unit/storage/segment_crypto_test.cpp
   unit/storage/partition_log_test.cpp
   unit/storage/log_compactor_test.cpp
   unit/bench/latency_histogram_test.cpp
