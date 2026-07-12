@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <random>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -468,6 +469,48 @@ TEST(SegmentEncrypted, TruncateThenAppend_ContinuaDesdeElCorte) {
     ASSERT_TRUE(batch.has_value());
     EXPECT_EQ(batch->header().base_offset, 6);
     EXPECT_EQ(fr->next_offset, 7);
+}
+
+// Property-based: N batches aleatorios cifrados sobreviven a seal+reopen y se leen en orden,
+// descifrados e íntegros (durabilidad + formato de segmento cifrado).
+TEST(SegmentEncrypted, ManyBatchesAleatorios_SealReopenLeeTodoDescifrado) {
+    if (!nexus::encryption_available()) {
+        GTEST_SKIP() << "sin OpenSSL";
+    }
+    const TempDir dir("enc_prop");
+    const auto key = test_key();
+    std::mt19937 rng(0xBEEF);
+    std::vector<std::pair<nexus::Offset, std::int32_t>> expected;  // (base_offset, record_count)
+
+    nexus::Offset next = 0;
+    {
+        auto seg = nexus::Segment::create(dir.path(), 0, /*interval=*/128, &key);
+        ASSERT_TRUE(seg.has_value());
+        for (int i = 0; i < 200; ++i) {
+            const auto count = static_cast<std::int32_t>(1 + (rng() % 8));
+            const std::size_t payload = rng() % 64;
+            ASSERT_TRUE(seg->append(make_batch(next, count, payload)).has_value());
+            expected.emplace_back(next, count);
+            next += count;
+        }
+        ASSERT_TRUE(seg->seal().has_value());
+    }
+
+    auto seg = nexus::Segment::open(dir.path(), 0, 128, &key);
+    ASSERT_TRUE(seg.has_value());
+    ASSERT_TRUE(seg->recover().has_value());
+
+    nexus::Offset cursor = 0;
+    for (const auto& [base, count] : expected) {
+        const auto fr = seg->read(cursor, 100000);
+        ASSERT_TRUE(fr.has_value());
+        const auto batch = nexus::RecordBatch::decode(fr->batches.as_span());
+        ASSERT_TRUE(batch.has_value());
+        EXPECT_EQ(batch->header().base_offset, base);
+        EXPECT_EQ(batch->header().record_count, count);
+        cursor = base + count;
+    }
+    EXPECT_EQ(cursor, next);
 }
 
 }  // namespace

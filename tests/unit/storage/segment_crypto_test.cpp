@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <random>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -307,6 +308,62 @@ TEST(SegmentCrypto, RandomBytes_RellenaYVariaEntreLlamadas) {
     ASSERT_TRUE(nexus::random_bytes(a).has_value());
     ASSERT_TRUE(nexus::random_bytes(b).has_value());
     EXPECT_NE(a, b);  // colisión de 256 bits: prácticamente imposible
+}
+
+// --- Property-based (RNG sembrado, determinista) ---
+
+// Para muchos plaintexts aleatorios de tamaño y metadatos variables, seal->open recupera el
+// plaintext exacto y peek expone los metadatos de traversal correctos.
+TEST(SegmentCryptoProperty, SealOpen_PlaintextsAleatorios_RoundTrip) {
+    if (!nexus::encryption_available()) {
+        GTEST_SKIP() << "sin OpenSSL";
+    }
+    const auto cipher = make_cipher();
+    std::mt19937_64 rng(0xC0FFEEULL);
+    for (int iter = 0; iter < 300; ++iter) {
+        const std::size_t len = rng() % 2048;
+        std::vector<std::byte> plaintext(len);
+        for (auto& byte : plaintext) {
+            byte = static_cast<std::byte>(rng() & 0xFFU);
+        }
+        const auto base_offset = static_cast<nexus::Offset>(rng() % 1'000'000'000);
+        const auto record_count = static_cast<std::int32_t>(rng() % 10'000);
+
+        nexus::Buffer frame;
+        ASSERT_TRUE(cipher.seal_block(plaintext, base_offset, record_count, frame).has_value());
+
+        const auto view = SegmentCipher::peek_block(frame.as_span());
+        ASSERT_TRUE(view.has_value());
+        EXPECT_EQ(view->base_offset, base_offset);
+        EXPECT_EQ(view->record_count, record_count);
+        EXPECT_EQ(view->ciphertext_len, len);
+
+        nexus::Buffer recovered;
+        ASSERT_TRUE(cipher.open_block(frame.as_span(), recovered).has_value());
+        const std::vector<std::byte> got(recovered.as_span().begin(), recovered.as_span().end());
+        EXPECT_EQ(got, plaintext);
+    }
+}
+
+// Invariante de integridad: alterar CUALQUIER byte del bloque (cabecera, nonce, tag o ciphertext)
+// hace fallar open (nunca devuelve un plaintext distinto en silencio).
+TEST(SegmentCryptoProperty, TamperSweep_CualquierByteAlterado_Falla) {
+    if (!nexus::encryption_available()) {
+        GTEST_SKIP() << "sin OpenSSL";
+    }
+    const auto cipher = make_cipher();
+    const auto plaintext = sample_plaintext(24);
+    nexus::Buffer frame;
+    ASSERT_TRUE(cipher.seal_block(plaintext, 123, 4, frame).has_value());
+    const std::vector<std::byte> original(frame.as_span().begin(), frame.as_span().end());
+
+    for (std::size_t pos = 0; pos < original.size(); ++pos) {
+        std::vector<std::byte> tampered = original;
+        tampered[pos] ^= std::byte{0xFF};
+        nexus::Buffer out;
+        const auto opened = cipher.open_block(tampered, out);
+        EXPECT_FALSE(opened.has_value()) << "byte " << pos << " alterado y open no falló";
+    }
 }
 
 }  // namespace
