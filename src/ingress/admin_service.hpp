@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -46,7 +47,20 @@ struct PartitionInfo {
 /// @brief Descripción detallada de un topic (DTO). Afinidad: INMUTABLE (valor).
 struct TopicDescription {
     TopicSummary summary;
+    std::int64_t retention_ms = -1;     ///< Retención por tiempo vigente (`-1` = sin límite).
+    std::int64_t retention_bytes = -1;  ///< Retención por tamaño vigente (`-1` = sin límite).
+    std::int64_t segment_bytes = 0;     ///< Tamaño de segmento (create-only; no mutable en caliente).
     std::vector<PartitionInfo> partitions;
+};
+
+/// @brief Cambios de config de topic **mutables en caliente** (DTO de `alter_topic_config`).
+///   Afinidad: INMUTABLE (valor).
+/// @details Semántica **PATCH**: solo se aplican los campos presentes (`optional`). `segment_bytes`
+///   **no** está aquí: ya está horneado en los segmentos escritos, así que es *create-only* y el
+///   borde REST rechaza intentar cambiarlo (ADR-0037).
+struct AlterTopicSpec {
+    std::optional<std::int64_t> retention_ms;
+    std::optional<std::int64_t> retention_bytes;
 };
 
 /// @brief Resumen de un grupo de consumidores (DTO de listados). Afinidad: INMUTABLE (valor).
@@ -143,6 +157,13 @@ public:
 
     /// @brief Borra el topic @p name. `NotFound` si no existe. Corrutina (fan-out cross-core).
     [[nodiscard]] virtual task<expected<void>> delete_topic(std::string_view name) = 0;
+
+    /// @brief Altera la config **mutable en caliente** del topic @p name (retención) según @p spec.
+    ///   `NotFound` si no existe. Corrutina: la config se publica a **todos** los núcleos por paso de
+    ///   mensajes (fan-out cross-core, ADR-0037), de modo que el barrido de retención de cada núcleo
+    ///   (ADR-0036) lea el valor nuevo. Devuelve el resumen del topic actualizado.
+    [[nodiscard]] virtual task<expected<TopicSummary>> alter_topic_config(
+        std::string_view name, const AlterTopicSpec& spec) = 0;
 
     /// @brief Describe el topic @p name (resumen + particiones). `NotFound` si no existe.
     /// @details Corrutina: los *high-watermark*/epoch de cada partición viven en su núcleo dueño,

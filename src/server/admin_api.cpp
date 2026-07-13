@@ -89,6 +89,27 @@ task<expected<void>> AdminApi::delete_topic(std::string_view name) {
     co_return topics_.delete_topic(name);  // local (N=1 / tests).
 }
 
+task<expected<TopicSummary>> AdminApi::alter_topic_config(std::string_view name,
+                                                         const AlterTopicSpec& spec) {
+    if (partitions_ != nullptr) {
+        // Cableado: publica la config a todos los núcleos por paso de mensajes (ADR-0037).
+        const expected<TopicMetadata> meta =
+            co_await update_topic_config_on_cluster(*self_, *partitions_, topics_by_core_,
+                                                    std::string{name}, spec.retention_ms,
+                                                    spec.retention_bytes);
+        if (!meta) {
+            co_return std::unexpected{meta.error()};
+        }
+        co_return to_summary(*meta);
+    }
+    const expected<TopicMetadata> meta =
+        topics_.update_config(name, spec.retention_ms, spec.retention_bytes);  // local (N=1 / tests).
+    if (!meta) {
+        co_return std::unexpected{meta.error()};
+    }
+    co_return to_summary(*meta);
+}
+
 namespace {
 
 /// Estado de la partición @p pid en @p manager (high-watermark/epoch), o ceros si no vive ahí.
@@ -127,6 +148,9 @@ task<expected<TopicDescription>> AdminApi::describe_topic(std::string_view name)
     }
     TopicDescription description;
     description.summary = to_summary(topic->meta());
+    description.retention_ms = topic->meta().config.retention_ms;
+    description.retention_bytes = topic->meta().config.retention_bytes;
+    description.segment_bytes = static_cast<std::int64_t>(topic->meta().config.segment_bytes);
     const std::int32_t count = topic->meta().partition_count;
     description.partitions.reserve(static_cast<std::size_t>(count));
     const std::string topic_name{name};

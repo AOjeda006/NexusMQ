@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -119,6 +120,41 @@ TEST(TopicManager, EnforceRetentionAll_SinPolitica_NoReclama) {
 
     EXPECT_EQ(part->log().segment_count(), segs_before);
     EXPECT_EQ(part->log().log_start_offset(), 0);
+}
+
+TEST(TopicManager, UpdateConfig_ActualizaRetencionParcial) {
+    TempDir dir{"upd"};
+    nexus::TopicManager manager{dir.path()};
+    ASSERT_TRUE(manager.create_topic("t", 1, retention_config(-1, -1)).has_value());
+
+    const auto meta =
+        manager.update_config("t", std::optional<std::int64_t>{5000}, std::nullopt);
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_EQ(meta->config.retention_ms, 5000);
+    EXPECT_EQ(meta->config.retention_bytes, -1);  // ausente en el PATCH: se conserva.
+    EXPECT_EQ(manager.get("t")->meta().config.retention_ms, 5000);  // persistido en el Topic.
+}
+
+TEST(TopicManager, UpdateConfig_Inexistente_NotFound) {
+    TempDir dir{"upd404"};
+    nexus::TopicManager manager{dir.path()};
+    const auto meta = manager.update_config("nope", std::optional<std::int64_t>{1}, std::nullopt);
+    ASSERT_FALSE(meta.has_value());
+    EXPECT_EQ(meta.error().code(), nexus::ErrorCode::NotFound);
+}
+
+TEST(TopicManager, UpdateConfig_SurteEfectoEnElBarridoDeRetencion) {
+    // Sin política, rueda segmentos, verifica que no reclama; tras el PATCH de retención, sí.
+    TempDir dir{"upd_effect"};
+    nexus::TopicManager manager{dir.path()};
+    nexus::PartitionBase* part = topic_with_segments(manager, retention_config(-1, -1));
+    manager.enforce_retention_all();
+    ASSERT_EQ(part->log().log_start_offset(), 0);  // sin política: no reclama.
+
+    ASSERT_TRUE(
+        manager.update_config("t", std::nullopt, std::optional<std::int64_t>{150}).has_value());
+    manager.enforce_retention_all();  // ahora con retention_bytes=150: reclama.
+    EXPECT_GT(part->log().log_start_offset(), 0);
 }
 
 TEST(TopicManager, CreateTopic_AbreParticionesYQuedaAccesible) {

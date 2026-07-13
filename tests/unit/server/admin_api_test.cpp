@@ -144,6 +144,31 @@ TEST(AdminApi, DescribeTopic_DevuelveParticiones) {
     EXPECT_EQ(description->partitions[0].high_watermark, 0);  // log vacío.
 }
 
+TEST(AdminApi, AlterTopicConfig_ActualizaRetencion) {
+    TempDir dir{"alter"};
+    nexus::TopicManager topics{dir.path()};
+    nexus::AdminApi admin{topics, kNodeId};
+    ASSERT_TRUE(run_create(admin, nexus::CreateTopicSpec{.name = "t", .partition_count = 1}));
+
+    nexus::AlterTopicSpec spec;
+    spec.retention_ms = 7000;
+    const auto summary = nexus::sync_wait(admin.alter_topic_config("t", spec));
+    ASSERT_TRUE(summary.has_value());
+    EXPECT_EQ(summary->name, "t");
+    EXPECT_EQ(topics.get("t")->meta().config.retention_ms, 7000);
+}
+
+TEST(AdminApi, AlterTopicConfig_Inexistente_NotFound) {
+    TempDir dir{"alter404"};
+    nexus::TopicManager topics{dir.path()};
+    nexus::AdminApi admin{topics, kNodeId};
+    nexus::AlterTopicSpec spec;
+    spec.retention_ms = 1;
+    const auto summary = nexus::sync_wait(admin.alter_topic_config("nope", spec));
+    ASSERT_FALSE(summary.has_value());
+    EXPECT_EQ(summary.error().code(), nexus::ErrorCode::NotFound);
+}
+
 TEST(AdminApi, DescribeTopic_Inexistente_Rechaza) {
     TempDir dir{"desc404"};
     nexus::TopicManager topics{dir.path()};

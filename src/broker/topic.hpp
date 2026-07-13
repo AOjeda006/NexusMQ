@@ -16,15 +16,19 @@
 
 namespace nexus {
 
-/// @brief Configuración (inmutable) de un topic: gobierna los logs de sus particiones. INMUTABLE.
+/// @brief Configuración de un topic: gobierna los logs de sus particiones. Afinidad: REACTOR-LOCAL
+///   (una copia por núcleo; la retención es **mutable en caliente**, ADR-0037).
 /// @details `segment_bytes`/`retention_*` se trasladan al `LogConfig` de cada `PartitionLog`.
-///   `compaction` y `compression` quedan reservados (compactación y LZ4/Zstd llegan en Fase 4).
+///   `retention_ms`/`retention_bytes` son **mutables en caliente** (`Topic::set_retention`,
+///   publicadas cross-core por `update_topic_config_on_cluster`, ADR-0037): el barrido de retención
+///   (ADR-0036) las lee en cada ciclo. `segment_bytes` es **create-only** (ya horneado en los
+///   segmentos escritos). `compaction` y `compression` quedan reservados (Fase 4).
 struct TopicConfig {
-    /// Tamaño del segmento activo.
+    /// Tamaño del segmento activo (**create-only**: no mutable en caliente).
     std::size_t segment_bytes = 64UL * 1024 * 1024;
-    /// Retención por tiempo (`-1` = sin límite).
+    /// Retención por tiempo (`-1` = sin límite). **Mutable en caliente** (ADR-0037).
     std::int64_t retention_ms = -1;
-    /// Retención por tamaño (`-1` = sin límite).
+    /// Retención por tamaño (`-1` = sin límite). **Mutable en caliente** (ADR-0037).
     std::int64_t retention_bytes = -1;
     /// Compactación por clave (Fase 4).
     bool compaction = false;
@@ -69,6 +73,15 @@ public:
     [[nodiscard]] const TopicMetadata& meta() const noexcept { return meta_; }
     /// Número de particiones efectivamente instaladas (observabilidad / pruebas).
     [[nodiscard]] std::size_t partition_count() const noexcept { return partitions_.size(); }
+
+    /// @brief Actualiza los campos de config **mutables en caliente** (retención; ADR-0037).
+    /// @details `segment_bytes` **no** se toca: está horneado en los segmentos ya escritos
+    ///   (create-only). El barrido de retención (ADR-0036) lee `meta().config` en cada ciclo, así
+    ///   que el cambio surte efecto sin reabrir la partición. REACTOR-LOCAL: solo el hilo dueño.
+    void set_retention(std::int64_t retention_ms, std::int64_t retention_bytes) noexcept {
+        meta_.config.retention_ms = retention_ms;
+        meta_.config.retention_bytes = retention_bytes;
+    }
 
 private:
     TopicMetadata meta_;

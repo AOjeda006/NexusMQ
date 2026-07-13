@@ -58,6 +58,8 @@ private:
     [[nodiscard]] task<HttpResponse> create_topic(const HttpRequest& request) const;
     [[nodiscard]] task<HttpResponse> describe_topic(const HttpRequest& request,
                                                     std::string_view name) const;
+    [[nodiscard]] task<HttpResponse> alter_topic(const HttpRequest& request,
+                                                 std::string_view name) const;
     [[nodiscard]] task<HttpResponse> delete_topic(std::string_view name) const;
 
     AdminService& admin_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)

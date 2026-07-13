@@ -61,6 +61,8 @@ public:
 
     [[nodiscard]] task<expected<TopicSummary>> create_topic(const CreateTopicSpec& spec) override;
     [[nodiscard]] task<expected<void>> delete_topic(std::string_view name) override;
+    [[nodiscard]] task<expected<TopicSummary>> alter_topic_config(
+        std::string_view name, const AlterTopicSpec& spec) override;
     [[nodiscard]] task<expected<TopicDescription>> describe_topic(std::string_view name) override;
     [[nodiscard]] std::vector<TopicSummary> list_topics(Page page) const override;
     [[nodiscard]] task<std::vector<GroupSummary>> list_groups(Page page) override;

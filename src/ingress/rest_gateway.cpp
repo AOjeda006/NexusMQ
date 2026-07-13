@@ -145,6 +145,9 @@ task<HttpResponse> RestGateway::route_topics(const HttpRequest& request,
     if (request.method == HttpMethod::Get) {
         co_return co_await describe_topic(request, name);
     }
+    if (request.method == HttpMethod::Patch) {
+        co_return co_await alter_topic(request, name);
+    }
     if (request.method == HttpMethod::Delete) {
         co_return co_await delete_topic(name);
     }
@@ -192,6 +195,41 @@ task<HttpResponse> RestGateway::create_topic(const HttpRequest& request) const {
     co_return response;
 }
 
+task<HttpResponse> RestGateway::alter_topic(const HttpRequest& request,
+                                            std::string_view name) const {
+    const auto json = parse_json(request.body);
+    if (!json || !json->is_object()) {
+        co_return problem_explicit(400, "el cuerpo debe ser un objeto JSON", request.path());
+    }
+    // `segmentBytes` está horneado en los segmentos escritos: no es mutable en caliente (ADR-0037).
+    if (json->find("segmentBytes") != nullptr) {
+        co_return problem_explicit(
+            400, "'segmentBytes' no es mutable en caliente (create-only): recréa el topic para cambiarlo",
+            request.path());
+    }
+    AlterTopicSpec spec;
+    if (const JsonValue* value = json->find("retentionMs");
+        value != nullptr && value->is_number()) {
+        spec.retention_ms = value->as_int64();
+    }
+    if (const JsonValue* value = json->find("retentionBytes");
+        value != nullptr && value->is_number()) {
+        spec.retention_bytes = value->as_int64();
+    }
+    if (!spec.retention_ms && !spec.retention_bytes) {
+        co_return problem_explicit(
+            400, "nada que alterar: incluye 'retentionMs' y/o 'retentionBytes'", request.path());
+    }
+    const expected<TopicSummary> summary = co_await admin_.alter_topic_config(name, spec);
+    if (!summary) {
+        co_return problem_response(
+            summary.error(), std::string{config_.api_prefix} + "/topics/" + std::string{name});
+    }
+    JsonWriter writer;
+    write_topic_summary(writer, *summary);
+    co_return json_response(200, writer.take());
+}
+
 task<HttpResponse> RestGateway::describe_topic(const HttpRequest& request,
                                                std::string_view name) const {
     const expected<TopicDescription> description = co_await admin_.describe_topic(name);
@@ -205,6 +243,11 @@ task<HttpResponse> RestGateway::describe_topic(const HttpRequest& request,
     writer.field("replicationFactor",
                  static_cast<std::int64_t>(description->summary.replication_factor));
     writer.field("createdAtMs", description->summary.created_at_ms);
+    writer.key("config").begin_object();
+    writer.field("retentionMs", description->retention_ms);
+    writer.field("retentionBytes", description->retention_bytes);
+    writer.field("segmentBytes", description->segment_bytes);
+    writer.end_object();
     writer.key("partitions").begin_array();
     for (const PartitionInfo& partition : description->partitions) {
         writer.begin_object();

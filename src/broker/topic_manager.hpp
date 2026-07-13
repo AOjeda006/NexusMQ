@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -116,6 +117,17 @@ public:
 
     /// @return El topic @p name, o `nullptr` si no existe.
     [[nodiscard]] Topic* get(std::string_view name);
+
+    /// @brief Actualiza la config **mutable en caliente** del topic @p name (retención; ADR-0037).
+    /// @param retention_ms Nuevo `retention_ms` si tiene valor (PATCH: solo si presente).
+    /// @param retention_bytes Nuevo `retention_bytes` si tiene valor.
+    /// @details `segment_bytes` **no** es mutable (create-only); esta API solo toca la retención. El
+    ///   barrido de `enforce_retention_all` lee la config vigente, de modo que el cambio surte
+    ///   efecto en el siguiente ciclo. El fan-out cross-core lo hace `update_topic_config_on_cluster`.
+    /// @return Los metadatos actualizados, o `NotFound` si el topic no existe en este núcleo.
+    [[nodiscard]] expected<TopicMetadata> update_config(std::string_view name,
+                                                        std::optional<std::int64_t> retention_ms,
+                                                        std::optional<std::int64_t> retention_bytes);
 
     /// @brief ¿Atiende este núcleo la partición @p pid? (`pid % num_cores == owner_core`,
     /// ADR-0026).

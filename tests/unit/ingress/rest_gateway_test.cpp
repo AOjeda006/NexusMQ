@@ -27,9 +27,11 @@ public:
     nexus::GroupDescription group_description;
     nexus::ClusterInfo cluster_info;
     nexus::CreateTopicSpec last_spec;
+    nexus::AlterTopicSpec last_alter;
     bool create_fails = false;
     bool describe_fails = false;
     bool delete_fails = false;
+    bool alter_fails = false;
     bool describe_group_fails = false;
 
     nexus::task<nexus::expected<nexus::TopicSummary>> create_topic(
@@ -51,6 +53,15 @@ public:
         co_return nexus::expected<void>{};
     }
 
+    nexus::task<nexus::expected<nexus::TopicSummary>> alter_topic_config(
+        std::string_view name, const nexus::AlterTopicSpec& spec) override {
+        last_alter = spec;
+        if (alter_fails) {
+            co_return nexus::make_error(nexus::ErrorCode::NotFound, "topic inexistente");
+        }
+        co_return nexus::TopicSummary{.name = std::string{name}, .partition_count = 2};
+    }
+
     nexus::task<nexus::expected<nexus::TopicDescription>> describe_topic(
         std::string_view name) override {
         if (describe_fails) {
@@ -58,6 +69,9 @@ public:
         }
         nexus::TopicDescription description;
         description.summary = nexus::TopicSummary{.name = std::string{name}, .partition_count = 2};
+        description.retention_ms = 1000;
+        description.retention_bytes = 2000;
+        description.segment_bytes = 4096;
         description.partitions = {nexus::PartitionInfo{.id = 0, .leader = 1, .high_watermark = 5},
                                   nexus::PartitionInfo{.id = 1, .leader = 1, .high_watermark = 9}};
         co_return description;
@@ -195,6 +209,63 @@ TEST(RestGateway, DescribeTopic_NoExiste_404) {
     const nexus::RestGateway gateway{admin, nullptr};
     const auto response =
         run_handle(gateway, make_request(nexus::HttpMethod::Get, "/api/v1/topics/x"), 0);
+    EXPECT_EQ(response.status, 404);
+}
+
+TEST(RestGateway, DescribeTopic_IncluyeConfig) {
+    FakeAdmin admin;
+    const nexus::RestGateway gateway{admin, nullptr};
+    const auto response =
+        run_handle(gateway, make_request(nexus::HttpMethod::Get, "/api/v1/topics/orders"), 0);
+    EXPECT_EQ(response.status, 200);
+    EXPECT_NE(response.body.find(R"("config":{)"), std::string::npos);
+    EXPECT_NE(response.body.find(R"("retentionMs":1000)"), std::string::npos);
+    EXPECT_NE(response.body.find(R"("segmentBytes":4096)"), std::string::npos);
+}
+
+TEST(RestGateway, AlterTopic_200AplicaRetencion) {
+    FakeAdmin admin;
+    const nexus::RestGateway gateway{admin, nullptr};
+    const auto response = run_handle(
+        gateway,
+        make_request(nexus::HttpMethod::Patch, "/api/v1/topics/orders",
+                     R"({"retentionMs":5000,"retentionBytes":9999})"),
+        0);
+    EXPECT_EQ(response.status, 200);
+    EXPECT_NE(response.body.find(R"("name":"orders")"), std::string::npos);
+    ASSERT_TRUE(admin.last_alter.retention_ms.has_value());
+    EXPECT_EQ(*admin.last_alter.retention_ms, 5000);
+    ASSERT_TRUE(admin.last_alter.retention_bytes.has_value());
+    EXPECT_EQ(*admin.last_alter.retention_bytes, 9999);
+}
+
+TEST(RestGateway, AlterTopic_SegmentBytes_400) {
+    FakeAdmin admin;
+    const nexus::RestGateway gateway{admin, nullptr};
+    const auto response =
+        run_handle(gateway,
+                   make_request(nexus::HttpMethod::Patch, "/api/v1/topics/orders",
+                                R"({"segmentBytes":1048576})"),
+                   0);
+    EXPECT_EQ(response.status, 400);  // segmentBytes no es mutable en caliente.
+}
+
+TEST(RestGateway, AlterTopic_SinCambios_400) {
+    FakeAdmin admin;
+    const nexus::RestGateway gateway{admin, nullptr};
+    const auto response = run_handle(
+        gateway, make_request(nexus::HttpMethod::Patch, "/api/v1/topics/orders", R"({})"), 0);
+    EXPECT_EQ(response.status, 400);  // nada que alterar.
+}
+
+TEST(RestGateway, AlterTopic_NoExiste_404) {
+    FakeAdmin admin;
+    admin.alter_fails = true;
+    const nexus::RestGateway gateway{admin, nullptr};
+    const auto response =
+        run_handle(gateway,
+                   make_request(nexus::HttpMethod::Patch, "/api/v1/topics/x", R"({"retentionMs":1})"),
+                   0);
     EXPECT_EQ(response.status, 404);
 }
 

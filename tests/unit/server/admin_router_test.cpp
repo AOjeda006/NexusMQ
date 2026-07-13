@@ -31,6 +31,10 @@ public:
     nexus::task<nexus::expected<void>> delete_topic(std::string_view /*name*/) override {
         co_return nexus::expected<void>{};
     }
+    nexus::task<nexus::expected<nexus::TopicSummary>> alter_topic_config(
+        std::string_view name, const nexus::AlterTopicSpec& /*spec*/) override {
+        co_return nexus::TopicSummary{.name = std::string{name}};
+    }
     nexus::task<nexus::expected<nexus::TopicDescription>> describe_topic(
         std::string_view /*name*/) override {
         co_return nexus::make_error(nexus::ErrorCode::NotFound, "no");

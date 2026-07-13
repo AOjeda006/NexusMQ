@@ -68,4 +68,27 @@ task<expected<void>> delete_topic_on_cluster(Reactor& self, PartitionRouter& par
     co_return result;
 }
 
+task<expected<TopicMetadata>> update_topic_config_on_cluster(
+    Reactor& self, PartitionRouter& partitions, std::span<TopicManager* const> topics_by_core,
+    std::string name, std::optional<std::int64_t> retention_ms,
+    std::optional<std::int64_t> retention_bytes) {
+    const int cores = partitions.core_count();
+    expected<TopicMetadata> authoritative =
+        make_error(ErrorCode::NotFound, "topic inexistente: " + name);
+    for (int core = 0; core < cores; ++core) {
+        // Publica la config en el hilo del reactor de cada núcleo (toca solo su `TopicManager`). El
+        // update es idempotente y no reserva recursos: no hace falta rollback.
+        expected<TopicMetadata> meta = co_await call_on(
+            self, partitions.reactor(core),
+            [topics_by_core, core, &name, retention_ms, retention_bytes] {
+                return topics_by_core[static_cast<std::size_t>(core)]->update_config(
+                    name, retention_ms, retention_bytes);
+            });
+        if (core == 0) {
+            authoritative = std::move(meta);  // el núcleo 0 es autoritativo.
+        }
+    }
+    co_return authoritative;
+}
+
 }  // namespace nexus

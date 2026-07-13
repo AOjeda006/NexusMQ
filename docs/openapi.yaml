@@ -155,6 +155,28 @@ paths:
               schema: { $ref: "#/components/schemas/TopicDescription" }
         "401": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+    patch:
+      tags: [topics]
+      summary: Altera la config mutable en caliente del topic (retención).
+      description: >-
+        Semántica PATCH: solo se aplican los campos presentes (`retentionMs`, `retentionBytes`).
+        `segmentBytes` es create-only (horneado en los segmentos escritos): incluirlo devuelve 400.
+        El cambio se publica a todos los núcleos y el barrido de retención lo aplica en el siguiente
+        ciclo (ADR-0036/0037).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AlterTopicRequest" }
+      responses:
+        "200":
+          description: Config actualizada; devuelve el resumen del topic.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TopicSummary" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
     delete:
       tags: [topics]
       summary: Borra un topic y sus datos en disco.
@@ -309,6 +331,21 @@ components:
         leaderEpoch: { type: integer, format: int64 }
       required: [id, leader, highWatermark, leaderEpoch]
 
+    AlterTopicRequest:
+      type: object
+      description: "Cambios de config mutables en caliente (PATCH parcial). `segmentBytes` no se admite."
+      properties:
+        retentionMs: { type: integer, format: int64, description: "Retención por tiempo (-1 = sin límite)." }
+        retentionBytes: { type: integer, format: int64, description: "Retención por tamaño (-1 = sin límite)." }
+
+    TopicConfigView:
+      type: object
+      properties:
+        retentionMs: { type: integer, format: int64 }
+        retentionBytes: { type: integer, format: int64 }
+        segmentBytes: { type: integer, format: int64, description: "create-only." }
+      required: [retentionMs, retentionBytes, segmentBytes]
+
     TopicDescription:
       type: object
       properties:
@@ -316,10 +353,11 @@ components:
         partitionCount: { type: integer }
         replicationFactor: { type: integer }
         createdAtMs: { type: integer, format: int64 }
+        config: { $ref: "#/components/schemas/TopicConfigView" }
         partitions:
           type: array
           items: { $ref: "#/components/schemas/PartitionInfo" }
-      required: [name, partitionCount, replicationFactor, createdAtMs, partitions]
+      required: [name, partitionCount, replicationFactor, createdAtMs, config, partitions]
 
     GroupSummary:
       type: object

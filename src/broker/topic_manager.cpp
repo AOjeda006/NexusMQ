@@ -250,6 +250,22 @@ Topic* TopicManager::get(std::string_view name) {
     return it == topics_.end() ? nullptr : it->second.get();
 }
 
+expected<TopicMetadata> TopicManager::update_config(std::string_view name,
+                                                    std::optional<std::int64_t> retention_ms,
+                                                    std::optional<std::int64_t> retention_bytes) {
+    const std::scoped_lock lock{mutex_};
+    const auto it = topics_.find(std::string{name});
+    if (it == topics_.end()) {
+        return make_error(ErrorCode::NotFound, "topic inexistente: " + std::string{name});
+    }
+    Topic& topic = *it->second;
+    // PATCH: solo los campos presentes; los ausentes conservan su valor vigente.
+    const std::int64_t new_ms = retention_ms.value_or(topic.meta().config.retention_ms);
+    const std::int64_t new_bytes = retention_bytes.value_or(topic.meta().config.retention_bytes);
+    topic.set_retention(new_ms, new_bytes);
+    return topic.meta();
+}
+
 std::vector<TopicMeta> TopicManager::describe(NodeId leader_node_id) const {
     const std::scoped_lock lock{mutex_};
     std::vector<TopicMeta> result;

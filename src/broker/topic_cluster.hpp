@@ -6,6 +6,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 
@@ -40,5 +41,15 @@ class TopicManager;
 [[nodiscard]] task<expected<void>> delete_topic_on_cluster(
     Reactor& self, PartitionRouter& partitions, std::span<TopicManager* const> topics_by_core,
     std::string name);
+
+/// @brief Publica la config **mutable** de @p name (retención) en **todos** los núcleos vía
+///   `call_on` (paso de mensajes, ADR-0037), de modo que el barrido de retención de cada núcleo lea
+///   el valor nuevo. Idempotente por núcleo; sin recursos que deshacer (no hace falta rollback).
+/// @return Los metadatos actualizados del núcleo 0 (autoritativo), o `NotFound` si no existe.
+/// @pre `topics_by_core.size() == partitions.core_count()`; ambos viven durante toda la corrutina.
+[[nodiscard]] task<expected<TopicMetadata>> update_topic_config_on_cluster(
+    Reactor& self, PartitionRouter& partitions, std::span<TopicManager* const> topics_by_core,
+    std::string name, std::optional<std::int64_t> retention_ms,
+    std::optional<std::int64_t> retention_bytes);
 
 }  // namespace nexus
