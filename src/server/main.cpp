@@ -21,6 +21,7 @@
 #include <exception>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -32,6 +33,27 @@
 
 namespace {
 
+/// @brief Lee la variable de entorno @p name de forma **portable**.
+/// @details En POSIX usa `std::getenv`; en MSVC usa `_dupenv_s` —la API «segura» que evita el aviso
+///   C4996 (tratado como error por `/WX`)— y confina el búfer que el CRT reserva en un propietario
+///   RAII. Devuelve `nullopt` si la variable no está definida (cadena vacía **sí** es un valor).
+[[nodiscard]] std::optional<std::string> read_env(const char* name) {
+#ifdef _MSC_VER
+    char* raw = nullptr;
+    std::size_t len = 0;
+    if (_dupenv_s(&raw, &len, name) != 0 || raw == nullptr) {
+        return std::nullopt;
+    }
+    const std::unique_ptr<char, decltype(&std::free)> owned{raw, &std::free};
+    return std::string(owned.get());
+#else
+    if (const char* env = std::getenv(name); env != nullptr) {
+        return std::string(env);
+    }
+    return std::nullopt;
+#endif
+}
+
 /// @brief Resuelve la KEK de cifrado en reposo (ADR-0031) sobre @p config.
 /// @details Toma la clave del flag `--encryption-key` o, preferido, de la variable de entorno
 ///   `NEXUS_ENCRYPTION_KEY` (no expone la clave en `ps`); el flag tiene prioridad. Si hay clave, la
@@ -42,8 +64,8 @@ namespace {
     std::string hex = config.encryption_key_hex;
     config.encryption_key_hex.clear();
     if (hex.empty()) {
-        if (const char* env = std::getenv("NEXUS_ENCRYPTION_KEY"); env != nullptr) {
-            hex = env;
+        if (const auto env = read_env("NEXUS_ENCRYPTION_KEY"); env.has_value()) {
+            hex = *env;
         }
     }
     if (hex.empty()) {
@@ -63,8 +85,8 @@ void resolve_tier_dir(nexus::Server::Config& config) {
     if (!config.tier_dir.empty()) {
         return;  // el flag tiene prioridad.
     }
-    if (const char* env = std::getenv("NEXUS_TIER_DIR"); env != nullptr && *env != '\0') {
-        config.tier_dir = env;
+    if (const auto env = read_env("NEXUS_TIER_DIR"); env.has_value() && !env->empty()) {
+        config.tier_dir = *env;
     }
 }
 
