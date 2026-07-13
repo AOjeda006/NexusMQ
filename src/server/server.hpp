@@ -219,6 +219,18 @@ private:
     ///   el admin); con un solo núcleo el `call_on` es local e inline.
     [[nodiscard]] task<std::vector<GroupSummary>> list_groups(Page page);
 
+    /// @brief Describe un grupo (miembros/offsets/lag) para el `AdminApi`. **Reactor-local:** lee su
+    ///   **único** núcleo coordinador (`fnv1a_64(group_id) % N`, ADR-0026); el *high-watermark* de
+    ///   cada partición se lee de su núcleo dueño (`partition % N`) para el *lag*.
+    /// @details Corrutina: `call_on` al núcleo del grupo (membresía + offsets) y luego a cada núcleo
+    ///   dueño de partición (high-watermark). Con N=1 los `call_on` son locales e inline. Pre-`run`
+    ///   (monohilo) lee directamente el núcleo 0.
+    [[nodiscard]] task<expected<GroupDescription>> describe_group(std::string group_id);
+
+    /// @brief *High-watermark* de la partición @p pid de @p topic, leído en su núcleo dueño
+    ///   (`pid % N`); `0` si el topic/partición no vive ahí. Para el cálculo de *lag* del grupo.
+    [[nodiscard]] task<std::int64_t> partition_high_watermark(std::string topic, PartitionId pid);
+
     /// @brief Registra en cada reactor dueño un temporizador que conduce (`on_tick`) los portadores
     ///   Raft de sus particiones replicadas (cadencia = `raft_config.heartbeat_interval`).
     /// @details El núcleo 0 se registra inline (este hilo); los núcleos 1..N-1 reciben el registro

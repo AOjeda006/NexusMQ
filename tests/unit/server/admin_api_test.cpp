@@ -197,6 +197,33 @@ TEST(AdminApi, ListGroups_SinLister_DevuelveVacio) {
     EXPECT_TRUE(run_list_groups(admin, nexus::Page{}).empty());
 }
 
+TEST(AdminApi, DescribeGroup_UsaElDescriberInyectado) {
+    TempDir dir{"describe_group"};
+    nexus::TopicManager topics{dir.path()};
+    auto describer = [](std::string id) -> nexus::task<nexus::expected<nexus::GroupDescription>> {
+        nexus::GroupDescription description;
+        description.group_id = std::move(id);
+        description.state = "Stable";
+        description.generation = 3;
+        co_return description;
+    };
+    nexus::AdminApi admin{topics, kNodeId, {}, describer};
+    const auto description = nexus::sync_wait(admin.describe_group("g1"));
+    ASSERT_TRUE(description.has_value());
+    EXPECT_EQ(description->group_id, "g1");
+    EXPECT_EQ(description->state, "Stable");
+    EXPECT_EQ(description->generation, 3);
+}
+
+TEST(AdminApi, DescribeGroup_SinDescriber_NotFound) {
+    TempDir dir{"describe_group_none"};
+    nexus::TopicManager topics{dir.path()};
+    nexus::AdminApi admin{topics, kNodeId};
+    const auto description = nexus::sync_wait(admin.describe_group("g1"));
+    ASSERT_FALSE(description.has_value());
+    EXPECT_EQ(description.error().code(), nexus::ErrorCode::NotFound);
+}
+
 TEST(AdminApi, CreateTopic_Cableado_FanOutATodosLosNucleos) {
     TempDir dir{"fanout"};
     // Dos reactores cableados; dos TopicManager sharded (núcleo 0 dueño de p0; núcleo 1 de p1).

@@ -40,8 +40,12 @@ std::vector<T> apply_page(std::vector<T> items, Page page) {
 
 }  // namespace
 
-AdminApi::AdminApi(TopicManager& topics, NodeId node_id, GroupLister group_lister)
-    : topics_(topics), node_id_(node_id), group_lister_(std::move(group_lister)) {}
+AdminApi::AdminApi(TopicManager& topics, NodeId node_id, GroupLister group_lister,
+                   GroupDescriber group_describer)
+    : topics_(topics),
+      node_id_(node_id),
+      group_lister_(std::move(group_lister)),
+      group_describer_(std::move(group_describer)) {}
 
 task<expected<TopicSummary>> AdminApi::create_topic(const CreateTopicSpec& spec) {
     // Validación de nombre centralizada en `TopicManager` (fuente única): REST y protocolo nativo
@@ -146,6 +150,13 @@ task<std::vector<GroupSummary>> AdminApi::list_groups(Page page) {
         co_return std::vector<GroupSummary>{};
     }
     co_return co_await group_lister_(page);
+}
+
+task<expected<GroupDescription>> AdminApi::describe_group(std::string_view group_id) {
+    if (!group_describer_) {
+        co_return make_error(ErrorCode::NotFound, "grupo inexistente: " + std::string{group_id});
+    }
+    co_return co_await group_describer_(std::string{group_id});
 }
 
 }  // namespace nexus

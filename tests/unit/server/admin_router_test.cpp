@@ -41,6 +41,10 @@ public:
     nexus::task<std::vector<nexus::GroupSummary>> list_groups(nexus::Page /*page*/) override {
         co_return std::vector<nexus::GroupSummary>{};
     }
+    nexus::task<nexus::expected<nexus::GroupDescription>> describe_group(
+        std::string_view /*group_id*/) override {
+        co_return nexus::make_error(nexus::ErrorCode::NotFound, "no");
+    }
 };
 
 nexus::HttpRequest make_request(nexus::HttpMethod method, std::string target) {

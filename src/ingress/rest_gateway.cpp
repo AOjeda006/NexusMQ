@@ -117,8 +117,8 @@ task<HttpResponse> RestGateway::handle(const HttpRequest& request,
     if (resource == "/topics" || resource.starts_with("/topics/")) {
         co_return co_await route_topics(request, resource);
     }
-    if (resource == "/groups") {
-        co_return co_await route_groups(request);
+    if (resource == "/groups" || resource.starts_with("/groups/")) {
+        co_return co_await route_groups(request, resource);
     }
     co_return problem_explicit(404, "recurso no encontrado", path);
 }
@@ -228,24 +228,71 @@ task<HttpResponse> RestGateway::delete_topic(std::string_view name) const {
     co_return response;
 }
 
-task<HttpResponse> RestGateway::route_groups(const HttpRequest& request) const {
-    if (request.method != HttpMethod::Get) {
-        co_return problem_explicit(405, "método no permitido en /groups", request.path());
+task<HttpResponse> RestGateway::route_groups(const HttpRequest& request,
+                                             std::string_view resource) const {
+    const std::string_view rest = resource.substr(std::string_view{"/groups"}.size());
+    if (rest.empty()) {
+        if (request.method != HttpMethod::Get) {
+            co_return problem_explicit(405, "método no permitido en /groups", request.path());
+        }
+        const auto page = parse_pagination(request.query(), config_.pagination);
+        if (!page) {
+            co_return problem_response(page.error(), request.path());
+        }
+        const std::vector<GroupSummary> groups = co_await admin_.list_groups(*page);
+        co_return json_response(
+            200, paged_json(*page, groups, [](JsonWriter& writer, const GroupSummary& group) {
+                writer.begin_object();
+                writer.field("groupId", group.group_id);
+                writer.field("state", group.state);
+                writer.field("generation", static_cast<std::int64_t>(group.generation));
+                writer.field("memberCount", group.member_count);
+                writer.end_object();
+            }));
     }
-    const auto page = parse_pagination(request.query(), config_.pagination);
-    if (!page) {
-        co_return problem_response(page.error(), request.path());
+    const std::string_view group_id = rest.substr(1);  // rest empieza por '/'.
+    if (group_id.empty() || group_id.contains('/')) {
+        co_return problem_explicit(404, "recurso no encontrado", request.path());
     }
-    const std::vector<GroupSummary> groups = co_await admin_.list_groups(*page);
-    co_return json_response(
-        200, paged_json(*page, groups, [](JsonWriter& writer, const GroupSummary& group) {
-            writer.begin_object();
-            writer.field("groupId", group.group_id);
-            writer.field("state", group.state);
-            writer.field("generation", static_cast<std::int64_t>(group.generation));
-            writer.field("memberCount", group.member_count);
-            writer.end_object();
-        }));
+    if (request.method == HttpMethod::Get) {
+        co_return co_await describe_group(group_id);
+    }
+    co_return problem_explicit(405, "método no permitido en /groups/{id}", request.path());
+}
+
+task<HttpResponse> RestGateway::describe_group(std::string_view group_id) const {
+    const expected<GroupDescription> description = co_await admin_.describe_group(group_id);
+    if (!description) {
+        co_return problem_response(
+            description.error(), std::string{config_.api_prefix} + "/groups/" + std::string{group_id});
+    }
+    JsonWriter writer;
+    writer.begin_object();
+    writer.field("groupId", description->group_id);
+    writer.field("state", description->state);
+    writer.field("generation", static_cast<std::int64_t>(description->generation));
+    writer.field("leaderId", description->leader_id);
+    writer.key("members").begin_array();
+    for (const GroupMemberInfo& member : description->members) {
+        writer.begin_object();
+        writer.field("memberId", member.member_id);
+        writer.field("subscriptionBytes", member.subscription_bytes);
+        writer.end_object();
+    }
+    writer.end_array();
+    writer.key("offsets").begin_array();
+    for (const GroupPartitionOffset& offset : description->offsets) {
+        writer.begin_object();
+        writer.field("topic", offset.topic);
+        writer.field("partition", static_cast<std::int64_t>(offset.partition));
+        writer.field("committedOffset", offset.committed_offset);
+        writer.field("highWatermark", offset.high_watermark);
+        writer.field("lag", offset.lag);
+        writer.end_object();
+    }
+    writer.end_array();
+    writer.end_object();
+    co_return json_response(200, writer.take());
 }
 
 }  // namespace nexus

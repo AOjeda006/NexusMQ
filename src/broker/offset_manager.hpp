@@ -9,11 +9,19 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 #include "common/error.hpp"
 #include "common/types.hpp"
 
 namespace nexus {
+
+/// @brief Offset confirmado de un grupo en una partición (para el `describe` de grupo). INMUTABLE.
+struct GroupOffsetEntry {
+    std::string topic;
+    PartitionId partition = 0;
+    Offset offset = -1;
+};
 
 /// @brief Clave de un commit de offset: (grupo, topic, partición). Afinidad: INMUTABLE.
 struct OffsetKey {
@@ -54,6 +62,11 @@ public:
     /// @return el offset, o `NotFound` si ese grupo no ha confirmado nada en esa partición.
     [[nodiscard]] expected<Offset> fetch(std::string_view group, std::string_view topic,
                                          PartitionId partition) const;
+
+    /// @brief Todos los offsets confirmados de @p group, **ordenados** por (topic, partición).
+    /// @details Para el `describe` de grupo (plano de control/observabilidad): el orden es
+    ///   determinista. Vacío si el grupo no ha confirmado nada.
+    [[nodiscard]] std::vector<GroupOffsetEntry> list_for_group(std::string_view group) const;
 
     /// Número de commits almacenados (para pruebas/diagnóstico).
     [[nodiscard]] std::size_t size() const noexcept { return commits_.size(); }

@@ -50,7 +50,9 @@ private:
                                                    std::int64_t now_unix_seconds) const;
     [[nodiscard]] task<HttpResponse> route_topics(const HttpRequest& request,
                                                   std::string_view resource) const;
-    [[nodiscard]] task<HttpResponse> route_groups(const HttpRequest& request) const;
+    [[nodiscard]] task<HttpResponse> route_groups(const HttpRequest& request,
+                                                  std::string_view resource) const;
+    [[nodiscard]] task<HttpResponse> describe_group(std::string_view group_id) const;
     [[nodiscard]] HttpResponse list_topics(const HttpRequest& request) const;
     [[nodiscard]] task<HttpResponse> create_topic(const HttpRequest& request) const;
     [[nodiscard]] task<HttpResponse> describe_topic(const HttpRequest& request,

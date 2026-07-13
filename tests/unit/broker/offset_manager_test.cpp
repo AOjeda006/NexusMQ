@@ -4,6 +4,8 @@
 
 #include <gtest/gtest.h>
 
+#include <vector>
+
 #include "common/error.hpp"
 
 namespace {
@@ -46,6 +48,33 @@ TEST(OffsetManager, ClavesDistintas_SonIndependientes) {
     EXPECT_EQ(offsets.fetch("g1", "t", 1).value(), 3);
     EXPECT_EQ(offsets.fetch("g1", "otro", 0).value(), 4);
     EXPECT_EQ(offsets.size(), 4U);
+}
+
+TEST(OffsetManager, ListForGroup_DevuelveTodosOrdenados) {
+    nexus::OffsetManager offsets;
+    offsets.commit("g1", "topic-b", 1, 30);
+    offsets.commit("g1", "topic-a", 0, 10);
+    offsets.commit("g1", "topic-a", 1, 20);
+    offsets.commit("g2", "topic-a", 0, 99);  // otro grupo: no debe salir.
+
+    const std::vector<nexus::GroupOffsetEntry> entries = offsets.list_for_group("g1");
+    ASSERT_EQ(entries.size(), 3U);
+    // Orden determinista por (topic, partición).
+    EXPECT_EQ(entries[0].topic, "topic-a");
+    EXPECT_EQ(entries[0].partition, 0);
+    EXPECT_EQ(entries[0].offset, 10);
+    EXPECT_EQ(entries[1].topic, "topic-a");
+    EXPECT_EQ(entries[1].partition, 1);
+    EXPECT_EQ(entries[1].offset, 20);
+    EXPECT_EQ(entries[2].topic, "topic-b");
+    EXPECT_EQ(entries[2].partition, 1);
+    EXPECT_EQ(entries[2].offset, 30);
+}
+
+TEST(OffsetManager, ListForGroup_GrupoSinCommits_DevuelveVacio) {
+    nexus::OffsetManager offsets;
+    offsets.commit("g1", "t", 0, 1);
+    EXPECT_TRUE(offsets.list_for_group("g2").empty());
 }
 
 }  // namespace

@@ -35,7 +35,12 @@ public:
     /// cableado del server. Es una corrutina (`task`): la agregación cruza núcleos (`call_on`).
     using GroupLister = std::function<task<std::vector<GroupSummary>>(Page)>;
 
-    AdminApi(TopicManager& topics, NodeId node_id, GroupLister group_lister = {});
+    /// Función que describe **un** grupo (miembros/offsets/lag) leyendo su núcleo coordinador
+    /// (`hash(group_id) % N`); la provee el cableado del server. Corrutina (`call_on`).
+    using GroupDescriber = std::function<task<expected<GroupDescription>>(std::string)>;
+
+    AdminApi(TopicManager& topics, NodeId node_id, GroupLister group_lister = {},
+             GroupDescriber group_describer = {});
 
     /// @brief Cablea el fan-out cross-core: a partir de aquí, crear/borrar topic se propaga a todos
     ///   los núcleos (ADR-0026) en vez de tocar solo el del núcleo 0.
@@ -55,6 +60,7 @@ public:
     [[nodiscard]] task<expected<TopicDescription>> describe_topic(std::string_view name) override;
     [[nodiscard]] std::vector<TopicSummary> list_topics(Page page) const override;
     [[nodiscard]] task<std::vector<GroupSummary>> list_groups(Page page) override;
+    [[nodiscard]] task<expected<GroupDescription>> describe_group(std::string_view group_id) override;
 
 private:
     /// @brief Estado de la partición @p pid del topic @p name (id/leader/high-watermark/epoch).
@@ -66,6 +72,7 @@ private:
     TopicManager& topics_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     NodeId node_id_;
     GroupLister group_lister_;
+    GroupDescriber group_describer_;
     /// Fan-out cross-core (cableado por `bind_cluster`; `nullptr` = operación local en el núcleo
     /// 0).
     Reactor* self_ = nullptr;

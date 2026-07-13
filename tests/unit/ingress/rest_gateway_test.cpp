@@ -24,10 +24,12 @@ class FakeAdmin : public nexus::AdminService {
 public:
     std::vector<nexus::TopicSummary> topics;
     std::vector<nexus::GroupSummary> groups;
+    nexus::GroupDescription group_description;
     nexus::CreateTopicSpec last_spec;
     bool create_fails = false;
     bool describe_fails = false;
     bool delete_fails = false;
+    bool describe_group_fails = false;
 
     nexus::task<nexus::expected<nexus::TopicSummary>> create_topic(
         const nexus::CreateTopicSpec& spec) override {
@@ -65,6 +67,13 @@ public:
     }
     nexus::task<std::vector<nexus::GroupSummary>> list_groups(nexus::Page /*page*/) override {
         co_return groups;
+    }
+    nexus::task<nexus::expected<nexus::GroupDescription>> describe_group(
+        std::string_view /*group_id*/) override {
+        if (describe_group_fails) {
+            co_return nexus::make_error(nexus::ErrorCode::NotFound, "grupo inexistente");
+        }
+        co_return group_description;
     }
 };
 
@@ -237,6 +246,47 @@ TEST(RestGateway, ListGroups_200) {
     EXPECT_EQ(response.status, 200);
     EXPECT_NE(response.body.find(R"("groupId":"g1")"), std::string::npos);
     EXPECT_NE(response.body.find(R"("memberCount":3)"), std::string::npos);
+}
+
+TEST(RestGateway, DescribeGroup_200ConMiembrosYLag) {
+    FakeAdmin admin;
+    admin.group_description = nexus::GroupDescription{
+        .group_id = "g1",
+        .state = "Stable",
+        .generation = 2,
+        .leader_id = "m-0",
+        .members = {nexus::GroupMemberInfo{.member_id = "m-0", .subscription_bytes = 12}},
+        .offsets = {nexus::GroupPartitionOffset{.topic = "orders",
+                                                .partition = 0,
+                                                .committed_offset = 5,
+                                                .high_watermark = 9,
+                                                .lag = 4}}};
+    const nexus::RestGateway gateway{admin, nullptr};
+    const auto response =
+        run_handle(gateway, make_request(nexus::HttpMethod::Get, "/api/v1/groups/g1"), 0);
+    EXPECT_EQ(response.status, 200);
+    EXPECT_NE(response.body.find(R"("groupId":"g1")"), std::string::npos);
+    EXPECT_NE(response.body.find(R"("leaderId":"m-0")"), std::string::npos);
+    EXPECT_NE(response.body.find(R"("memberId":"m-0")"), std::string::npos);
+    EXPECT_NE(response.body.find(R"("committedOffset":5)"), std::string::npos);
+    EXPECT_NE(response.body.find(R"("lag":4)"), std::string::npos);
+}
+
+TEST(RestGateway, DescribeGroup_Inexistente_404) {
+    FakeAdmin admin;
+    admin.describe_group_fails = true;
+    const nexus::RestGateway gateway{admin, nullptr};
+    const auto response =
+        run_handle(gateway, make_request(nexus::HttpMethod::Get, "/api/v1/groups/nope"), 0);
+    EXPECT_EQ(response.status, 404);
+}
+
+TEST(RestGateway, DescribeGroup_MetodoNoGet_405) {
+    FakeAdmin admin;
+    const nexus::RestGateway gateway{admin, nullptr};
+    const auto response =
+        run_handle(gateway, make_request(nexus::HttpMethod::Delete, "/api/v1/groups/g1"), 0);
+    EXPECT_EQ(response.status, 405);
 }
 
 TEST(RestGateway, Auth_SinToken_401) {

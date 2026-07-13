@@ -4,6 +4,8 @@
 
 #include "broker/offset_manager.hpp"
 
+#include <algorithm>
+#include <tuple>
 #include <utility>
 
 namespace nexus {
@@ -23,6 +25,20 @@ expected<Offset> OffsetManager::fetch(std::string_view group, std::string_view t
         return make_error(ErrorCode::NotFound, "el grupo no ha confirmado offset en esa partición");
     }
     return it->second.offset;
+}
+
+std::vector<GroupOffsetEntry> OffsetManager::list_for_group(std::string_view group) const {
+    std::vector<GroupOffsetEntry> out;
+    for (const auto& [key, entry] : commits_) {
+        if (key.group == group) {
+            out.push_back(GroupOffsetEntry{
+                .topic = key.topic, .partition = key.partition, .offset = entry.offset});
+        }
+    }
+    std::ranges::sort(out, {}, [](const GroupOffsetEntry& e) {
+        return std::tie(e.topic, e.partition);
+    });
+    return out;
 }
 
 }  // namespace nexus

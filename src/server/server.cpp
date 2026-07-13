@@ -15,7 +15,9 @@
 
 #include "broker/consumer_group.hpp"
 #include "broker/group_coordinator.hpp"
+#include "broker/partition_base.hpp"
 #include "cluster/raft_receiver.hpp"
+#include "common/fnv1a.hpp"
 #include "consensus/raft_carrier.hpp"
 #if defined(_WIN32)
 #include "io/iocp_backend.hpp"  // factoría de proactor en Windows (ADR-0023/0028)
@@ -203,8 +205,9 @@ Server::Server(Config config, ReactorPool::ProactorFactory proactor_factory)
     // El admin (REST) opera sobre el manager del núcleo 0 para las lecturas locales (describe/list
     // de topics, con metadatos completos en cada núcleo); crear/borrar topic se propaga a todos los
     // núcleos por paso de mensajes una vez cableado (`bind_cluster`, ADR-0026).
-    AdminApi& api = admin_api_.emplace(catalog_.manager(0), config_.node_id,
-                                       [this](Page page) { return list_groups(page); });
+    AdminApi& api = admin_api_.emplace(
+        catalog_.manager(0), config_.node_id, [this](Page page) { return list_groups(page); },
+        [this](std::string group_id) { return describe_group(std::move(group_id)); });
     RestGateway& rest = rest_.emplace(api, verifier);
     admin_router_.emplace(rest, health_, metrics_);
     if (config_.min_free_disk_bytes > 0) {
@@ -249,6 +252,88 @@ task<std::vector<GroupSummary>> Server::list_groups(Page page) {
     co_return std::vector<GroupSummary>{
         std::make_move_iterator(summaries.begin() + static_cast<std::ptrdiff_t>(offset)),
         std::make_move_iterator(summaries.begin() + static_cast<std::ptrdiff_t>(end))};
+}
+
+task<std::int64_t> Server::partition_high_watermark(std::string topic, PartitionId pid) {
+    const auto cores = static_cast<std::size_t>(config_.num_reactors);
+    const int owner = static_cast<int>(static_cast<std::size_t>(pid) % cores);
+    auto read = [this, owner, topic = std::move(topic), pid]() -> std::int64_t {
+        Topic* found = catalog_.manager(owner).get(topic);
+        if (found == nullptr) {
+            return 0;
+        }
+        const PartitionBase* part = found->partition(pid);
+        return part == nullptr ? 0 : part->high_watermark();
+    };
+    if (partition_router_) {
+        Reactor& self = *main_reactor_.load(std::memory_order_acquire);
+        co_return co_await call_on(self, partition_router_->reactor(owner), std::move(read));
+    }
+    co_return read();
+}
+
+task<expected<GroupDescription>> Server::describe_group(std::string group_id) {
+    // El grupo vive en un único núcleo coordinador (`fnv1a_64(group_id) % N`, ADR-0026): se lee ahí
+    // (más barato que agregar). El admin se sirve en el núcleo 0; con N=1 el `call_on` es local.
+    const auto cores = static_cast<std::uint64_t>(group_catalog_.core_count());
+    const auto owner = static_cast<int>(fnv1a_64(group_id) % cores);
+
+    // Membresía + offsets confirmados del grupo, leídos en su núcleo coordinador (reactor-local).
+    struct GroupData {
+        bool found = false;
+        std::string state;
+        std::int32_t generation = 0;
+        std::string leader_id;
+        std::vector<GroupMemberInfo> members;
+        std::vector<GroupOffsetEntry> offsets;
+    };
+    auto read_group = [this, owner, group_id]() -> GroupData {
+        GroupData data;
+        ConsumerGroup* group = group_catalog_.groups(owner).find(group_id);
+        if (group == nullptr) {
+            return data;  // grupo inexistente en su núcleo coordinador.
+        }
+        data.found = true;
+        data.state = std::string{group_state_name(group->state())};
+        data.generation = group->generation();
+        data.leader_id = group->leader_id();
+        for (const MemberInfo& member : group->members()) {
+            data.members.push_back(GroupMemberInfo{
+                .member_id = member.member_id,
+                .subscription_bytes = static_cast<std::int64_t>(member.subscription.size())});
+        }
+        data.offsets = group_catalog_.offsets(owner).list_for_group(group_id);
+        return data;
+    };
+
+    GroupData data;
+    if (partition_router_) {
+        Reactor& self = *main_reactor_.load(std::memory_order_acquire);
+        data = co_await call_on(self, partition_router_->reactor(owner), read_group);
+    } else {
+        data = read_group();
+    }
+    if (!data.found) {
+        co_return make_error(ErrorCode::NotFound, "grupo inexistente: " + group_id);
+    }
+
+    GroupDescription description;
+    description.group_id = group_id;
+    description.state = std::move(data.state);
+    description.generation = data.generation;
+    description.leader_id = std::move(data.leader_id);
+    description.members = std::move(data.members);
+    // Enriquece cada offset con el high-watermark de su partición (dueño = `partition % N`) → lag.
+    for (const GroupOffsetEntry& entry : data.offsets) {
+        const std::int64_t hwm = co_await partition_high_watermark(entry.topic, entry.partition);
+        const std::int64_t lag = hwm > entry.offset ? hwm - entry.offset : 0;
+        description.offsets.push_back(GroupPartitionOffset{.topic = entry.topic,
+                                                           .partition = entry.partition,
+                                                           .committed_offset = entry.offset,
+                                                           .high_watermark = hwm,
+                                                           .lag = lag});
+    }
+    co_return description;
 }
 
 expected<void> Server::create_topic(const std::string& name, std::int32_t partition_count,

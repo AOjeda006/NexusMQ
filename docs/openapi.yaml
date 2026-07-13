@@ -185,6 +185,30 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "405": { $ref: "#/components/responses/Problem" }
 
+  /api/v1/groups/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+        description: Identificador del grupo de consumidores.
+    get:
+      tags: [groups]
+      summary: Describe un grupo (miembros, offsets confirmados y lag).
+      description: >-
+        La asignación de particiones por miembro es un blob opaco del cliente (contrato
+        Kafka) y **no se decodifica**; se expone solo lo estructurado (id de miembro, tamaño
+        de la suscripción). El `lag` de cada partición es `highWatermark - committedOffset`.
+      responses:
+        "200":
+          description: Descripción del grupo.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GroupDescription" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "405": { $ref: "#/components/responses/Problem" }
+
 components:
   securitySchemes:
     bearerAuth:
