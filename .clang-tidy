@@ -12,6 +12,13 @@
 #    thread-per-core las corrutinas reciben referencias a objetos REACTOR-LOCAL
 #    (Proactor, Socket, Buffer) que las sobreviven por construcción; Proactor es
 #    abstracto y no puede pasarse por valor. La referencia es correcta y segura.
+#
+# Desactivado por chocar con una convención de proyecto (check nuevo de clang-tidy 21):
+#  - readability-use-concise-preprocessor-directives: el proyecto usa de forma
+#    uniforme `#if defined(X)` / `#if !defined(X)` para las guardas de plataforma
+#    (más algunas compuestas `#if defined(A) && defined(B)` que este check ni
+#    siquiera puede simplificar). Reescribir a `#ifdef`/`#ifndef` rompería esa
+#    consistencia sin ganancia real; se conserva la convención (ver CLAUDE.md).
 ---
 Checks: >
   -*,
@@ -37,6 +44,7 @@ Checks: >
   -cppcoreguidelines-pro-type-union-access,
   -cppcoreguidelines-avoid-reference-coroutine-parameters,
   -readability-convert-member-functions-to-static,
+  -readability-use-concise-preprocessor-directives,
   -portability-avoid-pragma-once
 
 WarningsAsErrors: '*'
