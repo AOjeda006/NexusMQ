@@ -39,6 +39,88 @@ private:
     std::filesystem::path path_;
 };
 
+// Batch no idempotente de un record con `payload_len` bytes (rueda segmentos con segment_bytes bajo).
+nexus::RecordBatch make_batch(std::size_t payload_len) {
+    nexus::RecordBatchHeader header;
+    header.producer_id = -1;
+    header.producer_epoch = 0;
+    header.base_sequence = -1;
+    header.record_count = 1;
+    return nexus::RecordBatch{header, std::vector<std::byte>(payload_len, std::byte{0xCD})};
+}
+
+// TopicConfig con segmentos pequeños (rota pronto) y la retención dada.
+nexus::TopicConfig retention_config(std::int64_t retention_bytes, std::int64_t retention_ms) {
+    nexus::TopicConfig cfg;
+    cfg.segment_bytes = 100;  // rota tras superar 100 bytes
+    cfg.retention_bytes = retention_bytes;
+    cfg.retention_ms = retention_ms;
+    return cfg;
+}
+
+// Crea el topic, produce 6 batches en la partición 0 (rueda a >1 segmento) y la devuelve.
+nexus::PartitionBase* topic_with_segments(nexus::TopicManager& manager, const nexus::TopicConfig& cfg) {
+    EXPECT_TRUE(manager.create_topic("t", 1, cfg).has_value());
+    nexus::PartitionBase* part = manager.get("t")->partition(0);
+    EXPECT_NE(part, nullptr);
+    for (int i = 0; i < 6; ++i) {
+        EXPECT_TRUE(part->produce(make_batch(40)).has_value());
+    }
+    EXPECT_GT(part->log().segment_count(), 1U);
+    return part;
+}
+
+TEST(TopicManager, EnforceRetentionAll_PorTamano_ReclamaSegmentosViejos) {
+    TempDir dir{"ret_size"};
+    nexus::TopicManager manager{dir.path()};
+    nexus::PartitionBase* part = topic_with_segments(manager, retention_config(150, -1));
+    const std::size_t segs_before = part->log().segment_count();
+
+    manager.enforce_retention_all();  // la retención por tamaño no usa el reloj.
+
+    EXPECT_LT(part->log().segment_count(), segs_before);  // reclamó los sellados más antiguos.
+    EXPECT_GT(part->log().log_start_offset(), 0);
+}
+
+TEST(TopicManager, EnforceRetentionAll_PorTiempo_ReclamaConRelojInyectado) {
+    TempDir dir{"ret_time"};
+    nexus::TopicManager manager{dir.path()};
+    nexus::PartitionBase* part = topic_with_segments(manager, retention_config(-1, 60000));  // 1 min
+
+    // Reloj inyectado 1 hora en el futuro: los segmentos sellados superan 1 min de antigüedad.
+    const auto future = std::filesystem::file_time_type::clock::now() + std::chrono::hours(1);
+    manager.enforce_retention_all(future);
+
+    EXPECT_GT(part->log().log_start_offset(), 0);  // reclamó los sellados viejos.
+}
+
+TEST(TopicManager, EnforceRetentionAll_DentroDePolitica_NoReclama) {
+    TempDir dir{"ret_within"};
+    nexus::TopicManager manager{dir.path()};
+    nexus::PartitionBase* part =
+        topic_with_segments(manager, retention_config(/*bytes=*/1'000'000, /*ms=*/60000));
+    const std::size_t segs_before = part->log().segment_count();
+
+    // Tamaño holgado y segmentos recientes (reloj actual): dentro de política, no reclama.
+    manager.enforce_retention_all(std::filesystem::file_time_type::clock::now());
+
+    EXPECT_EQ(part->log().segment_count(), segs_before);
+    EXPECT_EQ(part->log().log_start_offset(), 0);
+}
+
+TEST(TopicManager, EnforceRetentionAll_SinPolitica_NoReclama) {
+    TempDir dir{"ret_none"};
+    nexus::TopicManager manager{dir.path()};
+    nexus::PartitionBase* part = topic_with_segments(manager, retention_config(-1, -1));
+    const std::size_t segs_before = part->log().segment_count();
+
+    // Sin política aunque el reloj esté muy avanzado: nada se reclama.
+    manager.enforce_retention_all(std::filesystem::file_time_type::clock::now() + std::chrono::hours(1));
+
+    EXPECT_EQ(part->log().segment_count(), segs_before);
+    EXPECT_EQ(part->log().log_start_offset(), 0);
+}
+
 TEST(TopicManager, CreateTopic_AbreParticionesYQuedaAccesible) {
     TempDir dir{"create"};
     nexus::TopicManager manager{dir.path()};

@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstddef>
+#include <filesystem>
 #include <unordered_map>
 
 #include "broker/partition_base.hpp"
@@ -14,6 +15,7 @@
 #include "common/types.hpp"
 #include "storage/fetch_result.hpp"
 #include "storage/partition_log.hpp"
+#include "storage/retention.hpp"
 
 namespace nexus {
 
@@ -41,6 +43,13 @@ public:
 
     /// Fuerza la durabilidad del log (`fsync`).
     [[nodiscard]] expected<void> sync();
+
+    /// @copydoc PartitionBase::enforce_retention
+    /// @details Mono-nodo: delega en `PartitionLog::enforce_retention` (reclama segmentos sellados).
+    [[nodiscard]] expected<void> enforce_retention(
+        const RetentionPolicy& policy, std::filesystem::file_time_type now) override {
+        return log_.enforce_retention(policy, now);
+    }
 
     /// Frontera visible para los consumidores. 1b: `log_end_offset` (ack local).
     [[nodiscard]] Offset high_watermark() const noexcept override { return log_.log_end_offset(); }

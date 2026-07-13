@@ -280,6 +280,27 @@ std::vector<TopicMetadata> TopicManager::list_metadata() const {
     return result;
 }
 
+void TopicManager::enforce_retention_all(std::filesystem::file_time_type now) {
+    const std::scoped_lock lock{mutex_};
+    for (const auto& [name, topic] : topics_) {
+        const TopicConfig& config = topic->meta().config;
+        if (config.retention_ms < 0 && config.retention_bytes < 0) {
+            continue;  // topic sin política de retención: nada que reclamar.
+        }
+        const RetentionPolicy policy{.retention_bytes = config.retention_bytes,
+                                     .retention_ms = config.retention_ms};
+        for (PartitionId pid = 0; pid < topic->meta().partition_count; ++pid) {
+            PartitionBase* partition = topic->partition(pid);
+            if (partition == nullptr) {
+                continue;  // partición de otro núcleo (sharding ADR-0026) o no abierta.
+            }
+            // Best-effort: un error de E/S en una partición no aborta el barrido de las demás.
+            [[maybe_unused]] const expected<void> reclaimed =
+                partition->enforce_retention(policy, now);
+        }
+    }
+}
+
 std::size_t TopicManager::topic_count() const {
     const std::scoped_lock lock{mutex_};
     return topics_.size();

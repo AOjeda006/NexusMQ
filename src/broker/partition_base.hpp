@@ -6,12 +6,14 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 
 #include "common/error.hpp"
 #include "common/record.hpp"
 #include "common/types.hpp"
 #include "storage/fetch_result.hpp"
 #include "storage/partition_log.hpp"
+#include "storage/retention.hpp"
 
 namespace nexus {
 
@@ -69,6 +71,20 @@ public:
 
     /// @brief Acceso de solo lectura al log subyacente (offsets de inicio/fin, lecturas).
     [[nodiscard]] virtual const PartitionLog& log() const noexcept = 0;
+
+    /// @brief Aplica la retención al log de esta partición: reclama segmentos sellados por
+    ///   tamaño/tiempo (nunca el activo). **No-op por defecto**: las particiones replicadas gestionan
+    ///   su prefijo por **compactación de Raft** ([ADR-0024], sobre el `commit_index`), no por
+    ///   retención directa —borrar segmentos bajo el `RaftLog` rompería sus invariantes—, así que la
+    ///   retención por política solo la aplica `Partition` (mono-nodo).
+    /// @param policy Política de retención derivada de la config **actual** del topic.
+    /// @param now Instante de referencia para la retención por tiempo (se inyecta; ver
+    ///   `PartitionLog::enforce_retention`). REACTOR-LOCAL: se llama en el hilo dueño de la
+    ///   partición.
+    [[nodiscard]] virtual expected<void> enforce_retention(
+        const RetentionPolicy& /*policy*/, std::filesystem::file_time_type /*now*/) {
+        return {};
+    }
 
     /// @brief Reclama @p proto como protocolo de esta partición si aún no tiene dueño, o confirma
     ///   que ya es el suyo. Lo invoca el camino de `produce` **antes** de anexar (P2, ADR-0030).

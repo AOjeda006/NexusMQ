@@ -302,12 +302,12 @@ expected<void> PartitionLog::sync() {
     return {};
 }
 
-expected<void> PartitionLog::enforce_retention(const RetentionPolicy& policy) {
+expected<void> PartitionLog::enforce_retention(const RetentionPolicy& policy,
+                                               std::filesystem::file_time_type now) {
     std::int64_t total = 0;
     for (const auto& seg : segments_) {
         total += static_cast<std::int64_t>(seg->size_bytes());
     }
-    const auto now = std::filesystem::file_time_type::clock::now();
 
     // Borra el segmento local más antiguo mientras sea elegible, preservando siempre el activo. Si
     // hay prefijo **frío** (tier), no se toca el hot set local: los datos más antiguos ya están en

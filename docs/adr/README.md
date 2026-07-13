@@ -46,3 +46,4 @@ con las secciones **Contexto · Decisión · Consecuencias · Alternativas consi
 | [0033](adr-0033-exactly-once-nativo-transacciones.md) | Exactly-once multi-partición nativo (transacciones, coordinador y `read_committed`) | aceptado | 2026-07-12 |
 | [0034](adr-0034-2pc-logueado-recuperable.md) | 2PC logueado y recuperable (reconciliación con la prohibición del 2PC bloqueante) | aceptado | 2026-07-12 |
 | [0035](adr-0035-estado-cluster-raft-rest-admin.md) | Estado de clúster/Raft por la superficie REST admin (`GET /api/v1/cluster`) | aceptado | 2026-07-13 |
+| [0036](adr-0036-aplicacion-retencion-runtime.md) | Aplicación de la retención en runtime (barrido periódico por núcleo) | aceptado | 2026-07-13 |

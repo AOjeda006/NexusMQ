@@ -137,6 +137,18 @@ public:
     /// @brief Devuelve los metadatos de todos los topics (control-plane; admin/observabilidad).
     [[nodiscard]] std::vector<TopicMetadata> list_metadata() const;
 
+    /// @brief Aplica la retención a **todas** las particiones locales no replicadas de este núcleo,
+    ///   derivando la `RetentionPolicy` de la config **actual** de cada topic. Reactor-local.
+    /// @details Tarea de mantenimiento periódica (ADR-0036): recorre los topics de este núcleo y,
+    ///   por cada partición local `Partition` (las réplicas reclaman por compactación de Raft), llama
+    ///   a `PartitionBase::enforce_retention` con la política del topic. Topics sin política
+    ///   (`retention_ms < 0` y `retention_bytes < 0`) se omiten. Reclama por **segmentos sellados
+    ///   enteros** (nunca el activo).
+    /// @param now Instante de referencia para la retención por tiempo (se inyecta; por defecto el
+    ///   reloj de fichero), para pruebas deterministas.
+    void enforce_retention_all(
+        std::filesystem::file_time_type now = std::filesystem::file_time_type::clock::now());
+
     [[nodiscard]] std::size_t topic_count() const;
 
     /// @brief Portadores Raft de las particiones replicadas de este núcleo (para que el reactor

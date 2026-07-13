@@ -238,6 +238,13 @@ private:
     ///   `run` tras arrancar el pool. @p main es el reactor del núcleo 0.
     void start_raft_ticks(Reactor& main);
 
+    /// @brief Registra en cada reactor un temporizador periódico que aplica la retención de sus
+    ///   topics (`TopicManager::enforce_retention_all`), reactor-local (ADR-0036).
+    /// @details Cadencia `kRetentionInterval`. Núcleo 0 inline; núcleos 1..N-1 por su buzón (el
+    ///   conjunto de temporizadores es reactor-local). La retención lee la config **actual** de cada
+    ///   topic, de modo que un `PATCH` posterior surte efecto. @p main es el reactor del núcleo 0.
+    void start_retention_maintenance(Reactor& main);
+
     /// @brief Crea el `RaftTransport` de cada núcleo (sobre su `Proactor`) y lo instala como
     /// sumidero
     ///   de los portadores de ese núcleo, para que la replicación salga por la red a los peers.

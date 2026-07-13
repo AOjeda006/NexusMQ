@@ -45,6 +45,11 @@ constexpr unsigned int kRingDepth = 256;
 /// `AppendEntries`/`InstallSnapshot` con lotes grandes).
 constexpr std::size_t kMaxRaftMessage = std::size_t{16} * 1024 * 1024;
 
+/// Cadencia del barrido de retención por núcleo (ADR-0036). La retención es mantenimiento de fondo
+/// (reclama segmentos sellados enteros), no un plazo estricto: un periodo holgado basta y no compite
+/// con el hot path.
+constexpr std::chrono::seconds kRetentionInterval{30};
+
 /// Factoría por defecto del `Proactor` de cada reactor (plano de control): io_uring en Linux, IOCP
 /// en Windows. Ambos son proactores sobre el mismo puerto `Proactor` (ADR-0023), así que el bucle
 /// del reactor no cambia; la elección es en compilación (ADR-0028).
@@ -458,6 +463,27 @@ void Server::start_raft_ticks(Reactor& main) {
     }
 }
 
+void Server::start_retention_maintenance(Reactor& main) {
+    for (int core = 0; core < config_.num_reactors; ++core) {
+        TopicManager* manager = &catalog_.manager(core);
+        // La edad de retención se mide contra el mtime del segmento: se usa el reloj de fichero (no
+        // el MonoTime del reactor, que es steady_clock y no compara con `last_write_time`).
+        auto tick = [manager](MonoTime /*now*/) {
+            manager->enforce_retention_all(std::filesystem::file_time_type::clock::now());
+        };
+        Reactor& owner = pool_.reactor(core);
+        if (core == 0) {
+            owner.every(kRetentionInterval, std::move(tick));  // núcleo 0: este hilo, registro directo.
+        } else {
+            // Núcleos 1..N-1 corren en su propio hilo: registra el temporizador EN ese hilo por el
+            // buzón (el conjunto de temporizadores del reactor no es thread-safe).
+            main.submit_to(core, [&owner, tick = std::move(tick)]() mutable {
+                owner.every(kRetentionInterval, std::move(tick));
+            });
+        }
+    }
+}
+
 void Server::start_raft_transport(Reactor& main) {
     if (!config_.cluster_port) {
         return;  // sin plano inter-nodo: los portadores quedan como votante único (sumidero nulo).
@@ -555,6 +581,7 @@ void Server::run() {
     // por la red a los peers (ADR-0025).
     start_raft_transport(main);
     start_raft_ticks(main);
+    start_retention_maintenance(main);
 
     // listener_/router_ siempre presentes en start(); la guarda satisface a clang-tidy y es más
     // segura que derefar el `optional` a ciegas.

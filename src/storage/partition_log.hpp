@@ -85,10 +85,16 @@ public:
 
     /// @brief Aplica la retención: borra los segmentos sellados más antiguos elegibles por
     ///   tamaño o tiempo, **nunca el activo**; avanza `log_start_offset`.
+    /// @param policy Política de retención (por tamaño y/o tiempo).
+    /// @param now Instante de referencia para la retención **por tiempo** (edad = @p now − mtime del
+    ///   `.log`). Se **inyecta** (por defecto, el reloj de fichero) para pruebas deterministas; la
+    ///   retención por tamaño no lo usa.
     /// @note Opera sobre los segmentos **locales**; los ya descargados al tier (fríos) se conservan
     ///   ahí (el offload es precisamente para retención larga). No mueve `log_start_offset` por
     ///   debajo del prefijo frío.
-    [[nodiscard]] expected<void> enforce_retention(const RetentionPolicy& policy);
+    [[nodiscard]] expected<void> enforce_retention(
+        const RetentionPolicy& policy,
+        std::filesystem::file_time_type now = std::filesystem::file_time_type::clock::now());
 
     /// @brief Descarga al *tier* (ADR-0032) los segmentos **sellados** locales y reclama su
     /// espacio.
