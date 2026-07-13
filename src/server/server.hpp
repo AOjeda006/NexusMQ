@@ -103,7 +103,7 @@ public:
         struct TlsConfig {
             std::filesystem::path cert_chain;   ///< Cadena de certificado del servidor (PEM).
             std::filesystem::path private_key;  ///< Clave privada del servidor (PEM).
-            std::filesystem::path client_ca;    ///< CA del cert de cliente (PEM); vacío = sin mTLS.
+            std::filesystem::path client_ca;    ///< CA del cert de cliente (PEM), para mTLS.
 
             /// @brief ¿Se ha solicitado TLS? (certificado y clave presentes).
             [[nodiscard]] bool enabled() const noexcept {

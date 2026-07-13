@@ -219,10 +219,11 @@ expected<FetchResult> Segment::read(Offset offset, std::size_t max_bytes) const 
         if (!header) {
             return std::unexpected(header.error());
         }
-        if (!*header) {
+        const std::optional<BlockHeader>& block = *header;
+        if (!block.has_value()) {
             break;  // cola incompleta (no debería ocurrir en un segmento íntegro).
         }
-        const BlockHeader info = **header;
+        const BlockHeader info = *block;
         const std::size_t total = info.on_disk_size;
         if (position + total > size_bytes_) {
             break;  // bloque truncado en disco.
@@ -257,10 +258,11 @@ expected<Offset> Segment::recover() {
         if (!header) {
             return std::unexpected(header.error());
         }
-        if (!*header) {
+        const std::optional<BlockHeader>& block = *header;
+        if (!block.has_value()) {
             break;  // cabecera incompleta: cola torn.
         }
-        const BlockHeader info = **header;
+        const BlockHeader info = *block;
         const std::size_t total = info.on_disk_size;
         if (valid_end + total > size_bytes_) {
             break;  // bloque truncado al final.
@@ -304,10 +306,11 @@ expected<std::size_t> Segment::position_of(Offset target) const {
         if (!header) {
             return std::unexpected(header.error());
         }
-        if (!*header) {
+        const std::optional<BlockHeader>& block = *header;
+        if (!block.has_value()) {
             break;  // cabecera incompleta: trata el resto como inexistente.
         }
-        const BlockHeader info = **header;
+        const BlockHeader info = *block;
         if (info.base_offset == target) {
             return position;
         }
@@ -329,10 +332,11 @@ expected<void> Segment::rebuild_index() {
         if (!header) {
             return std::unexpected(header.error());
         }
-        if (!*header) {
+        const std::optional<BlockHeader>& block = *header;
+        if (!block.has_value()) {
             break;
         }
-        const BlockHeader info = **header;
+        const BlockHeader info = *block;
         index_.maybe_append(info.base_offset, static_cast<std::uint32_t>(scan), info.on_disk_size);
         scan += info.on_disk_size;
     }
