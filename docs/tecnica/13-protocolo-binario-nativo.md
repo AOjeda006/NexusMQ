@@ -58,6 +58,16 @@ Sobre este framing se construyen los dos flujos calientes del plano de datos. El
 
 Las respuestas siempre incluyen el `errorCode:i16` del contrato externo de errores; su taxonomía y la traducción en el borde se tratan en el [capítulo 16](./16-modelo-errores-wire-codes.md). Las operaciones de administración (`CreateTopic`/`DeleteTopic`) devuelven igualmente su `errorCode:i16`; en particular, `CreateTopic` con un **nombre inválido** (vacío, con espacios o separadores de ruta, `.`/`..`, o de más de 249 caracteres) se rechaza con `InvalidRequest` **sin crear ficheros**, aplicando la misma validación centralizada (`TopicManager::validate_topic_name`) que la API REST.
 
+## 13.6b. API transaccional (exactly-once nativo)
+
+La superficie **nativa** —no el subset Kafka ([ADR-0030](../adr/adr-0030-particion-mono-protocolo.md))— expone las transacciones multi-partición ([ADR-0033](../adr/adr-0033-exactly-once-nativo-transacciones.md)) como un pequeño grupo de operaciones sobre el mismo framing:
+
+- **`InitProducerId`** (`initTransactions`): registra un `transactional.id` y devuelve su identidad (`producer_id` + época). Reiniciar sube la época, expulsando (*fencing*) a la encarnación anterior.
+- **`AddPartitionsToTxn`**: declara qué particiones participan en la transacción abierta.
+- **`EndTxn`** (COMMIT/ABORT): decide el fin de la transacción; el coordinador escribe los marcadores de control en cada participante (ver [capítulo 10 §10.8](./10-replicacion-y-consenso.md)).
+
+En el lado de lectura, `Fetch` acepta un **nivel de aislamiento**: `read_uncommitted` (0) entrega hasta el *high-watermark* como siempre; `read_committed` (1) entrega solo hasta el **LSO** y filtra los records abortados y los marcadores (§9.8). El `Produce` de un batch transaccional arrastra `producer_id`/época/*flag* transaccional en la cabecera del `RecordBatch`, reutilizando la idempotencia de `ProducerSession`. El camino no transaccional es idéntico al de hoy. Formatos en [`../protocol.md`](../protocol.md).
+
 ## 13.7. Seguridad del transporte
 
 El plano de datos puede terminar **TLS 1.3** (y **mTLS** intra-clúster) por delante del framing (ADR-0019): el protocolo binario es idéntico, cifrado o en claro. El puente TLS sobre el proactor asíncrono se trata en el [capítulo 11 (Ingress)](./11-ingress.md) y el [capítulo 27 (Seguridad)](./27-seguridad.md).

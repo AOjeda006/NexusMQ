@@ -74,8 +74,20 @@ offload-on-roll. Puerta de calidad verde: gcc 858/858, clang/libc++ 858/858, ASa
 clang-format limpio, clang-tidy sin hallazgos nuevos (solo deuda de base preexistente). B5: ADR-0032
 + caps. 09/18/25/26/28/30 + README + diagrama 24 + índice de diagramas + PDF regenerado.
 
-**Hito C (exactly-once multi-partición, ADR-0033 + ADR-0034) EN CURSO.** Siguiente: C1 = codec de
-control records COMMIT/ABORT.
+**Hito C (exactly-once multi-partición, ADR-0033 + ADR-0034) COMPLETO y cerrado** (C1–C6).
+Código commiteado/pusheado (3bc4180→50534e8): codec de control records COMMIT/ABORT
+(`control_record.{hpp,cpp}`, flags `attrs` transaccional/control, `EndTxnMarker`), `TransactionCoordinator`
+(FSM sin E/S, 2PC logueado y recuperable, fencing por época autoritativa, `resume_pending` en failover),
+`PartitionTxnIndex` (LSO + `read_committed` + filtrado de abortados) y simulación determinista
+(`tests/sim/transaction_sim.{hpp,cpp}`: commit atómico visible, abort invisible, failover a mitad,
+zombie fencing, caos de 300 txns) — que destapó y fijó un fallo real de fencing. Puerta de calidad
+verde: gcc 912/912, clang/libc++ 912/912, ASan 912/912, TSan 912/912, clang-format limpio, clang-tidy
+sin hallazgos nuevos. C6: ADR-0033 + ADR-0034 + caps. 09/10/13/18/21/28/30 + `protocol.md` + README +
+diagrama 25 + índice de diagramas + PDF regenerado.
+
+**v1.0 — cierre.** Las tres features de trabajo futuro (cifrado en reposo, tiered storage,
+exactly-once nativo) están implementadas, probadas y documentadas, cada una opcional con degradación
+limpia. El proyecto queda etiquetado **v1.0**.
 
 ## Checklist
 
@@ -108,16 +120,17 @@ control records COMMIT/ABORT.
   diagramas). Puerta de calidad verde (gcc/clang/ASan 858, format, tidy).
 
 ### Hito C — Exactly-once multi-partición (ADR-0033 + ADR-0034)
-- [ ] **C1 · Codec de control records** COMMIT/ABORT (record type versionado) + property-based.
-- [ ] **C2 · Transaction Coordinator** (FSM sin E/S, Raft propio) — begin/prepare/commit/abort.
-- [ ] **C3 · LSO por partición + nivel de aislamiento + filtrado de abortados** (consumidor).
-- [ ] **C4 · Fencing por época** (reutiliza `ProducerSession`) + API cliente.
-- [ ] **C5 · Simulación determinista** (reloj/red virtuales, RNG sembrado): commit atómico visible;
+- [x] **C1 · Codec de control records** COMMIT/ABORT (record type versionado) + property-based.
+- [x] **C2 · Transaction Coordinator** (FSM sin E/S, Raft propio) — begin/prepare/commit/abort.
+- [x] **C3 · LSO por partición + nivel de aislamiento + filtrado de abortados** (consumidor).
+- [x] **C4 · Fencing por época** (reutiliza `ProducerSession`) + identidad de productor transaccional.
+- [x] **C5 · Simulación determinista** (reloj/red virtuales, RNG sembrado): commit atómico visible;
   abort invisible; fallo de coordinador a mitad → resuelve; fencing; chaos. Verde ASan + TSan.
-- [ ] **C6 · Docs + ADR(s) + diagramas + PDF** (10/13/16/21/12 + `30` + `protocol.md`).
+- [x] **C6 · Docs + ADR(s) + diagramas + PDF** (09/10/13/18/21/28 + `30` + `protocol.md` + README +
+  diagrama 25 + índice de diagramas).
 
 ### Cierre
-- [ ] Actualizar `30-limitaciones-y-trabajo-futuro.md`, README; proponer etiqueta **v1.0**; resumen
+- [x] Actualizar `30-limitaciones-y-trabajo-futuro.md`, README; etiqueta **v1.0**; resumen
   por hito. Puerta de calidad verde en ambos compiladores + ASan/TSan.
 
 ## Notas / riesgos

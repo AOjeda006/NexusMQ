@@ -39,6 +39,7 @@
 | 13 | Dos espacios de coordenadas (índice vs offset) | diagram | [13-espacios-coordenadas.md](../diagramas/13-espacios-coordenadas.md) |
 | 14 | Snapshot / InstallSnapshot | sequence | [14-snapshot-installsnapshot.md](../diagramas/14-snapshot-installsnapshot.md) |
 | 15 | Planos de red (cliente vs inter-nodo Raft) | flow | [15-planos-red.md](../diagramas/15-planos-red.md) |
+| 25 | Transacciones y 2PC logueado (exactly-once nativo) | state/sequence | [25-transacciones-2pc.md](../diagramas/25-transacciones-2pc.md) |
 
 ## Protocolos
 

@@ -11,10 +11,11 @@
 **Responsabilidad:** tipos y utilidades transversales sin dependencias internas.
 **Tipos clave:** `Bytes`/`span` (vistas no propietarias), `Error` y `expected<T>`, `Record`
 y `RecordCodec`, `crc32c`, `varint`/zigzag, `base64`, `sha256`, `fnv1a`, `compression`
-(LZ4/Zstd opcional), `task<T>` (corutinas), `move_only_function`.
+(LZ4/Zstd opcional), `task<T>` (corutinas), `move_only_function`; control records de
+transacción (`ControlRecordType`, `EndTxnMarker`; [ADR-0033](../adr/adr-0033-exactly-once-nativo-transacciones.md)).
 **Afinidad:** mayormente **INMUTABLE**/valor puro; `task<T>` es REACTOR-LOCAL en uso.
 **Invariantes:** `crc32c` coincide con el hardware (SSE4.2) y el *fallback* software; el
-codec de `Record` es *round-trip* (`decode(encode(x)) == x`).
+codec de `Record` y el de los marcadores de control son *round-trip* (`decode(encode(x)) == x`).
 
 ## nexus-io
 **Responsabilidad:** I/O asíncrona por *completions* (el proactor) y recursos del SO.
@@ -81,11 +82,15 @@ plano separado del de cliente ([ADR-0025](../adr/adr-0025-activacion-raft-multir
 **Responsabilidad:** dominio del broker: topics, particiones, grupos, offsets, enrutado.
 **Tipos clave:** `Topic`, `Partition`, `PartitionBase`, `ReplicatedPartition`, `TopicCatalog`,
 `TopicManager`, `TopicCluster`, `ConsumerGroup`, `GroupCatalog`, `GroupCoordinator`,
-`OffsetManager`, `ProducerSession` (idempotencia), `CreditWindow` (backpressure), `RequestRouter`.
+`OffsetManager`, `ProducerSession` (idempotencia), `CreditWindow` (backpressure), `RequestRouter`;
+transacciones (`TransactionCoordinator`, `ProducerIdentity`, `TopicPartition`, `PartitionTxnIndex`,
+`IsolationLevel`, `AbortedTxn`; [ADR-0033](../adr/adr-0033-exactly-once-nativo-transacciones.md)).
 **Afinidad:** **REACTOR-LOCAL** por partición/grupo (cada uno tiene un único dueño;
 ver [sharding](./07-concurrencia.md)).
 **Invariantes:** una partición es la unidad de serialización (estilo *actor*); `leaderEpoch`
-descarta líderes obsoletos; secuencia idempotente por `producerId` (duplicado/hueco).
+descarta líderes obsoletos; secuencia idempotente por `producerId` (duplicado/hueco); el
+`TransactionCoordinator` registra la decisión (`Prepare*`) antes de escribir marcadores (2PC
+recuperable) y el LSO nunca supera el *high-watermark*.
 
 ## nexus-kafka
 **Responsabilidad:** subconjunto Kafka-compatible (interop `kcat`).

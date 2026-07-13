@@ -36,6 +36,16 @@ particiones de red de forma **repetible**. Así el consenso cumple **FIRST**
 (determinismo/independencia) sin *flakiness*: una prueba *flaky* es un bug —de la prueba o del
 diseño—, no algo tolerable. El no-determinismo se controla **inyectándolo**.
 
+El mismo patrón cubre el **exactly-once transaccional**
+([ADR-0033](../adr/adr-0033-exactly-once-nativo-transacciones.md)): `tests/sim/transaction_sim.hpp`
+monta el `TransactionCoordinator` (FSM sin E/S) sobre particiones en memoria con reloj virtual y RNG
+sembrado, y ejercita el 2PC de punta a punta —init/begin/produce/commit/abort → marcadores →
+visibilidad `read_committed`— con **entrega parcial de marcadores** y **failover del coordinador**.
+Los escenarios verifican las invariantes de atomicidad (un commit hace visible **toda** la data; un
+abort, **ninguna**; una transacción abierta queda retenida por el LSO) e incluyen un **caos** de 300
+transacciones con commit/abort aleatorios y failovers, donde al final se ve **exactamente** el
+conjunto confirmado. Este arnés destapó y fijó un fallo real de *fencing* en el coordinador.
+
 ## 21.4 Crash y chaos
 
 - **Crash testing** (`tests/crash/`): se mata el proceso a mitad de escritura (`kill -9`) y se

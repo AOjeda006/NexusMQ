@@ -92,3 +92,22 @@ partición de datos sin quórum **deja de aceptar escrituras** (no diverge); en 
 normal, las escrituras esperan al quórum (`acks=quorum`), priorizando consistencia sobre
 latencia. La lectura por defecto es desde el **líder** hasta el *high-watermark*; las lecturas
 *stale* desde *followers* son *opt-in* y documentadas.
+
+## 10.8 Coordinador de transacciones (Raft propio)
+
+El **exactly-once multi-partición** ([ADR-0033](../adr/adr-0033-exactly-once-nativo-transacciones.md))
+añade un `TransactionCoordinator`: una **máquina de estados sin E/S** (mismo patrón que `RaftNode`,
+§10.3, y `GroupCoordinator`) que conduce el *two-phase commit* de una transacción. Consume
+`init_producer_id`/`begin`/`add_partitions`/`commit`/`abort`/`on_marker_written`/`tick` con el `now`
+inyectado y produce **órdenes de marcador** que el portador escribe en cada partición participante.
+Su estado (por transacción: estado FSM, participantes, época) se replica por su **propio grupo Raft**
+—«otro grupo Raft» sobre la misma infraestructura—, lo que hace el 2PC **recuperable**.
+
+El 2PC es **logueado y recuperable, no bloqueante**
+([ADR-0034](../adr/adr-0034-2pc-logueado-recuperable.md)): la decisión (`PrepareCommit`/`PrepareAbort`)
+se **registra en Raft antes** de escribir ningún marcador; un failover del coordinador **re-conduce**
+la decisión ya registrada (`resume_pending`) en vez de dejar a los participantes bloqueados. Cada
+marcador se sella con la **época del coordinador** para descartar los de un líder obsoleto, y un
+*timeout* (`tick`) aborta las transacciones colgadas, liberando el LSO (§9.8). Coherente con la
+postura **CP** (§10.7): cerrar transacciones nuevas exige quórum en el grupo del coordinador. El flujo
+se ilustra en el [diagrama 25](../diagramas/25-transacciones-2pc.md).

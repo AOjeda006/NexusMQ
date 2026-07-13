@@ -117,6 +117,57 @@ comprimido—; solo el cliente lo descomprime al consumir. El bloque comprimido 
 original** como prefijo (u32 LE) para acotar la descompresión (defensa anti *decompression bomb*).
 Ver [`src/common/compression.hpp`](../src/common/compression.hpp).
 
+## Transacciones y marcadores de control (exactly-once nativo)
+
+El *exactly-once* multi-partición (ADR-0033 / ADR-0034) se apoya en dos bits altos de `attrs`
+—**disjuntos** del códec de compresión (bits bajos)— y en un **batch de control** que el
+coordinador de transacciones escribe en cada partición participante para cerrar la transacción.
+El formato de estos elementos es contrato *as-built*; la fuente es
+[`src/common/control_record.hpp`](../src/common/control_record.hpp).
+
+### Flags transaccionales de `attrs`
+
+| Bit      | Nombre          | Significado                                                       |
+| -------- | --------------- | ---------------------------------------------------------------- |
+| `0x0010` | transactional   | El batch pertenece a una transacción abierta; su visibilidad depende de su marcador. |
+| `0x0020` | control         | Batch de **control**: no lleva datos de usuario, sino un único marcador COMMIT/ABORT. |
+
+Un batch transaccional de datos arrastra además `producer_id` + época en la cabecera del batch,
+reutilizando la idempotencia de `ProducerSession` (dedup por secuencia + *fencing* por época).
+
+### Batch de control (marcador de fin de transacción)
+
+Un batch de control lleva `record_count = 1`, sin comprimir, con los bits `control`+`transactional`
+fijados. Su único record codifica un `EndTxnMarker` en clave/valor:
+
+| Parte  | Layout                                | Tamaño  |
+| ------ | ------------------------------------- | ------- |
+| clave  | `version:i16 \| type:i16`             | 4 bytes |
+| valor  | `version:i16 \| coordinator_epoch:i32`| 6 bytes |
+
+- **`type`**: `0` = `Abort`, `1` = `Commit` (convención de wire compatible con Kafka).
+- **`coordinator_epoch`**: época de liderazgo del coordinador emisor; la partición **descarta**
+  marcadores de un coordinador obsoleto (*fencing* en el failover).
+- **`version`**: `0` (reservado para evolución del formato); un decodificador defensivo devuelve
+  `Corrupt` ante tamaños/tipo inválidos y `Unsupported` ante una versión desconocida.
+
+### Aislamiento de lectura y LSO
+
+En lectura, la superficie nativa distingue un **nivel de aislamiento**: `read_uncommitted` (0)
+entrega hasta el *high-watermark*, como siempre; `read_committed` (1) entrega solo hasta el **LSO**
+(*last stable offset* = mínimo *first-offset* de transacción abierta, acotado por el HWM) y **filtra**
+los records abortados y los propios marcadores de control. El LSO y el conjunto de rangos abortados
+los mantiene `PartitionTxnIndex` en el broker (§9.8 de la
+[documentación técnica](tecnica/09-almacenamiento.md)).
+
+> **Estado *as-built*.** El formato de batch de control, los flags de `attrs`, el filtrado
+> `read_committed`/LSO y el `TransactionCoordinator` (2PC logueado y recuperable) están
+> implementados y probados por simulación determinista. La **orquestación** (`InitProducerId`,
+> `AddPartitionsToTxn`, `EndTxn`, nivel de aislamiento en `Fetch`) vive hoy en la capa de
+> coordinador/broker; **no** hay todavía `ApiKey` de wire dedicadas en el enum de
+> [`src/protocol/frame.hpp`](../src/protocol/frame.hpp): cablearlas al framing nativo es el
+> paso de exposición pendiente. Este documento no inventa valores de `ApiKey` no implementados.
+
 ## Seguridad del transporte
 
 El plano de datos puede terminar **TLS 1.3** (y **mTLS** intra-clúster) por delante del framing

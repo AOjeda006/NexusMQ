@@ -1,6 +1,6 @@
 # 28. Registro de decisiones (ADR)
 
-Este capítulo es la puerta de entrada al **registro de decisiones de arquitectura** (ADR) de NexusMQ: explica qué es un ADR, la regla de inmutabilidad que rige su ciclo de vida, y ofrece el **índice completo** de los 32 ADR del proyecto, agrupados por tema. Las decisiones íntegras viven en el directorio [`../adr/`](../adr/), una por fichero.
+Este capítulo es la puerta de entrada al **registro de decisiones de arquitectura** (ADR) de NexusMQ: explica qué es un ADR, la regla de inmutabilidad que rige su ciclo de vida, y ofrece el **índice completo** de los 34 ADR del proyecto, agrupados por tema. Las decisiones íntegras viven en el directorio [`../adr/`](../adr/), una por fichero.
 
 ## 28.1 Qué es un ADR
 
@@ -20,7 +20,7 @@ En NexusMQ esto produce una **cadena de reemplazo** visible en el backend de I/O
 
 Cada eslabón cae cuando una premisa se demuestra falsa: ADR-0021 asumía que el backend «no era verificable en este entorno»; resultó que el contenedor **sí** podía instalar el cross-compiler MinGW-w64 (ADR-0022), y finalmente se **ejecutó** en una máquina Windows real (ADR-0023). La cadena documenta esa progresión sin reescribir el pasado.
 
-## 28.3 Índice de los 32 ADR
+## 28.3 Índice de los 34 ADR
 
 | ADR | Título | Estado | Fecha |
 |-----|--------|--------|-------|
@@ -56,10 +56,12 @@ Cada eslabón cae cuando una premisa se demuestra falsa: ADR-0021 asumía que el
 | [0030](../adr/adr-0030-particion-mono-protocolo.md) | Partición mono-protocolo — guarda cross-protocol nativo/Kafka | aceptado | 2026-07-09 |
 | [0031](../adr/adr-0031-cifrado-en-reposo-aes-gcm.md) | Cifrado en reposo del log con AES-256-GCM y framing AEAD por bloque | aceptado | 2026-07-12 |
 | [0032](../adr/adr-0032-tiered-storage-puerto-y-tier-local.md) | Almacenamiento por niveles — puerto `StorageTier` y tier local | aceptado | 2026-07-12 |
+| [0033](../adr/adr-0033-exactly-once-nativo-transacciones.md) | Exactly-once multi-partición nativo (transacciones, coordinador y `read_committed`) | aceptado | 2026-07-12 |
+| [0034](../adr/adr-0034-2pc-logueado-recuperable.md) | 2PC logueado y recuperable (reconciliación con la prohibición del 2PC bloqueante) | aceptado | 2026-07-12 |
 
 ## 28.4 ADR agrupados por tema
 
-Los 32 ADR cubren nueve áreas. Cada grupo se resume en una frase; los números enlazan al fichero correspondiente en [`../adr/`](../adr/).
+Los 34 ADR cubren diez áreas. Cada grupo se resume en una frase; los números enlazan al fichero correspondiente en [`../adr/`](../adr/).
 
 ### Plataforma e I/O
 
@@ -96,6 +98,12 @@ El borde del sistema y la protección de datos: *ingress* en dos modos (nativo d
 [0032](../adr/adr-0032-tiered-storage-puerto-y-tier-local.md).
 
 La retención larga a bajo coste: el **almacenamiento por niveles** (*tiered storage*) descarga los segmentos sellados fríos a un puerto `StorageTier` (con adaptador local por defecto e interfaz orientada a fichero, lista para un adaptador S3 futuro), reclama el disco local **solo tras confirmar** la subida y **rehidrata** de forma transparente al leer un offset frío, interoperando con el cifrado en reposo (sube el *ciphertext* tal cual).
+
+### Transacciones
+
+[0033](../adr/adr-0033-exactly-once-nativo-transacciones.md), [0034](../adr/adr-0034-2pc-logueado-recuperable.md).
+
+El **exactly-once multi-partición** (nativo, *effectively-once* honesto): marcadores de control COMMIT/ABORT, un **coordinador de transacciones** como FSM sin E/S con su propio grupo Raft, el **LSO** por partición y el aislamiento `read_committed` (con filtrado de abortados), y el *fencing* por época de productores y coordinadores. El 2PC que lo sostiene es **logueado y recuperable** (la decisión se registra en Raft antes de escribir marcadores; un failover la re-conduce), reconciliando la atomicidad multi-partición con la prohibición del 2PC en memoria bloqueante.
 
 ### Observabilidad
 

@@ -12,8 +12,14 @@
   keys* versionadas ni el *consumer group protocol* completo
   ([ADR-0004](../adr/adr-0004-protocolo-binario-propio-gateway-rest.md),
   [ADR-0029](../adr/adr-0029-adaptador-kafka-async-cross-core.md)).
-- **Exactly-once transaccional entre particiones.** Sí se contempla **productor
-  idempotente** (*effectively-once* por partición); no hay transacciones multi-partición.
+- **Transacciones en el subset Kafka y *exactly-once* de entrega literal.** El
+  *exactly-once* multi-partición **sí** está implementado en la **superficie nativa**
+  (transacciones con coordinador, marcadores de control, LSO y `read_committed`,
+  [ADR-0033](../adr/adr-0033-exactly-once-nativo-transacciones.md) /
+  [ADR-0034](../adr/adr-0034-2pc-logueado-recuperable.md)); es *effectively-once* **honesto**
+  (deduplicación + visibilidad atómica), no una entrega *exactly-once* literal (inalcanzable
+  ante fallos arbitrarios). Queda fuera: exponer transacciones en el **subset Kafka** (coherente
+  con la partición mono-protocolo, ADR-0030).
 - **Adaptador S3 real y offload asíncrono del tiered storage.** El **tiered storage sí** está
   implementado (puerto `StorageTier` + adaptador local, offload de segmentos sellados y rehidratación
   transparente, [ADR-0032](../adr/adr-0032-tiered-storage-puerto-y-tier-local.md)); lo que queda como

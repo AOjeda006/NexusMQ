@@ -136,3 +136,25 @@ frío está siempre vacío y el comportamiento es byte-idéntico al de hoy. El d
   rechaza reescribir dentro del prefijo frío (historia comprometida) y la retención no toca el *hot
   set* mientras haya prefijo frío—. Configuración: ver
   [capítulo 26](./26-configuracion-y-operacion.md).
+
+## 9.8 Visibilidad transaccional (opcional)
+
+El log soporta **transacciones multi-partición** con visibilidad atómica, de forma **opt-in** y con
+degradación limpia ([ADR-0033](../adr/adr-0033-exactly-once-nativo-transacciones.md)). Sin usar la
+API transaccional, nada cambia. La coordinación (2PC recuperable) vive en el broker (ver
+[capítulo 10](./10-replicacion-y-consenso.md)); lo que toca al **almacenamiento** es cómo se marcan
+las transacciones en el log y cómo se acota la lectura. Se ilustra en el
+[diagrama 25](../diagramas/25-transacciones-2pc.md).
+
+- **Marcadores de control en el log.** El `RecordBatch` gana dos *flags* en `attrs` —**transaccional**
+  y **control**— disjuntos de los bits de códec (§9.3). Un batch **transaccional** lleva datos de una
+  transacción abierta; un batch de **control** no lleva datos de usuario sino un único **marcador**
+  `EndTxnMarker` (COMMIT o ABORT, con la época del coordinador), que **cierra** la transacción en esa
+  partición. El codec del marcador (clave/valor versionados, decodificador defensivo) vive en
+  `common/control_record`; el marcador es un record normal del log (interopera con cifrado y tiering).
+- **LSO y `read_committed`.** `PartitionTxnIndex` mantiene el **Last Stable Offset** =
+  `min(high_watermark, primer offset de la transacción abierta más antigua)`: la frontera hasta la que
+  **todo** está decidido. Un consumidor `read_committed` no lee más allá del LSO y **filtra** los
+  records de transacciones **abortadas** y los marcadores de control (`filter_committed`);
+  `read_uncommitted` lee hasta el *high-watermark* como hasta ahora. Los offsets nunca se reescriben
+  ni se borran por abortar: la visibilidad la decide el lector según su nivel de aislamiento.
