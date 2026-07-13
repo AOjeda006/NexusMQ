@@ -8,6 +8,8 @@
 #include <string>
 #include <utility>
 
+#include "server/metrics_json.hpp"
+
 namespace nexus {
 
 namespace {
@@ -17,6 +19,16 @@ std::int64_t system_now_seconds() {
     return std::chrono::duration_cast<std::chrono::seconds>(
                std::chrono::system_clock::now().time_since_epoch())
         .count();
+}
+
+/// Respuesta JSON (`application/json`) con @p status y @p body.
+HttpResponse json_response(int status, std::string body) {
+    HttpResponse response;
+    response.status = status;
+    response.reason = std::string{http_reason(status)};
+    response.set_header("Content-Type", "application/json");
+    response.body = std::move(body);
+    return response;
 }
 
 /// Respuesta de texto plano con @p status y @p content_type.
@@ -48,6 +60,15 @@ task<HttpResponse> AdminRouter::handle(const HttpRequest& request) const {
         }
         co_return text_response(200, "text/plain; version=0.0.4; charset=utf-8",
                                 metrics_.render_prometheus());
+    }
+    // Snapshot estructurado de métricas en JSON (misma observabilidad que `/metrics`, otro formato;
+    // lo consume la consola de administración). Abierto como `/metrics` (no pasa por la auth del
+    // REST): son datos de observabilidad, no la superficie mutante del `AdminService`.
+    if (path == "/api/v1/metrics/snapshot") {
+        if (!is_read_method(request.method)) {
+            co_return text_response(405, "text/plain; charset=utf-8", "method not allowed\n");
+        }
+        co_return json_response(200, render_metrics_snapshot_json(metrics_.snapshot()));
     }
     if (path == "/healthz") {
         if (!is_read_method(request.method)) {

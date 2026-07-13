@@ -7,6 +7,7 @@ add_library(nexus-server
   admin_api.cpp
   admin_router.cpp
   admin_http.cpp
+  metrics_json.cpp
   daemon_args.cpp)
 add_library(nexus::server ALIAS nexus-server)
 

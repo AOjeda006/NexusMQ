@@ -78,6 +78,66 @@ TEST(MetricsRegistry, Render_EscapaValoresDeEtiqueta) {
     EXPECT_NE(text.find("path=\"a\\\"b\\\\c\""), std::string::npos);
 }
 
+TEST(MetricsRegistry, Snapshot_CounterYGauge_CapturaValorYEtiquetas) {
+    nexus::MetricsRegistry reg;
+    reg.counter("nexus_requests_total", {{"protocol", "native"}}).inc(7);
+    reg.gauge("nexus_commit_index", {{"partition", "0"}}).set(42);
+
+    const nexus::MetricsSnapshot snap = reg.snapshot();
+
+    const nexus::MetricSample* counter = nullptr;
+    const nexus::MetricSample* gauge = nullptr;
+    for (const auto& sample : snap.samples) {
+        if (sample.name == "nexus_requests_total") {
+            counter = &sample;
+        } else if (sample.name == "nexus_commit_index") {
+            gauge = &sample;
+        }
+    }
+    ASSERT_NE(counter, nullptr);
+    EXPECT_EQ(counter->type, nexus::MetricType::Counter);
+    EXPECT_DOUBLE_EQ(counter->value, 7.0);
+    ASSERT_EQ(counter->labels.size(), 1U);
+    EXPECT_EQ(counter->labels[0].first, "protocol");
+    EXPECT_EQ(counter->labels[0].second, "native");
+
+    ASSERT_NE(gauge, nullptr);
+    EXPECT_EQ(gauge->type, nexus::MetricType::Gauge);
+    EXPECT_DOUBLE_EQ(gauge->value, 42.0);
+}
+
+TEST(MetricsRegistry, Snapshot_Histograma_CubosAcumulativosCountSum) {
+    nexus::MetricsRegistry reg;
+    nexus::Histogram& h = reg.histogram("lat", {}, {1.0, 5.0, 10.0});
+    h.observe(0.5);   // cubo le=1
+    h.observe(3.0);   // cubo le=5
+    h.observe(7.0);   // cubo le=10
+    h.observe(50.0);  // +Inf
+
+    const nexus::MetricsSnapshot snap = reg.snapshot();
+    const nexus::MetricSample* hist = nullptr;
+    for (const auto& sample : snap.samples) {
+        if (sample.name == "lat") {
+            hist = &sample;
+        }
+    }
+    ASSERT_NE(hist, nullptr);
+    EXPECT_EQ(hist->type, nexus::MetricType::Histogram);
+    EXPECT_EQ(hist->count, 4U);  // total = cubo +Inf.
+    EXPECT_DOUBLE_EQ(hist->sum, 60.5);
+    ASSERT_EQ(hist->buckets.size(), 3U);  // solo cubos finitos (le=1,5,10).
+    EXPECT_DOUBLE_EQ(hist->buckets[0].upper_bound, 1.0);
+    EXPECT_EQ(hist->buckets[0].cumulative_count, 1U);
+    EXPECT_EQ(hist->buckets[1].cumulative_count, 2U);  // acumulado.
+    EXPECT_EQ(hist->buckets[2].cumulative_count, 3U);  // acumulado.
+}
+
+TEST(MetricsRegistry, MetricTypeName_NombresEstables) {
+    EXPECT_EQ(nexus::metric_type_name(nexus::MetricType::Counter), "counter");
+    EXPECT_EQ(nexus::metric_type_name(nexus::MetricType::Gauge), "gauge");
+    EXPECT_EQ(nexus::metric_type_name(nexus::MetricType::Histogram), "histogram");
+}
+
 TEST(MetricsRegistry, DefaultLatencyBounds_AscendenteYNoVacio) {
     const auto bounds = nexus::MetricsRegistry::default_latency_bounds();
     ASSERT_FALSE(bounds.empty());

@@ -83,6 +83,23 @@ paths:
             text/plain:
               schema: { type: string }
 
+  /api/v1/metrics/snapshot:
+    get:
+      tags: [operación]
+      summary: Snapshot estructurado de métricas en JSON.
+      description: >-
+        Misma observabilidad que `/metrics`, en JSON estructurado para la consola de
+        administración. Abierto (sin autenticación), igual que `/metrics`: son datos de
+        observabilidad, no la superficie mutante del `AdminService`.
+      security: []
+      responses:
+        "200":
+          description: Snapshot de métricas.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MetricsSnapshot" }
+        "405": { $ref: "#/components/responses/Problem" }
+
   /api/v1/topics:
     get:
       tags: [topics]
@@ -292,6 +309,39 @@ components:
           type: array
           items: { $ref: "#/components/schemas/GroupSummary" }
       required: [page, size, items]
+
+    MetricSample:
+      type: object
+      description: >-
+        Una serie de métrica. `counter`/`gauge` aportan `value`; `histogram` aporta `count`
+        (total = cubo +Inf), `sum` y `buckets` (cubos acumulativos finitos).
+      properties:
+        name: { type: string }
+        type: { type: string, enum: [counter, gauge, histogram] }
+        labels:
+          type: object
+          additionalProperties: { type: string }
+        value: { type: number, description: "Solo counter/gauge." }
+        count: { type: integer, format: int64, description: "Solo histogram (cubo +Inf)." }
+        sum: { type: number, description: "Solo histogram." }
+        buckets:
+          type: array
+          description: "Solo histogram: cubos acumulativos finitos (el +Inf es `count`)."
+          items:
+            type: object
+            properties:
+              le: { type: number, description: Límite superior del cubo. }
+              cumulativeCount: { type: integer, format: int64 }
+            required: [le, cumulativeCount]
+      required: [name, type, labels]
+
+    MetricsSnapshot:
+      type: object
+      properties:
+        metrics:
+          type: array
+          items: { $ref: "#/components/schemas/MetricSample" }
+      required: [metrics]
 
     ProblemDetail:
       type: object

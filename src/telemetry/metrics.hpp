@@ -78,6 +78,44 @@ private:
     std::atomic<std::uint64_t> sum_bits_{0};  ///< bits del doble acumulado (CAS).
 };
 
+/// @brief Tipo de una serie en el snapshot estructurado de métricas. Afinidad: INMUTABLE.
+enum class MetricType : std::uint8_t { Counter, Gauge, Histogram };
+
+/// @brief Nombre estable de un `MetricType` (`"counter"`/`"gauge"`/`"histogram"`).
+[[nodiscard]] std::string_view metric_type_name(MetricType type) noexcept;
+
+/// @brief Cubo acumulativo de un histograma en el snapshot (límite `le` + cuenta acumulada).
+///   Afinidad: INMUTABLE.
+/// @details Solo cubos **finitos**: el cubo `+Inf` (todas las observaciones) es
+/// `MetricSample::count`.
+struct HistogramBucketSample {
+    double upper_bound = 0.0;            ///< Límite superior `le` del cubo (finito).
+    std::uint64_t cumulative_count = 0;  ///< Observaciones con valor <= `upper_bound` (acumulado).
+};
+
+/// @brief Una serie de métrica capturada del registro (snapshot estructurado). Afinidad: INMUTABLE.
+/// @details Alternativa **estructurada** a `render_prometheus()` para consumidores que quieren
+/// datos
+///   (REST admin, SSE): mismo recorrido, pero devuelve valores en vez de texto Prometheus. Para
+///   `Counter`/`Gauge` el dato es `value`; para `Histogram`, los `buckets` acumulativos finitos más
+///   `count` (total = cubo `+Inf`) y `sum`.
+struct MetricSample {
+    std::string name;
+    MetricType type = MetricType::Counter;
+    Labels labels;                               ///< Canónicas (ordenadas por clave).
+    double value = 0.0;                          ///< Counter/Gauge: valor actual.
+    std::vector<HistogramBucketSample> buckets;  ///< Histogram: cubos acumulativos finitos.
+    std::uint64_t count = 0;                     ///< Histogram: total de observaciones (cubo +Inf).
+    double sum = 0.0;                            ///< Histogram: suma de observaciones.
+};
+
+/// @brief Snapshot estructurado del registro completo. Afinidad: INMUTABLE (copia del estado).
+/// @details Series en orden determinista (contadores, luego gauges, luego histogramas; cada familia
+///   ordenada por clave de serie), igual que `render_prometheus()`.
+struct MetricsSnapshot {
+    std::vector<MetricSample> samples;
+};
+
 /// @brief Registro central de métricas con exposición Prometheus (§7.6). Afinidad: THREAD-SAFE.
 /// @details Crea/recupera series por `(nombre, etiquetas)` con `counter`/`gauge`/`histogram` y las
 ///   expone en el **formato de texto de Prometheus** con `render_prometheus()` (orden determinista:
@@ -108,6 +146,13 @@ public:
 
     /// @brief Render del registro en el formato de texto de Prometheus (para `/metrics`).
     [[nodiscard]] std::string render_prometheus() const;
+
+    /// @brief Captura un **snapshot estructurado** de todas las series (para el REST admin / SSE).
+    /// @details Recorre los tres mapas bajo `mutex_` —igual que `render_prometheus()`, mismo orden
+    ///   determinista— y devuelve los valores en tipos (`MetricsSnapshot`) en vez de texto.
+    ///   Aditivo: no altera `render_prometheus()` ni `/metrics`. THREAD-SAFE (toma el candado de
+    ///   estructura).
+    [[nodiscard]] MetricsSnapshot snapshot() const;
 
     /// @brief Cubos de latencia por defecto (segundos), convención de Prometheus.
     [[nodiscard]] static std::vector<double> default_latency_bounds();

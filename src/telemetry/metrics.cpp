@@ -221,6 +221,59 @@ std::string MetricsRegistry::render_prometheus() const {
     return out;
 }
 
+MetricsSnapshot MetricsRegistry::snapshot() const {
+    const std::scoped_lock lock{mutex_};
+    MetricsSnapshot out;
+    out.samples.reserve(counters_.size() + gauges_.size() + histograms_.size());
+
+    for (const auto& [key, series] : counters_) {
+        MetricSample sample;
+        sample.name = series.name;
+        sample.type = MetricType::Counter;
+        sample.labels = series.labels;
+        sample.value = static_cast<double>(series.metric->value());
+        out.samples.push_back(std::move(sample));
+    }
+    for (const auto& [key, series] : gauges_) {
+        MetricSample sample;
+        sample.name = series.name;
+        sample.type = MetricType::Gauge;
+        sample.labels = series.labels;
+        sample.value = static_cast<double>(series.metric->value());
+        out.samples.push_back(std::move(sample));
+    }
+    for (const auto& [key, series] : histograms_) {
+        const Histogram& hist = *series.metric;
+        MetricSample sample;
+        sample.name = series.name;
+        sample.type = MetricType::Histogram;
+        sample.labels = series.labels;
+        sample.buckets.reserve(hist.bounds().size());
+        std::uint64_t cumulative = 0;
+        for (std::size_t i = 0; i < hist.bounds().size(); ++i) {
+            cumulative += hist.bucket(i);
+            sample.buckets.push_back(HistogramBucketSample{.upper_bound = hist.bounds()[i],
+                                                           .cumulative_count = cumulative});
+        }
+        sample.count = hist.count();  // total = cubo +Inf (implícito).
+        sample.sum = hist.sum();
+        out.samples.push_back(std::move(sample));
+    }
+    return out;
+}
+
+std::string_view metric_type_name(MetricType type) noexcept {
+    switch (type) {
+        case MetricType::Counter:
+            return "counter";
+        case MetricType::Gauge:
+            return "gauge";
+        case MetricType::Histogram:
+            return "histogram";
+    }
+    return "unknown";
+}
+
 std::vector<double> MetricsRegistry::default_latency_bounds() {
     return {0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0};
 }

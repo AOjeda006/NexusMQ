@@ -88,6 +88,41 @@ TEST(AdminRouter, Metrics_MetodoNoGet_405) {
     EXPECT_EQ(response.status, 405);
 }
 
+TEST(AdminRouter, MetricsSnapshot_200Json) {
+    FakeAdmin admin;
+    nexus::RestGateway rest{admin, nullptr};
+    nexus::HealthMonitor health;
+    nexus::MetricsRegistry metrics;
+    metrics.counter("nexus_requests_total", {{"protocol", "native"}}).inc(3);
+    const nexus::AdminRouter router{rest, health, metrics};
+
+    const auto response =
+        run_handle(router, make_request(nexus::HttpMethod::Get, "/api/v1/metrics/snapshot"));
+    EXPECT_EQ(response.status, 200);
+    bool json_ct = false;
+    for (const auto& [key, value] : response.headers) {
+        if (key == "Content-Type" && value == "application/json") {
+            json_ct = true;
+        }
+    }
+    EXPECT_TRUE(json_ct);
+    EXPECT_NE(response.body.find(R"("name":"nexus_requests_total")"), std::string::npos);
+    EXPECT_NE(response.body.find(R"("type":"counter")"), std::string::npos);
+    EXPECT_NE(response.body.find(R"("protocol":"native")"), std::string::npos);
+}
+
+TEST(AdminRouter, MetricsSnapshot_MetodoNoGet_405) {
+    FakeAdmin admin;
+    nexus::RestGateway rest{admin, nullptr};
+    nexus::HealthMonitor health;
+    nexus::MetricsRegistry metrics;
+    const nexus::AdminRouter router{rest, health, metrics};
+
+    const auto response =
+        run_handle(router, make_request(nexus::HttpMethod::Post, "/api/v1/metrics/snapshot"));
+    EXPECT_EQ(response.status, 405);
+}
+
 TEST(AdminRouter, Healthz_200Liveness) {
     FakeAdmin admin;
     nexus::RestGateway rest{admin, nullptr};
