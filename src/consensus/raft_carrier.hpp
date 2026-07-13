@@ -5,12 +5,14 @@
 #pragma once
 
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "common/types.hpp"
 #include "consensus/raft_rpc.hpp"
+#include "consensus/raft_state.hpp"
 #include "consensus/raft_wire.hpp"
 
 namespace nexus {
@@ -52,6 +54,29 @@ public:
 
     /// @brief Envía @p envelope al peer `envelope.message.to` (lo entrega el transporte).
     virtual void send(const RaftEnvelope& envelope) = 0;
+};
+
+/// @brief Progreso de replicación de un peer visto por el líder (observabilidad). Afinidad:
+///   INMUTABLE.
+struct RaftPeerObservation {
+    NodeId peer = 0;         ///< Identidad del peer.
+    Index match_index = 0;   ///< Mayor índice replicado confirmado por el peer (solo líder).
+};
+
+/// @brief Estado observable de una réplica de Raft (plano de operación). Afinidad: INMUTABLE.
+/// @details *Snapshot* de solo lectura de los getters de observabilidad del `RaftNode`, tomado en el
+///   reactor dueño de la partición (REACTOR-LOCAL). No expone el `RaftNode` (encapsulación): el
+///   plano REST lo traduce a su DTO. El plano de operación agrega estas observaciones por `call_on`.
+struct RaftObservation {
+    std::string topic;
+    PartitionId partition = 0;
+    RaftRole role = RaftRole::Follower;
+    Term term = 0;
+    Index commit_index = 0;    ///< High-watermark de la réplica (entradas aplicadas).
+    Index last_log_index = 0;  ///< Último índice del log local.
+    Epoch leader_epoch = 0;
+    std::optional<NodeId> leader_hint;      ///< Líder conocido, si lo hay.
+    std::vector<RaftPeerObservation> peers;  ///< Progreso por peer (solo significativo siendo líder).
 };
 
 /// @brief Conduce la FSM de Raft (ADR-0015) de **una** réplica de partición: la avanza por tiempo,
@@ -127,6 +152,13 @@ public:
 
     [[nodiscard]] const std::string& topic() const noexcept { return topic_; }
     [[nodiscard]] PartitionId partition() const noexcept { return partition_; }
+
+    /// @brief *Snapshot* de solo lectura del estado de Raft de esta réplica (rol, término,
+    ///   commit-index/HWM, último índice, época, líder y progreso por peer). Para el plano de
+    ///   operación (`/api/v1/cluster`).
+    /// @details Lee solo *getters* `const` del `RaftNode`; se invoca en el reactor dueño de la
+    ///   partición (REACTOR-LOCAL). No expone el `RaftNode` (encapsulación).
+    [[nodiscard]] RaftObservation observe() const;
 
 private:
     /// @brief Persiste el estado (si cambió) y drena la cola de salida hacia el sumidero.

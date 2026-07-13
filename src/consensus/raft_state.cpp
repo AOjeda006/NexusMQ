@@ -6,6 +6,20 @@
 
 namespace nexus {
 
+std::string_view raft_role_name(RaftRole role) noexcept {
+    switch (role) {
+        case RaftRole::Follower:
+            return "follower";
+        case RaftRole::PreCandidate:
+            return "pre_candidate";
+        case RaftRole::Candidate:
+            return "candidate";
+        case RaftRole::Leader:
+            return "leader";
+    }
+    return "unknown";
+}
+
 void RaftVolatileState::reset_leader_progress(std::span<const NodeId> peers, Index last_log_index) {
     next_index_.clear();
     match_index_.clear();

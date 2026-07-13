@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -26,6 +27,10 @@ enum class RaftRole : std::uint8_t {
     Candidate,     ///< Solicita votos tras ganar la ronda de pre-votos.
     Leader,        ///< Sirve produce/fetch y replica su log a los seguidores.
 };
+
+/// @brief Nombre estable de un `RaftRole` (`"follower"`/`"pre_candidate"`/`"candidate"`/`"leader"`),
+///   para observabilidad (plano de operación).
+[[nodiscard]] std::string_view raft_role_name(RaftRole role) noexcept;
 
 /// @brief Naturaleza de una entrada del log de Raft.
 enum class RaftEntryType : std::uint8_t {

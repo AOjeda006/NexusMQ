@@ -86,6 +86,39 @@ struct GroupDescription {
     std::vector<GroupPartitionOffset> offsets;
 };
 
+/// @brief Un nodo del clúster (DTO de `describe_cluster`). Afinidad: INMUTABLE (valor).
+struct NodeInfo {
+    std::int32_t node_id = 0;
+    bool is_self = false;  ///< ¿Es este nodo?
+};
+
+/// @brief Progreso de replicación de un seguidor visto por el líder (DTO). Afinidad: INMUTABLE.
+struct FollowerProgress {
+    std::int32_t node = 0;         ///< NodeId del seguidor.
+    std::int64_t match_index = 0;  ///< Mayor índice replicado confirmado por el seguidor.
+    std::int64_t lag = 0;          ///< `last_log_index - match_index` (acotado a >= 0).
+};
+
+/// @brief Estado Raft de una partición replicada (DTO de `describe_cluster`). Afinidad: INMUTABLE.
+struct PartitionRaftInfo {
+    std::string topic;
+    std::int32_t partition = 0;
+    std::int32_t leader = -1;         ///< NodeId del líder conocido, o `-1` si se desconoce.
+    std::string role;                 ///< Rol de esta réplica (`follower`/`candidate`/`leader`…).
+    std::int64_t term = 0;
+    std::int64_t commit_index = 0;    ///< High-watermark de la réplica (entradas aplicadas).
+    std::int64_t last_log_index = 0;  ///< Último índice del log local.
+    std::int64_t leader_epoch = 0;
+    std::vector<FollowerProgress> followers;  ///< Progreso por seguidor (solo si esta réplica lidera).
+};
+
+/// @brief Estado del clúster/Raft (DTO de `describe_cluster`). Afinidad: INMUTABLE (valor).
+struct ClusterInfo {
+    std::int32_t node_id = 0;  ///< Este nodo.
+    std::vector<NodeInfo> nodes;
+    std::vector<PartitionRaftInfo> partitions;  ///< Réplicas de Raft de este nodo (por partición).
+};
+
 /// @brief Puerto de administración del REST admin (ADR-0018). Afinidad: THREAD-SAFE (contrato).
 /// @details Interfaz que el `RestGateway` (ingress) usa para administrar el broker, sin acoplarse
 /// al
@@ -135,6 +168,14 @@ public:
     ///   partición (`partition % N`) y se lee por `call_on`.
     [[nodiscard]] virtual task<expected<GroupDescription>> describe_group(
         std::string_view group_id) = 0;
+
+    /// @brief Estado del clúster: nodos conocidos y estado Raft de las particiones replicadas de
+    ///   este nodo. Nunca falla en operación normal (devuelve `expected` por uniformidad del
+    ///   contrato).
+    /// @details Corrutina: las réplicas de Raft viven en el núcleo dueño de su partición
+    ///   (`partition % N`, ADR-0026), así que el estado se **agrega** con `call_on` sobre todos los
+    ///   núcleos. Sin particiones replicadas (`replication_factor == 1`), `partitions` va vacío.
+    [[nodiscard]] virtual task<expected<ClusterInfo>> describe_cluster() = 0;
 };
 
 }  // namespace nexus

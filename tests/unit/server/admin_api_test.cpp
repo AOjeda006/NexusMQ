@@ -224,6 +224,21 @@ TEST(AdminApi, DescribeGroup_SinDescriber_NotFound) {
     EXPECT_EQ(description.error().code(), nexus::ErrorCode::NotFound);
 }
 
+TEST(AdminApi, DescribeCluster_SinReplicacion_DevuelveNodoSinParticiones) {
+    TempDir dir{"cluster"};
+    nexus::TopicManager topics{dir.path()};
+    nexus::AdminApi admin{topics, kNodeId};
+    ASSERT_TRUE(run_create(admin, nexus::CreateTopicSpec{.name = "t", .partition_count = 2}));
+
+    const auto info = nexus::sync_wait(admin.describe_cluster());
+    ASSERT_TRUE(info.has_value());
+    EXPECT_EQ(info->node_id, kNodeId);
+    ASSERT_EQ(info->nodes.size(), 1U);  // nodo aislado (sin bind_cluster con peers).
+    EXPECT_EQ(info->nodes[0].node_id, kNodeId);
+    EXPECT_TRUE(info->nodes[0].is_self);
+    EXPECT_TRUE(info->partitions.empty());  // replication_factor=1: sin réplicas de Raft.
+}
+
 TEST(AdminApi, CreateTopic_Cableado_FanOutATodosLosNucleos) {
     TempDir dir{"fanout"};
     // Dos reactores cableados; dos TopicManager sharded (núcleo 0 dueño de p0; núcleo 1 de p1).

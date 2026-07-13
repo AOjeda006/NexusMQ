@@ -47,12 +47,16 @@ public:
     /// @param self Reactor donde se sirve el admin (el núcleo 0).
     /// @param partitions Router de particiones del nodo (no propietario; vive más que este).
     /// @param topics_by_core `TopicManager` de cada núcleo, indexado por `core_id`.
+    /// @param cluster_nodes NodeIds de todos los nodos del clúster (este + peers), para
+    ///   `describe_cluster`. Vacío = solo este nodo.
     /// @pre `self`, `partitions` y los punteros de `topics_by_core` viven más que este adaptador.
     void bind_cluster(Reactor& self, PartitionRouter& partitions,
-                      std::vector<TopicManager*> topics_by_core) noexcept {
+                      std::vector<TopicManager*> topics_by_core,
+                      std::vector<NodeId> cluster_nodes = {}) noexcept {
         self_ = &self;
         partitions_ = &partitions;
         topics_by_core_ = std::move(topics_by_core);
+        cluster_nodes_ = std::move(cluster_nodes);
     }
 
     [[nodiscard]] task<expected<TopicSummary>> create_topic(const CreateTopicSpec& spec) override;
@@ -61,6 +65,7 @@ public:
     [[nodiscard]] std::vector<TopicSummary> list_topics(Page page) const override;
     [[nodiscard]] task<std::vector<GroupSummary>> list_groups(Page page) override;
     [[nodiscard]] task<expected<GroupDescription>> describe_group(std::string_view group_id) override;
+    [[nodiscard]] task<expected<ClusterInfo>> describe_cluster() override;
 
 private:
     /// @brief Estado de la partición @p pid del topic @p name (id/leader/high-watermark/epoch).
@@ -79,6 +84,8 @@ private:
     PartitionRouter* partitions_ = nullptr;
     /// `TopicManager` por núcleo (indexado por `core_id`); destino del fan-out de crear/borrar.
     std::vector<TopicManager*> topics_by_core_;
+    /// NodeIds de todos los nodos del clúster (este + peers), para `describe_cluster`.
+    std::vector<NodeId> cluster_nodes_;
 };
 
 }  // namespace nexus

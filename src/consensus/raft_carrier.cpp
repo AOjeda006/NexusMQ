@@ -29,6 +29,23 @@ RaftCarrier::RaftCarrier(std::string topic, PartitionId partition, RaftNode& nod
       log_(log),
       compaction_(compaction) {}
 
+RaftObservation RaftCarrier::observe() const {
+    RaftObservation obs;
+    obs.topic = topic_;
+    obs.partition = partition_;
+    obs.role = node_.role();
+    obs.term = node_.current_term();
+    obs.commit_index = node_.commit_index();
+    obs.last_log_index = node_.last_log_index();
+    obs.leader_epoch = node_.leader_epoch();
+    obs.leader_hint = node_.leader_hint();
+    for (const NodeId peer : node_.peers()) {
+        obs.peers.push_back(
+            RaftPeerObservation{.peer = peer, .match_index = node_.match_index(peer)});
+    }
+    return obs;
+}
+
 void RaftCarrier::set_metrics(MetricsRegistry& metrics) {
     metrics.describe("nexus_raft_commit_index",
                      "High-watermark de la réplica de Raft (entradas aplicadas).");

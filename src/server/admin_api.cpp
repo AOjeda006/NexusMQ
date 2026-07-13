@@ -7,11 +7,14 @@
 #include <algorithm>
 #include <cstddef>
 #include <string>
+#include <tuple>
 #include <utility>
 
 #include "broker/partition_base.hpp"
 #include "broker/topic.hpp"
 #include "broker/topic_cluster.hpp"
+#include "consensus/raft_carrier.hpp"
+#include "consensus/raft_state.hpp"
 #include "reactor/cross_core_call.hpp"
 
 namespace nexus {
@@ -157,6 +160,73 @@ task<expected<GroupDescription>> AdminApi::describe_group(std::string_view group
         co_return make_error(ErrorCode::NotFound, "grupo inexistente: " + std::string{group_id});
     }
     co_return co_await group_describer_(std::string{group_id});
+}
+
+namespace {
+
+/// Traduce una observación de Raft (consensus) al DTO del REST admin (traducción en el borde).
+PartitionRaftInfo to_raft_info(const RaftObservation& obs) {
+    PartitionRaftInfo info;
+    info.topic = obs.topic;
+    info.partition = obs.partition;
+    info.leader = obs.leader_hint.value_or(-1);
+    info.role = std::string{raft_role_name(obs.role)};
+    info.term = obs.term;
+    info.commit_index = obs.commit_index;
+    info.last_log_index = obs.last_log_index;
+    info.leader_epoch = obs.leader_epoch;
+    // El progreso por seguidor solo es significativo en el líder (match_index se sigue ahí).
+    if (obs.role == RaftRole::Leader) {
+        for (const RaftPeerObservation& peer : obs.peers) {
+            const std::int64_t lag =
+                obs.last_log_index > peer.match_index ? obs.last_log_index - peer.match_index : 0;
+            info.followers.push_back(FollowerProgress{
+                .node = peer.peer, .match_index = peer.match_index, .lag = lag});
+        }
+    }
+    return info;
+}
+
+/// Observaciones de Raft de las réplicas que atiende @p manager (su núcleo).
+std::vector<RaftObservation> observe_carriers(TopicManager& manager) {
+    std::vector<RaftObservation> out;
+    for (RaftCarrier* carrier : manager.carriers()) {
+        out.push_back(carrier->observe());
+    }
+    return out;
+}
+
+}  // namespace
+
+task<expected<ClusterInfo>> AdminApi::describe_cluster() {
+    ClusterInfo info;
+    info.node_id = node_id_;
+    for (const NodeId node : cluster_nodes_) {
+        info.nodes.push_back(NodeInfo{.node_id = node, .is_self = std::cmp_equal(node, node_id_)});
+    }
+    if (info.nodes.empty()) {
+        info.nodes.push_back(NodeInfo{.node_id = node_id_, .is_self = true});  // nodo aislado.
+    }
+
+    if (partitions_ == nullptr) {
+        for (const RaftObservation& obs : observe_carriers(topics_)) {  // local (N=1 / tests).
+            info.partitions.push_back(to_raft_info(obs));
+        }
+    } else {
+        // Las réplicas viven en el núcleo dueño de su partición: se observan en su hilo (ADR-0026).
+        for (int core = 0; core < partitions_->core_count(); ++core) {
+            TopicManager* manager = topics_by_core_[static_cast<std::size_t>(core)];
+            std::vector<RaftObservation> obs = co_await call_on(
+                *self_, partitions_->reactor(core), [manager]() { return observe_carriers(*manager); });
+            for (const RaftObservation& observation : obs) {
+                info.partitions.push_back(to_raft_info(observation));
+            }
+        }
+    }
+    std::ranges::sort(info.partitions, {}, [](const PartitionRaftInfo& part) {
+        return std::tie(part.topic, part.partition);
+    });
+    co_return info;
 }
 
 }  // namespace nexus

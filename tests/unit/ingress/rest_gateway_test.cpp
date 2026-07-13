@@ -25,6 +25,7 @@ public:
     std::vector<nexus::TopicSummary> topics;
     std::vector<nexus::GroupSummary> groups;
     nexus::GroupDescription group_description;
+    nexus::ClusterInfo cluster_info;
     nexus::CreateTopicSpec last_spec;
     bool create_fails = false;
     bool describe_fails = false;
@@ -74,6 +75,9 @@ public:
             co_return nexus::make_error(nexus::ErrorCode::NotFound, "grupo inexistente");
         }
         co_return group_description;
+    }
+    nexus::task<nexus::expected<nexus::ClusterInfo>> describe_cluster() override {
+        co_return cluster_info;
     }
 };
 
@@ -286,6 +290,41 @@ TEST(RestGateway, DescribeGroup_MetodoNoGet_405) {
     const nexus::RestGateway gateway{admin, nullptr};
     const auto response =
         run_handle(gateway, make_request(nexus::HttpMethod::Delete, "/api/v1/groups/g1"), 0);
+    EXPECT_EQ(response.status, 405);
+}
+
+TEST(RestGateway, DescribeCluster_200ConNodosYRaft) {
+    FakeAdmin admin;
+    nexus::PartitionRaftInfo raft;
+    raft.topic = "orders";
+    raft.partition = 0;
+    raft.leader = 1;
+    raft.role = "leader";
+    raft.term = 4;
+    raft.commit_index = 10;
+    raft.last_log_index = 12;
+    raft.followers = {nexus::FollowerProgress{.node = 2, .match_index = 10, .lag = 2}};
+    admin.cluster_info = nexus::ClusterInfo{
+        .node_id = 1,
+        .nodes = {nexus::NodeInfo{.node_id = 1, .is_self = true},
+                  nexus::NodeInfo{.node_id = 2, .is_self = false}},
+        .partitions = {raft}};
+    const nexus::RestGateway gateway{admin, nullptr};
+    const auto response =
+        run_handle(gateway, make_request(nexus::HttpMethod::Get, "/api/v1/cluster"), 0);
+    EXPECT_EQ(response.status, 200);
+    EXPECT_NE(response.body.find(R"("nodeId":1)"), std::string::npos);
+    EXPECT_NE(response.body.find(R"("isSelf":true)"), std::string::npos);
+    EXPECT_NE(response.body.find(R"("role":"leader")"), std::string::npos);
+    EXPECT_NE(response.body.find(R"("commitIndex":10)"), std::string::npos);
+    EXPECT_NE(response.body.find(R"("matchIndex":10)"), std::string::npos);
+}
+
+TEST(RestGateway, DescribeCluster_MetodoNoGet_405) {
+    FakeAdmin admin;
+    const nexus::RestGateway gateway{admin, nullptr};
+    const auto response =
+        run_handle(gateway, make_request(nexus::HttpMethod::Post, "/api/v1/cluster"), 0);
     EXPECT_EQ(response.status, 405);
 }
 

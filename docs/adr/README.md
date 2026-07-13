@@ -45,3 +45,4 @@ con las secciones **Contexto · Decisión · Consecuencias · Alternativas consi
 | [0032](adr-0032-tiered-storage-puerto-y-tier-local.md) | Almacenamiento por niveles — puerto `StorageTier` y tier local | aceptado | 2026-07-12 |
 | [0033](adr-0033-exactly-once-nativo-transacciones.md) | Exactly-once multi-partición nativo (transacciones, coordinador y `read_committed`) | aceptado | 2026-07-12 |
 | [0034](adr-0034-2pc-logueado-recuperable.md) | 2PC logueado y recuperable (reconciliación con la prohibición del 2PC bloqueante) | aceptado | 2026-07-12 |
+| [0035](adr-0035-estado-cluster-raft-rest-admin.md) | Estado de clúster/Raft por la superficie REST admin (`GET /api/v1/cluster`) | aceptado | 2026-07-13 |

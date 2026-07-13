@@ -209,6 +209,24 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "405": { $ref: "#/components/responses/Problem" }
 
+  /api/v1/cluster:
+    get:
+      tags: [operación]
+      summary: Estado del clúster y del consenso (Raft) por partición.
+      description: >-
+        Nodos conocidos (este nodo + peers) y estado Raft de las particiones replicadas de este
+        nodo: líder, rol, término, commitIndex (= high-watermark), lastLogIndex, época y retraso
+        de cada seguidor. Sin particiones replicadas (`replicationFactor == 1`), `partitions` va
+        vacío.
+      responses:
+        "200":
+          description: Estado del clúster.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClusterInfo" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "405": { $ref: "#/components/responses/Problem" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -366,6 +384,86 @@ components:
           type: array
           items: { $ref: "#/components/schemas/MetricSample" }
       required: [metrics]
+
+    GroupMember:
+      type: object
+      properties:
+        memberId: { type: string }
+        subscriptionBytes: { type: integer, format: int64, description: "Tamaño de la suscripción opaca (no se decodifica)." }
+      required: [memberId, subscriptionBytes]
+
+    GroupPartitionOffset:
+      type: object
+      properties:
+        topic: { type: string }
+        partition: { type: integer }
+        committedOffset: { type: integer, format: int64 }
+        highWatermark: { type: integer, format: int64 }
+        lag: { type: integer, format: int64, description: "highWatermark - committedOffset (>= 0)." }
+      required: [topic, partition, committedOffset, highWatermark, lag]
+
+    GroupDescription:
+      type: object
+      properties:
+        groupId: { type: string }
+        state:
+          type: string
+          enum: [Empty, PreparingRebalance, CompletingRebalance, Stable, Dead, Unknown]
+        generation: { type: integer }
+        leaderId: { type: string }
+        members:
+          type: array
+          items: { $ref: "#/components/schemas/GroupMember" }
+        offsets:
+          type: array
+          items: { $ref: "#/components/schemas/GroupPartitionOffset" }
+      required: [groupId, state, generation, leaderId, members, offsets]
+
+    NodeInfo:
+      type: object
+      properties:
+        nodeId: { type: integer }
+        isSelf: { type: boolean }
+      required: [nodeId, isSelf]
+
+    FollowerProgress:
+      type: object
+      properties:
+        node: { type: integer }
+        matchIndex: { type: integer, format: int64 }
+        lag: { type: integer, format: int64, description: "lastLogIndex - matchIndex (>= 0)." }
+      required: [node, matchIndex, lag]
+
+    PartitionRaftInfo:
+      type: object
+      properties:
+        topic: { type: string }
+        partition: { type: integer }
+        leader: { type: integer, description: "NodeId del líder conocido, o -1 si se desconoce." }
+        role:
+          type: string
+          enum: [follower, pre_candidate, candidate, leader, unknown]
+        term: { type: integer, format: int64 }
+        commitIndex: { type: integer, format: int64, description: "= high-watermark de la réplica." }
+        lastLogIndex: { type: integer, format: int64 }
+        leaderEpoch: { type: integer, format: int64 }
+        followers:
+          type: array
+          description: "Progreso por seguidor (solo poblado si esta réplica es líder)."
+          items: { $ref: "#/components/schemas/FollowerProgress" }
+      required: [topic, partition, leader, role, term, commitIndex, lastLogIndex, leaderEpoch, followers]
+
+    ClusterInfo:
+      type: object
+      properties:
+        nodeId: { type: integer, description: Este nodo. }
+        nodes:
+          type: array
+          items: { $ref: "#/components/schemas/NodeInfo" }
+        partitions:
+          type: array
+          items: { $ref: "#/components/schemas/PartitionRaftInfo" }
+      required: [nodeId, nodes, partitions]
 
     ProblemDetail:
       type: object

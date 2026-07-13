@@ -18,6 +18,13 @@ TEST(RaftPersistentState, PorDefecto_TerminoCeroSinVoto) {
     EXPECT_FALSE(state.voted_for().has_value());
 }
 
+TEST(RaftRole, RaftRoleName_NombresEstables) {
+    EXPECT_EQ(nexus::raft_role_name(nexus::RaftRole::Follower), "follower");
+    EXPECT_EQ(nexus::raft_role_name(nexus::RaftRole::PreCandidate), "pre_candidate");
+    EXPECT_EQ(nexus::raft_role_name(nexus::RaftRole::Candidate), "candidate");
+    EXPECT_EQ(nexus::raft_role_name(nexus::RaftRole::Leader), "leader");
+}
+
 TEST(RaftPersistentState, RecordVote_GuardaElCandidato) {
     nexus::RaftPersistentState state;
     state.record_vote(7);

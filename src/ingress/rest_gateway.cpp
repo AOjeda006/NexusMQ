@@ -120,6 +120,9 @@ task<HttpResponse> RestGateway::handle(const HttpRequest& request,
     if (resource == "/groups" || resource.starts_with("/groups/")) {
         co_return co_await route_groups(request, resource);
     }
+    if (resource == "/cluster") {
+        co_return co_await describe_cluster(request);
+    }
     co_return problem_explicit(404, "recurso no encontrado", path);
 }
 
@@ -288,6 +291,52 @@ task<HttpResponse> RestGateway::describe_group(std::string_view group_id) const 
         writer.field("committedOffset", offset.committed_offset);
         writer.field("highWatermark", offset.high_watermark);
         writer.field("lag", offset.lag);
+        writer.end_object();
+    }
+    writer.end_array();
+    writer.end_object();
+    co_return json_response(200, writer.take());
+}
+
+task<HttpResponse> RestGateway::describe_cluster(const HttpRequest& request) const {
+    if (request.method != HttpMethod::Get) {
+        co_return problem_explicit(405, "método no permitido en /cluster", request.path());
+    }
+    const expected<ClusterInfo> info = co_await admin_.describe_cluster();
+    if (!info) {
+        co_return problem_response(info.error(), request.path());
+    }
+    JsonWriter writer;
+    writer.begin_object();
+    writer.field("nodeId", static_cast<std::int64_t>(info->node_id));
+    writer.key("nodes").begin_array();
+    for (const NodeInfo& node : info->nodes) {
+        writer.begin_object();
+        writer.field("nodeId", static_cast<std::int64_t>(node.node_id));
+        writer.field("isSelf", node.is_self);
+        writer.end_object();
+    }
+    writer.end_array();
+    writer.key("partitions").begin_array();
+    for (const PartitionRaftInfo& part : info->partitions) {
+        writer.begin_object();
+        writer.field("topic", part.topic);
+        writer.field("partition", static_cast<std::int64_t>(part.partition));
+        writer.field("leader", static_cast<std::int64_t>(part.leader));
+        writer.field("role", part.role);
+        writer.field("term", part.term);
+        writer.field("commitIndex", part.commit_index);
+        writer.field("lastLogIndex", part.last_log_index);
+        writer.field("leaderEpoch", part.leader_epoch);
+        writer.key("followers").begin_array();
+        for (const FollowerProgress& follower : part.followers) {
+            writer.begin_object();
+            writer.field("node", static_cast<std::int64_t>(follower.node));
+            writer.field("matchIndex", follower.match_index);
+            writer.field("lag", follower.lag);
+            writer.end_object();
+        }
+        writer.end_array();
         writer.end_object();
     }
     writer.end_array();

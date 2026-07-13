@@ -45,6 +45,9 @@ public:
         std::string_view /*group_id*/) override {
         co_return nexus::make_error(nexus::ErrorCode::NotFound, "no");
     }
+    nexus::task<nexus::expected<nexus::ClusterInfo>> describe_cluster() override {
+        co_return nexus::ClusterInfo{};
+    }
 };
 
 nexus::HttpRequest make_request(nexus::HttpMethod method, std::string target) {

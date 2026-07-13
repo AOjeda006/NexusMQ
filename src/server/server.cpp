@@ -542,8 +542,14 @@ void Server::run() {
     router_->bind_cluster(main, *partition_router_, catalog_.managers(),
                           group_catalog_.all_groups(), group_catalog_.all_offsets());
     if (admin_api_) {
-        // El admin REST también propaga crear/borrar topic a todos los núcleos (ADR-0026).
-        admin_api_->bind_cluster(main, *partition_router_, catalog_.managers());
+        // El admin REST también propaga crear/borrar topic a todos los núcleos (ADR-0026). Le pasa
+        // además la membresía del clúster (este nodo + peers) para `describe_cluster`.
+        std::vector<NodeId> cluster_nodes = peers_.node_ids();
+        cluster_nodes.push_back(config_.node_id);
+        std::ranges::sort(cluster_nodes);
+        cluster_nodes.erase(std::ranges::unique(cluster_nodes).begin(), cluster_nodes.end());
+        admin_api_->bind_cluster(main, *partition_router_, catalog_.managers(),
+                                 std::move(cluster_nodes));
     }
     // El transporte se instala ANTES de los ticks para que la primera elección/heartbeat ya salga
     // por la red a los peers (ADR-0025).

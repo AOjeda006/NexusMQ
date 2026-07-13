@@ -105,6 +105,7 @@ public:
     }
 
     [[nodiscard]] nexus::ReplicatedPartition& part(nexus::NodeId id) { return nodes_.at(id).part; }
+    [[nodiscard]] nexus::RaftCarrier& carrier(nexus::NodeId id) { return *nodes_.at(id).carrier; }
 
     /// Cablea @p reg al portador de @p id (las series quedan etiquetadas por su réplica).
     void enable_metrics(nexus::NodeId id, nexus::MetricsRegistry& reg) {
@@ -188,6 +189,32 @@ TEST(RaftCarrier, TresNodos_ProduceEnLider_ReplicaYConfirmaAQuorum) {
     ASSERT_TRUE(
         cluster.run_until([&] { return cluster.part(leader).high_watermark() == 3; }, 3000ms));
     EXPECT_EQ(cluster.part(leader).high_watermark(), 3);
+}
+
+TEST(RaftCarrier, Observe_Lider_ReportaRolTerminoYPeers) {
+    CarrierCluster cluster({1, 2, 3}, 7);
+    ASSERT_TRUE(cluster.run_until([&] { return cluster.leader().has_value(); }, 5000ms));
+    const nexus::NodeId leader = *cluster.leader();
+
+    const nexus::RaftObservation obs = cluster.carrier(leader).observe();
+    EXPECT_EQ(obs.role, nexus::RaftRole::Leader);
+    EXPECT_EQ(obs.topic, "orders");
+    EXPECT_EQ(obs.partition, 0);
+    EXPECT_GE(obs.term, 1);
+    EXPECT_EQ(obs.peers.size(), 2U);  // 3 nodos → 2 peers.
+    ASSERT_TRUE(obs.leader_hint.has_value());
+    EXPECT_EQ(*obs.leader_hint, leader);
+}
+
+TEST(RaftCarrier, Observe_Seguidor_ReportaRolSeguidor) {
+    CarrierCluster cluster({1, 2, 3}, 7);
+    ASSERT_TRUE(cluster.run_until([&] { return cluster.leader().has_value(); }, 5000ms));
+    const nexus::NodeId leader = *cluster.leader();
+    const nexus::NodeId follower = leader == 1 ? 2 : 1;
+
+    const nexus::RaftObservation obs = cluster.carrier(follower).observe();
+    EXPECT_EQ(obs.role, nexus::RaftRole::Follower);
+    EXPECT_EQ(obs.commit_index, cluster.part(follower).high_watermark());
 }
 
 TEST(RaftCarrier, NoLider_RechazaProduce) {
