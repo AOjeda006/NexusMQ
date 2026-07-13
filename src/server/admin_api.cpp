@@ -113,7 +113,8 @@ task<PartitionInfo> AdminApi::partition_info(std::string name, PartitionId pid) 
 }
 
 task<expected<TopicDescription>> AdminApi::describe_topic(std::string_view name) {
-    Topic* topic = topics_.get(name);  // el núcleo 0 tiene los metadatos completos (ADR-0026).
+    // El núcleo 0 tiene los metadatos completos (ADR-0026).
+    const Topic* topic = topics_.get(name);
     if (topic == nullptr) {
         co_return make_error(ErrorCode::NotFound, "topic inexistente: " + std::string{name});
     }

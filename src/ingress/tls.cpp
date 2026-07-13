@@ -60,19 +60,14 @@ expected<CtxGuard> make_ctx(const SSL_METHOD* method, std::string_view role) {
     return ctx;
 }
 
-// OpenSSL recibe rutas como `const char*`. `std::filesystem::path::c_str()` ya es `const char*` en
-// POSIX, pero `const wchar_t*` en Windows; ahí materializamos la ruta narrow del SO en una
-// std::string cuyo `c_str()` sobrevive a la llamada. En POSIX devuelve una referencia a la propia
-// ruta: `native_path(p).c_str()` queda byte-idéntico a `p.c_str()` (cero copia).
-#if defined(_WIN32)
+// OpenSSL recibe rutas como `const char*`. `std::filesystem::path::c_str()` es `const char*` en
+// POSIX pero `const wchar_t*` en Windows; materializamos siempre la ruta narrow del SO en una
+// std::string (byte-idéntica a la ruta en POSIX, conversión narrow en Windows) cuyo `c_str()`
+// sobrevive a la llamada. La copia es trivial —se hace unas pocas veces al cargar certificados,
+// camino frío— y devolver por valor evita colgar una referencia a un temporal.
 [[nodiscard]] std::string native_path(const std::filesystem::path& path) {
     return path.string();
 }
-#else
-[[nodiscard]] const std::filesystem::path& native_path(const std::filesystem::path& path) {
-    return path;
-}
-#endif
 
 /// Carga el par certificado/clave PEM en @p ctx y comprueba que casan.
 expected<void> load_keypair(SSL_CTX* ctx, const std::filesystem::path& cert,

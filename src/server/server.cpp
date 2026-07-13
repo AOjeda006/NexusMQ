@@ -465,18 +465,22 @@ void Server::run() {
     start_raft_transport(main);
     start_raft_ticks(main);
 
-    if (proxy_ && upstream_pool_) {
-        // Modo proxy (opt-in, ADR-0006/0027): el núcleo 0 releva cada conexión a un nodo aguas
-        // arriba en vez de servirla localmente. El relevo es en claro (no se cablea TLS en proxy).
-        main.spawn(proxy_accept_loop(main, *listener_, *proxy_, *upstream_pool_));
-    } else {
-        const TlsContext* tls_ptr = nullptr;
+    // listener_/router_ siempre presentes en start(); la guarda satisface a clang-tidy y es más
+    // segura que derefar el `optional` a ciegas.
+    if (listener_ && router_) {
+        if (proxy_ && upstream_pool_) {
+            // Modo proxy (opt-in, ADR-0006/0027): el núcleo 0 releva cada conexión a un nodo aguas
+            // arriba en vez de servirla local. El relevo es en claro (no se cablea TLS en proxy).
+            main.spawn(proxy_accept_loop(main, *listener_, *proxy_, *upstream_pool_));
+        } else {
+            const TlsContext* tls_ptr = nullptr;
 #ifdef NEXUS_HAVE_OPENSSL
-        if (tls_) {
-            tls_ptr = &*tls_;  // contexto TLS compartido por el bucle de aceptación (núcleo 0).
-        }
+            if (tls_) {
+                tls_ptr = &*tls_;  // contexto TLS compartido por el bucle de aceptación (núcleo 0).
+            }
 #endif
-        main.spawn(accept_loop(main, *listener_, *router_, tls_ptr));
+            main.spawn(accept_loop(main, *listener_, *router_, tls_ptr));
+        }
     }
     if (admin_listener_ && admin_router_) {
         main.spawn(admin_accept_loop(main, *admin_listener_, *admin_router_));
@@ -484,7 +488,7 @@ void Server::run() {
     if (cluster_listener_) {
         main.spawn(cluster_accept_loop(main, *cluster_listener_));
     }
-    if (kafka_listener_) {
+    if (kafka_listener_ && partition_router_) {
         // Adaptador Kafka sobre el broker real (F7f): opera sobre el `TopicManager` del núcleo 0 y
         // reparte cada partición a su reactor dueño (ADR-0026), igual que el router nativo. Anuncia
         // en Metadata el host configurado y el puerto Kafka realmente enlazado (los clientes se

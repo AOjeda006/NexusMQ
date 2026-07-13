@@ -127,6 +127,9 @@ expected<std::vector<std::byte>> decompress(Codec codec, ByteSpan input, std::si
     // `body` solo se consume en las ramas de códec compiladas (LZ4/Zstd). En una build sin ningún
     // códec nativo (p. ej. Windows sin LZ4/Zstd) queda sin usar: lo marcamos para no avisar.
     [[maybe_unused]] const ByteSpan body = input.subspan(kSizePrefix);
+    // `out` se muta vía out.data() en las ramas LZ4/Zstd; solo parece "const" en una build sin
+    // ningún códec nativo compilado.
+    // NOLINTNEXTLINE(misc-const-correctness)
     std::vector<std::byte> out(original_size);
 
     switch (codec) {

@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "broker/topic.hpp"
@@ -121,8 +122,8 @@ public:
     /// @details Misma regla que `PartitionRouter::owner_core`; el router decide local vs
     /// cross-core.
     [[nodiscard]] bool owns_partition(PartitionId pid) const noexcept {
-        return static_cast<int>(static_cast<std::size_t>(pid) %
-                                static_cast<std::size_t>(num_cores_)) == owner_core_;
+        return std::cmp_equal(static_cast<std::size_t>(pid) % static_cast<std::size_t>(num_cores_),
+                              owner_core_);
     }
 
     /// Número de núcleos del nodo con el que se construyó (para el reparto de particiones).

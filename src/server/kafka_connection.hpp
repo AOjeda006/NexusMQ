@@ -88,7 +88,7 @@ task<void> serve_kafka_connection(Proactor& proactor, Stream stream, kafka::Kafk
         }
         kafka::Decoder size_dec{req_buf.as_span()};
         const expected<std::int32_t> size = size_dec.get_i32();
-        if (!size || *size <= 0 || static_cast<std::size_t>(*size) > kMaxKafkaFrame) {
+        if (!size || *size <= 0 || std::cmp_greater(*size, kMaxKafkaFrame)) {
             break;  // tamaño inválido o excesivo: cerramos.
         }
 

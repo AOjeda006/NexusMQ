@@ -161,7 +161,7 @@ kafka::FetchPartitionResponse fetch_partition(TopicManager& topics, const std::s
                                               const kafka::FetchPartitionRequest& req) {
     kafka::FetchPartitionResponse resp;
     resp.partition_index = req.partition;
-    PartitionBase* part = find_partition(topics, topic, req.partition);
+    const PartitionBase* part = find_partition(topics, topic, req.partition);
     if (part == nullptr) {
         resp.error_code = kafka::to_wire(kafka::KafkaError::UnknownTopicOrPartition);
         return resp;
@@ -195,7 +195,7 @@ kafka::ListOffsetPartitionResponse list_offset_partition(TopicManager& topics,
                                                          const kafka::ListOffsetPartition& req) {
     kafka::ListOffsetPartitionResponse resp;
     resp.partition_index = req.partition_index;
-    PartitionBase* part = find_partition(topics, topic, req.partition_index);
+    const PartitionBase* part = find_partition(topics, topic, req.partition_index);
     if (part == nullptr) {
         resp.error_code = kafka::to_wire(kafka::KafkaError::UnknownTopicOrPartition);
         return resp;
