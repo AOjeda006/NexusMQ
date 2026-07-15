@@ -28,7 +28,8 @@ enum class RaftRole : std::uint8_t {
     Leader,        ///< Sirve produce/fetch y replica su log a los seguidores.
 };
 
-/// @brief Nombre estable de un `RaftRole` (`"follower"`/`"pre_candidate"`/`"candidate"`/`"leader"`),
+/// @brief Nombre estable de un `RaftRole`
+/// (`"follower"`/`"pre_candidate"`/`"candidate"`/`"leader"`),
 ///   para observabilidad (plano de operación).
 [[nodiscard]] std::string_view raft_role_name(RaftRole role) noexcept;
 

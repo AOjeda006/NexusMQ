@@ -73,10 +73,10 @@ public:
     [[nodiscard]] virtual const PartitionLog& log() const noexcept = 0;
 
     /// @brief Aplica la retención al log de esta partición: reclama segmentos sellados por
-    ///   tamaño/tiempo (nunca el activo). **No-op por defecto**: las particiones replicadas gestionan
-    ///   su prefijo por **compactación de Raft** ([ADR-0024], sobre el `commit_index`), no por
-    ///   retención directa —borrar segmentos bajo el `RaftLog` rompería sus invariantes—, así que la
-    ///   retención por política solo la aplica `Partition` (mono-nodo).
+    ///   tamaño/tiempo (nunca el activo). **No-op por defecto**: las particiones replicadas
+    ///   gestionan su prefijo por **compactación de Raft** ([ADR-0024], sobre el `commit_index`),
+    ///   no por retención directa —borrar segmentos bajo el `RaftLog` rompería sus invariantes—,
+    ///   así que la retención por política solo la aplica `Partition` (mono-nodo).
     /// @param policy Política de retención derivada de la config **actual** del topic.
     /// @param now Instante de referencia para la retención por tiempo (se inyecta; ver
     ///   `PartitionLog::enforce_retention`). REACTOR-LOCAL: se llama en el hilo dueño de la

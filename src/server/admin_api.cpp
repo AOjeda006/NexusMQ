@@ -90,20 +90,19 @@ task<expected<void>> AdminApi::delete_topic(std::string_view name) {
 }
 
 task<expected<TopicSummary>> AdminApi::alter_topic_config(std::string_view name,
-                                                         const AlterTopicSpec& spec) {
+                                                          const AlterTopicSpec& spec) {
     if (partitions_ != nullptr) {
         // Cableado: publica la config a todos los núcleos por paso de mensajes (ADR-0037).
-        const expected<TopicMetadata> meta =
-            co_await update_topic_config_on_cluster(*self_, *partitions_, topics_by_core_,
-                                                    std::string{name}, spec.retention_ms,
-                                                    spec.retention_bytes);
+        const expected<TopicMetadata> meta = co_await update_topic_config_on_cluster(
+            *self_, *partitions_, topics_by_core_, std::string{name}, spec.retention_ms,
+            spec.retention_bytes);
         if (!meta) {
             co_return std::unexpected{meta.error()};
         }
         co_return to_summary(*meta);
     }
-    const expected<TopicMetadata> meta =
-        topics_.update_config(name, spec.retention_ms, spec.retention_bytes);  // local (N=1 / tests).
+    const expected<TopicMetadata> meta = topics_.update_config(
+        name, spec.retention_ms, spec.retention_bytes);  // local (N=1 / tests).
     if (!meta) {
         co_return std::unexpected{meta.error()};
     }
@@ -204,8 +203,8 @@ PartitionRaftInfo to_raft_info(const RaftObservation& obs) {
         for (const RaftPeerObservation& peer : obs.peers) {
             const std::int64_t lag =
                 obs.last_log_index > peer.match_index ? obs.last_log_index - peer.match_index : 0;
-            info.followers.push_back(FollowerProgress{
-                .node = peer.peer, .match_index = peer.match_index, .lag = lag});
+            info.followers.push_back(
+                FollowerProgress{.node = peer.peer, .match_index = peer.match_index, .lag = lag});
         }
     }
     return info;
@@ -240,8 +239,9 @@ task<expected<ClusterInfo>> AdminApi::describe_cluster() {
         // Las réplicas viven en el núcleo dueño de su partición: se observan en su hilo (ADR-0026).
         for (int core = 0; core < partitions_->core_count(); ++core) {
             TopicManager* manager = topics_by_core_[static_cast<std::size_t>(core)];
-            std::vector<RaftObservation> obs = co_await call_on(
-                *self_, partitions_->reactor(core), [manager]() { return observe_carriers(*manager); });
+            std::vector<RaftObservation> obs =
+                co_await call_on(*self_, partitions_->reactor(core),
+                                 [manager]() { return observe_carriers(*manager); });
             for (const RaftObservation& observation : obs) {
                 info.partitions.push_back(to_raft_info(observation));
             }

@@ -226,11 +226,10 @@ TEST(RestGateway, DescribeTopic_IncluyeConfig) {
 TEST(RestGateway, AlterTopic_200AplicaRetencion) {
     FakeAdmin admin;
     const nexus::RestGateway gateway{admin, nullptr};
-    const auto response = run_handle(
-        gateway,
-        make_request(nexus::HttpMethod::Patch, "/api/v1/topics/orders",
-                     R"({"retentionMs":5000,"retentionBytes":9999})"),
-        0);
+    const auto response = run_handle(gateway,
+                                     make_request(nexus::HttpMethod::Patch, "/api/v1/topics/orders",
+                                                  R"({"retentionMs":5000,"retentionBytes":9999})"),
+                                     0);
     EXPECT_EQ(response.status, 200);
     EXPECT_NE(response.body.find(R"("name":"orders")"), std::string::npos);
     ASSERT_TRUE(admin.last_alter.retention_ms.has_value());
@@ -242,11 +241,10 @@ TEST(RestGateway, AlterTopic_200AplicaRetencion) {
 TEST(RestGateway, AlterTopic_SegmentBytes_400) {
     FakeAdmin admin;
     const nexus::RestGateway gateway{admin, nullptr};
-    const auto response =
-        run_handle(gateway,
-                   make_request(nexus::HttpMethod::Patch, "/api/v1/topics/orders",
-                                R"({"segmentBytes":1048576})"),
-                   0);
+    const auto response = run_handle(gateway,
+                                     make_request(nexus::HttpMethod::Patch, "/api/v1/topics/orders",
+                                                  R"({"segmentBytes":1048576})"),
+                                     0);
     EXPECT_EQ(response.status, 400);  // segmentBytes no es mutable en caliente.
 }
 
@@ -262,10 +260,9 @@ TEST(RestGateway, AlterTopic_NoExiste_404) {
     FakeAdmin admin;
     admin.alter_fails = true;
     const nexus::RestGateway gateway{admin, nullptr};
-    const auto response =
-        run_handle(gateway,
-                   make_request(nexus::HttpMethod::Patch, "/api/v1/topics/x", R"({"retentionMs":1})"),
-                   0);
+    const auto response = run_handle(
+        gateway, make_request(nexus::HttpMethod::Patch, "/api/v1/topics/x", R"({"retentionMs":1})"),
+        0);
     EXPECT_EQ(response.status, 404);
 }
 
@@ -375,11 +372,11 @@ TEST(RestGateway, DescribeCluster_200ConNodosYRaft) {
     raft.commit_index = 10;
     raft.last_log_index = 12;
     raft.followers = {nexus::FollowerProgress{.node = 2, .match_index = 10, .lag = 2}};
-    admin.cluster_info = nexus::ClusterInfo{
-        .node_id = 1,
-        .nodes = {nexus::NodeInfo{.node_id = 1, .is_self = true},
-                  nexus::NodeInfo{.node_id = 2, .is_self = false}},
-        .partitions = {raft}};
+    admin.cluster_info =
+        nexus::ClusterInfo{.node_id = 1,
+                           .nodes = {nexus::NodeInfo{.node_id = 1, .is_self = true},
+                                     nexus::NodeInfo{.node_id = 2, .is_self = false}},
+                           .partitions = {raft}};
     const nexus::RestGateway gateway{admin, nullptr};
     const auto response =
         run_handle(gateway, make_request(nexus::HttpMethod::Get, "/api/v1/cluster"), 0);

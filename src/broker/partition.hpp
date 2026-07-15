@@ -45,9 +45,10 @@ public:
     [[nodiscard]] expected<void> sync();
 
     /// @copydoc PartitionBase::enforce_retention
-    /// @details Mono-nodo: delega en `PartitionLog::enforce_retention` (reclama segmentos sellados).
-    [[nodiscard]] expected<void> enforce_retention(
-        const RetentionPolicy& policy, std::filesystem::file_time_type now) override {
+    /// @details Mono-nodo: delega en `PartitionLog::enforce_retention` (reclama segmentos
+    /// sellados).
+    [[nodiscard]] expected<void> enforce_retention(const RetentionPolicy& policy,
+                                                   std::filesystem::file_time_type now) override {
         return log_.enforce_retention(policy, now);
     }
 

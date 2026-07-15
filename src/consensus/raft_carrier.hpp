@@ -59,14 +59,16 @@ public:
 /// @brief Progreso de replicación de un peer visto por el líder (observabilidad). Afinidad:
 ///   INMUTABLE.
 struct RaftPeerObservation {
-    NodeId peer = 0;         ///< Identidad del peer.
-    Index match_index = 0;   ///< Mayor índice replicado confirmado por el peer (solo líder).
+    NodeId peer = 0;        ///< Identidad del peer.
+    Index match_index = 0;  ///< Mayor índice replicado confirmado por el peer (solo líder).
 };
 
 /// @brief Estado observable de una réplica de Raft (plano de operación). Afinidad: INMUTABLE.
-/// @details *Snapshot* de solo lectura de los getters de observabilidad del `RaftNode`, tomado en el
+/// @details *Snapshot* de solo lectura de los getters de observabilidad del `RaftNode`, tomado en
+/// el
 ///   reactor dueño de la partición (REACTOR-LOCAL). No expone el `RaftNode` (encapsulación): el
-///   plano REST lo traduce a su DTO. El plano de operación agrega estas observaciones por `call_on`.
+///   plano REST lo traduce a su DTO. El plano de operación agrega estas observaciones por
+///   `call_on`.
 struct RaftObservation {
     std::string topic;
     PartitionId partition = 0;
@@ -75,8 +77,9 @@ struct RaftObservation {
     Index commit_index = 0;    ///< High-watermark de la réplica (entradas aplicadas).
     Index last_log_index = 0;  ///< Último índice del log local.
     Epoch leader_epoch = 0;
-    std::optional<NodeId> leader_hint;      ///< Líder conocido, si lo hay.
-    std::vector<RaftPeerObservation> peers;  ///< Progreso por peer (solo significativo siendo líder).
+    std::optional<NodeId> leader_hint;  ///< Líder conocido, si lo hay.
+    std::vector<RaftPeerObservation>
+        peers;  ///< Progreso por peer (solo significativo siendo líder).
 };
 
 /// @brief Conduce la FSM de Raft (ADR-0015) de **una** réplica de partición: la avanza por tiempo,

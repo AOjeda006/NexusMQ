@@ -86,7 +86,8 @@ public:
     /// @brief Aplica la retención: borra los segmentos sellados más antiguos elegibles por
     ///   tamaño o tiempo, **nunca el activo**; avanza `log_start_offset`.
     /// @param policy Política de retención (por tamaño y/o tiempo).
-    /// @param now Instante de referencia para la retención **por tiempo** (edad = @p now − mtime del
+    /// @param now Instante de referencia para la retención **por tiempo** (edad = @p now − mtime
+    /// del
     ///   `.log`). Se **inyecta** (por defecto, el reloj de fichero) para pruebas deterministas; la
     ///   retención por tamaño no lo usa.
     /// @note Opera sobre los segmentos **locales**; los ya descargados al tier (fríos) se conservan

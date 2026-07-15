@@ -35,9 +35,8 @@ std::vector<GroupOffsetEntry> OffsetManager::list_for_group(std::string_view gro
                 .topic = key.topic, .partition = key.partition, .offset = entry.offset});
         }
     }
-    std::ranges::sort(out, {}, [](const GroupOffsetEntry& e) {
-        return std::tie(e.topic, e.partition);
-    });
+    std::ranges::sort(out, {},
+                      [](const GroupOffsetEntry& e) { return std::tie(e.topic, e.partition); });
     return out;
 }
 

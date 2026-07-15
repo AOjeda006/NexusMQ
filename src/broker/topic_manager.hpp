@@ -121,13 +121,15 @@ public:
     /// @brief Actualiza la config **mutable en caliente** del topic @p name (retención; ADR-0037).
     /// @param retention_ms Nuevo `retention_ms` si tiene valor (PATCH: solo si presente).
     /// @param retention_bytes Nuevo `retention_bytes` si tiene valor.
-    /// @details `segment_bytes` **no** es mutable (create-only); esta API solo toca la retención. El
+    /// @details `segment_bytes` **no** es mutable (create-only); esta API solo toca la retención.
+    /// El
     ///   barrido de `enforce_retention_all` lee la config vigente, de modo que el cambio surte
-    ///   efecto en el siguiente ciclo. El fan-out cross-core lo hace `update_topic_config_on_cluster`.
+    ///   efecto en el siguiente ciclo. El fan-out cross-core lo hace
+    ///   `update_topic_config_on_cluster`.
     /// @return Los metadatos actualizados, o `NotFound` si el topic no existe en este núcleo.
-    [[nodiscard]] expected<TopicMetadata> update_config(std::string_view name,
-                                                        std::optional<std::int64_t> retention_ms,
-                                                        std::optional<std::int64_t> retention_bytes);
+    [[nodiscard]] expected<TopicMetadata> update_config(
+        std::string_view name, std::optional<std::int64_t> retention_ms,
+        std::optional<std::int64_t> retention_bytes);
 
     /// @brief ¿Atiende este núcleo la partición @p pid? (`pid % num_cores == owner_core`,
     /// ADR-0026).
@@ -152,8 +154,8 @@ public:
     /// @brief Aplica la retención a **todas** las particiones locales no replicadas de este núcleo,
     ///   derivando la `RetentionPolicy` de la config **actual** de cada topic. Reactor-local.
     /// @details Tarea de mantenimiento periódica (ADR-0036): recorre los topics de este núcleo y,
-    ///   por cada partición local `Partition` (las réplicas reclaman por compactación de Raft), llama
-    ///   a `PartitionBase::enforce_retention` con la política del topic. Topics sin política
+    ///   por cada partición local `Partition` (las réplicas reclaman por compactación de Raft),
+    ///   llama a `PartitionBase::enforce_retention` con la política del topic. Topics sin política
     ///   (`retention_ms < 0` y `retention_bytes < 0`) se omiten. Reclama por **segmentos sellados
     ///   enteros** (nunca el activo).
     /// @param now Instante de referencia para la retención por tiempo (se inyecta; por defecto el

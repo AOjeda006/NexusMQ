@@ -66,7 +66,8 @@ public:
     [[nodiscard]] task<expected<TopicDescription>> describe_topic(std::string_view name) override;
     [[nodiscard]] std::vector<TopicSummary> list_topics(Page page) const override;
     [[nodiscard]] task<std::vector<GroupSummary>> list_groups(Page page) override;
-    [[nodiscard]] task<expected<GroupDescription>> describe_group(std::string_view group_id) override;
+    [[nodiscard]] task<expected<GroupDescription>> describe_group(
+        std::string_view group_id) override;
     [[nodiscard]] task<expected<ClusterInfo>> describe_cluster() override;
 
 private:

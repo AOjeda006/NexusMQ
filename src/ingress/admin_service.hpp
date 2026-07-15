@@ -49,7 +49,7 @@ struct TopicDescription {
     TopicSummary summary;
     std::int64_t retention_ms = -1;     ///< Retención por tiempo vigente (`-1` = sin límite).
     std::int64_t retention_bytes = -1;  ///< Retención por tamaño vigente (`-1` = sin límite).
-    std::int64_t segment_bytes = 0;     ///< Tamaño de segmento (create-only; no mutable en caliente).
+    std::int64_t segment_bytes = 0;  ///< Tamaño de segmento (create-only; no mutable en caliente).
     std::vector<PartitionInfo> partitions;
 };
 
@@ -117,13 +117,14 @@ struct FollowerProgress {
 struct PartitionRaftInfo {
     std::string topic;
     std::int32_t partition = 0;
-    std::int32_t leader = -1;         ///< NodeId del líder conocido, o `-1` si se desconoce.
-    std::string role;                 ///< Rol de esta réplica (`follower`/`candidate`/`leader`…).
+    std::int32_t leader = -1;  ///< NodeId del líder conocido, o `-1` si se desconoce.
+    std::string role;          ///< Rol de esta réplica (`follower`/`candidate`/`leader`…).
     std::int64_t term = 0;
     std::int64_t commit_index = 0;    ///< High-watermark de la réplica (entradas aplicadas).
     std::int64_t last_log_index = 0;  ///< Último índice del log local.
     std::int64_t leader_epoch = 0;
-    std::vector<FollowerProgress> followers;  ///< Progreso por seguidor (solo si esta réplica lidera).
+    std::vector<FollowerProgress>
+        followers;  ///< Progreso por seguidor (solo si esta réplica lidera).
 };
 
 /// @brief Estado del clúster/Raft (DTO de `describe_cluster`). Afinidad: INMUTABLE (valor).
@@ -159,9 +160,9 @@ public:
     [[nodiscard]] virtual task<expected<void>> delete_topic(std::string_view name) = 0;
 
     /// @brief Altera la config **mutable en caliente** del topic @p name (retención) según @p spec.
-    ///   `NotFound` si no existe. Corrutina: la config se publica a **todos** los núcleos por paso de
-    ///   mensajes (fan-out cross-core, ADR-0037), de modo que el barrido de retención de cada núcleo
-    ///   (ADR-0036) lea el valor nuevo. Devuelve el resumen del topic actualizado.
+    ///   `NotFound` si no existe. Corrutina: la config se publica a **todos** los núcleos por paso
+    ///   de mensajes (fan-out cross-core, ADR-0037), de modo que el barrido de retención de cada
+    ///   núcleo (ADR-0036) lea el valor nuevo. Devuelve el resumen del topic actualizado.
     [[nodiscard]] virtual task<expected<TopicSummary>> alter_topic_config(
         std::string_view name, const AlterTopicSpec& spec) = 0;
 

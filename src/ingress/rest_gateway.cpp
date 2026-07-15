@@ -203,9 +203,10 @@ task<HttpResponse> RestGateway::alter_topic(const HttpRequest& request,
     }
     // `segmentBytes` está horneado en los segmentos escritos: no es mutable en caliente (ADR-0037).
     if (json->find("segmentBytes") != nullptr) {
-        co_return problem_explicit(
-            400, "'segmentBytes' no es mutable en caliente (create-only): recréa el topic para cambiarlo",
-            request.path());
+        co_return problem_explicit(400,
+                                   "'segmentBytes' no es mutable en caliente (create-only): recréa "
+                                   "el topic para cambiarlo",
+                                   request.path());
     }
     AlterTopicSpec spec;
     if (const JsonValue* value = json->find("retentionMs");
@@ -309,8 +310,8 @@ task<HttpResponse> RestGateway::route_groups(const HttpRequest& request,
 task<HttpResponse> RestGateway::describe_group(std::string_view group_id) const {
     const expected<GroupDescription> description = co_await admin_.describe_group(group_id);
     if (!description) {
-        co_return problem_response(
-            description.error(), std::string{config_.api_prefix} + "/groups/" + std::string{group_id});
+        co_return problem_response(description.error(), std::string{config_.api_prefix} +
+                                                            "/groups/" + std::string{group_id});
     }
     JsonWriter writer;
     writer.begin_object();
