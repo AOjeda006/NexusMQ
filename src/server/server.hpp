@@ -219,10 +219,12 @@ private:
     ///   el admin); con un solo núcleo el `call_on` es local e inline.
     [[nodiscard]] task<std::vector<GroupSummary>> list_groups(Page page);
 
-    /// @brief Describe un grupo (miembros/offsets/lag) para el `AdminApi`. **Reactor-local:** lee su
+    /// @brief Describe un grupo (miembros/offsets/lag) para el `AdminApi`. **Reactor-local:** lee
+    /// su
     ///   **único** núcleo coordinador (`fnv1a_64(group_id) % N`, ADR-0026); el *high-watermark* de
     ///   cada partición se lee de su núcleo dueño (`partition % N`) para el *lag*.
-    /// @details Corrutina: `call_on` al núcleo del grupo (membresía + offsets) y luego a cada núcleo
+    /// @details Corrutina: `call_on` al núcleo del grupo (membresía + offsets) y luego a cada
+    /// núcleo
     ///   dueño de partición (high-watermark). Con N=1 los `call_on` son locales e inline. Pre-`run`
     ///   (monohilo) lee directamente el núcleo 0.
     [[nodiscard]] task<expected<GroupDescription>> describe_group(std::string group_id);
@@ -241,8 +243,9 @@ private:
     /// @brief Registra en cada reactor un temporizador periódico que aplica la retención de sus
     ///   topics (`TopicManager::enforce_retention_all`), reactor-local (ADR-0036).
     /// @details Cadencia `kRetentionInterval`. Núcleo 0 inline; núcleos 1..N-1 por su buzón (el
-    ///   conjunto de temporizadores es reactor-local). La retención lee la config **actual** de cada
-    ///   topic, de modo que un `PATCH` posterior surte efecto. @p main es el reactor del núcleo 0.
+    ///   conjunto de temporizadores es reactor-local). La retención lee la config **actual** de
+    ///   cada topic, de modo que un `PATCH` posterior surte efecto. @p main es el reactor del
+    ///   núcleo 0.
     void start_retention_maintenance(Reactor& main);
 
     /// @brief Crea el `RaftTransport` de cada núcleo (sobre su `Proactor`) y lo instala como
@@ -314,6 +317,10 @@ private:
     std::atomic<Reactor*> main_reactor_{nullptr};
     /// Marca de apagado: si `stop` llega antes de que `run` publique el núcleo 0, `run` no arranca.
     std::atomic<bool> stop_requested_{false};
+    /// Señal de drenaje para las conexiones SSE largas (ADR-0038): `stop` la activa para que sus
+    /// bucles de emisión salgan y cierren la conexión. La referencian las corrutinas del pool, así
+    /// que vive mientras el server exista.
+    std::atomic<bool> admin_draining_{false};
     std::optional<JwtVerifier> jwt_;
     std::optional<AdminApi> admin_api_;
     std::optional<RestGateway> rest_;

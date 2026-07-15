@@ -48,3 +48,4 @@ con las secciones **Contexto · Decisión · Consecuencias · Alternativas consi
 | [0035](adr-0035-estado-cluster-raft-rest-admin.md) | Estado de clúster/Raft por la superficie REST admin (`GET /api/v1/cluster`) | aceptado | 2026-07-13 |
 | [0036](adr-0036-aplicacion-retencion-runtime.md) | Aplicación de la retención en runtime (barrido periódico por núcleo) | aceptado | 2026-07-13 |
 | [0037](adr-0037-config-topic-mutable-cross-core.md) | Config de topic mutable en caliente y publicada cross-core (`PATCH /api/v1/topics/{name}`) | aceptado | 2026-07-13 |
+| [0038](adr-0038-streaming-sse-admin-http.md) | Modelo de streaming del servidor HTTP admin (SSE, `GET /api/v1/stream`) | aceptado | 2026-07-13 |

@@ -231,6 +231,23 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "405": { $ref: "#/components/responses/Problem" }
 
+  /api/v1/stream:
+    get:
+      tags: [operación]
+      summary: Stream de métricas en tiempo real (Server-Sent Events).
+      description: >-
+        Conexión SSE (`text/event-stream`, sin `Content-Length`, keep-alive): emite un evento
+        `metrics` con el snapshot de métricas (mismo payload que `/api/v1/metrics/snapshot`) con
+        una cadencia. Abierto como el resto de la observabilidad. El navegador lo consume con
+        `EventSource` (reconexión automática). ADR-0038.
+      security: []
+      responses:
+        "200":
+          description: Stream de eventos SSE.
+          content:
+            text/event-stream:
+              schema: { type: string }
+
   /api/v1/cluster:
     get:
       tags: [operación]

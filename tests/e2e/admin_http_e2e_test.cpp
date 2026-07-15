@@ -4,6 +4,7 @@
 // AdminRouter no cubren.
 #include <gtest/gtest.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 
 #include <array>
 #include <cstddef>
@@ -87,6 +88,34 @@ std::string http_request(std::uint16_t port, std::string_view method, std::strin
     return response;
 }
 
+// Abre el stream SSE y lee hasta capturar cabeceras + el primer frame (que se emite de inmediato,
+// antes de la primera espera de cadencia). Cierra al salir (RAII) → el server termina ese stream.
+std::string sse_probe(std::uint16_t port) {
+    nexus::expected<nexus::Socket> client = nexus::Socket::connect("127.0.0.1", port);
+    if (!client) {
+        return {};
+    }
+    const timeval tv{.tv_sec = 3, .tv_usec = 0};  // no bloquear indefinidamente si algo va mal.
+    ::setsockopt(client->fd(), SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    if (!send_all(client->fd(), "GET /api/v1/stream HTTP/1.1\r\nHost: localhost\r\n\r\n")) {
+        return {};
+    }
+    std::string response;
+    std::array<char, 4096> chunk{};
+    for (int i = 0; i < 64; ++i) {
+        const ssize_t got = ::recv(client->fd(), chunk.data(), chunk.size(), 0);
+        if (got <= 0) {
+            break;
+        }
+        response.append(chunk.data(), static_cast<std::size_t>(got));
+        const std::size_t data_pos = response.find("data: ");
+        if (data_pos != std::string::npos && response.find("\n\n", data_pos) != std::string::npos) {
+            break;  // ya tenemos un frame completo.
+        }
+    }
+    return response;
+}
+
 TEST(AdminHttpE2E, PuertoDeOperacion_HealthMetricsYRest) {
     TempDir dir{"ops"};
     nexus::Server::Config config;
@@ -139,6 +168,14 @@ TEST(AdminHttpE2E, PuertoDeOperacion_HealthMetricsYRest) {
     // --- ruta desconocida → 404 ---
     const std::string unknown = http_request(admin, "GET", "/api/v1/desconocido");
     EXPECT_NE(unknown.find("404"), std::string::npos);
+
+    // --- stream SSE: cabeceras text/event-stream (sin Content-Length) + un frame de métricas ---
+    const std::string stream = sse_probe(admin);
+    EXPECT_NE(stream.find("200"), std::string::npos);
+    EXPECT_NE(stream.find("text/event-stream"), std::string::npos);
+    EXPECT_EQ(stream.find("Content-Length"), std::string::npos);  // stream: sin Content-Length.
+    EXPECT_NE(stream.find("event: metrics"), std::string::npos);
+    EXPECT_NE(stream.find("data: {"), std::string::npos);  // payload JSON del snapshot.
 
     server->stop();
     server_thread.join();

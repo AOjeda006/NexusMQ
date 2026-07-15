@@ -46,8 +46,8 @@ constexpr unsigned int kRingDepth = 256;
 constexpr std::size_t kMaxRaftMessage = std::size_t{16} * 1024 * 1024;
 
 /// Cadencia del barrido de retención por núcleo (ADR-0036). La retención es mantenimiento de fondo
-/// (reclama segmentos sellados enteros), no un plazo estricto: un periodo holgado basta y no compite
-/// con el hot path.
+/// (reclama segmentos sellados enteros), no un plazo estricto: un periodo holgado basta y no
+/// compite con el hot path.
 constexpr std::chrono::seconds kRetentionInterval{30};
 
 /// Factoría por defecto del `Proactor` de cada reactor (plano de control): io_uring en Linux, IOCP
@@ -164,14 +164,17 @@ task<void> proxy_accept_loop(Reactor& reactor, Listener& listener, Proxy& proxy,
     }
 }
 
-/// Bucle de aceptación del plano de operación: una corrutina HTTP por conexión.
-task<void> admin_accept_loop(Reactor& reactor, Listener& listener, const AdminRouter& router) {
+/// Bucle de aceptación del plano de operación: una corrutina HTTP por conexión. @p draining se pasa
+/// a cada conexión para que las SSE largas cierren al apagar (ADR-0038).
+task<void> admin_accept_loop(Reactor& reactor, Listener& listener, const AdminRouter& router,
+                             const std::atomic<bool>& draining) {
     while (true) {
         expected<Socket> client = co_await listener.async_accept(reactor.proactor());
         if (!client) {
             co_return;
         }
-        reactor.spawn(serve_admin_connection(reactor.proactor(), std::move(*client), router));
+        reactor.spawn(
+            serve_admin_connection(reactor.proactor(), std::move(*client), router, draining));
     }
 }
 
@@ -473,7 +476,8 @@ void Server::start_retention_maintenance(Reactor& main) {
         };
         Reactor& owner = pool_.reactor(core);
         if (core == 0) {
-            owner.every(kRetentionInterval, std::move(tick));  // núcleo 0: este hilo, registro directo.
+            owner.every(kRetentionInterval,
+                        std::move(tick));  // núcleo 0: este hilo, registro directo.
         } else {
             // Núcleos 1..N-1 corren en su propio hilo: registra el temporizador EN ese hilo por el
             // buzón (el conjunto de temporizadores del reactor no es thread-safe).
@@ -601,7 +605,7 @@ void Server::run() {
         }
     }
     if (admin_listener_ && admin_router_) {
-        main.spawn(admin_accept_loop(main, *admin_listener_, *admin_router_));
+        main.spawn(admin_accept_loop(main, *admin_listener_, *admin_router_, admin_draining_));
     }
     if (cluster_listener_) {
         main.spawn(cluster_accept_loop(main, *cluster_listener_));
@@ -630,6 +634,8 @@ void Server::run() {
 
 void Server::stop() noexcept {
     health_.set_live(false);  // drenando: `/healthz` da 503 para sacarnos del balanceador.
+    admin_draining_.store(true,
+                          std::memory_order_release);  // las conexiones SSE largas salen y cierran.
     stop_requested_.store(true, std::memory_order_release);
     // Despierta el núcleo 0 si `run` ya lo publicó (atómico + eventfd: async-signal-safe).
     if (Reactor* main = main_reactor_.load(std::memory_order_acquire); main != nullptr) {

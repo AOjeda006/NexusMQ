@@ -67,6 +67,7 @@ add_executable(nexus-tests
   unit/broker/request_router_test.cpp
   unit/server/admin_api_test.cpp
   unit/server/admin_router_test.cpp
+  unit/server/sse_test.cpp
   unit/server/daemon_args_test.cpp
   unit/server/kafka_adapter_test.cpp
   unit/consensus/raft_state_test.cpp

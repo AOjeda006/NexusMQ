@@ -86,4 +86,12 @@ task<HttpResponse> AdminRouter::handle(const HttpRequest& request) const {
     co_return co_await rest_.handle(request, now);
 }
 
+bool AdminRouter::is_stream_request(const HttpRequest& request) const noexcept {
+    return is_read_method(request.method) && request.path() == kStreamPath;
+}
+
+std::string AdminRouter::stream_snapshot_json() const {
+    return render_metrics_snapshot_json(metrics_.snapshot());
+}
+
 }  // namespace nexus

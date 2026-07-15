@@ -5,13 +5,17 @@
 #include "server/admin_http.hpp"
 
 #include <array>
+#include <atomic>
 #include <charconv>
+#include <chrono>
 #include <cstddef>
 #include <string>
 #include <string_view>
 
 #include "common/bytes.hpp"
+#include "io/awaitable.hpp"
 #include "server/admin_router.hpp"
+#include "server/sse.hpp"
 
 namespace nexus {
 
@@ -19,6 +23,24 @@ namespace {
 
 /// Tamaño del búfer de recepción por iteración.
 constexpr std::size_t kChunkSize = 4096;
+
+/// Cadencia de emisión de frames del stream SSE (ADR-0038).
+constexpr auto kSseInterval = std::chrono::seconds{1};
+
+/// @brief Envía @p raw completo por @p sock (reintenta los envíos parciales). REACTOR-LOCAL.
+/// @return `true` si se envió todo; `false` si el par cerró o hubo error (el llamante abandona).
+task<bool> send_all(Proactor& proactor, const Socket& sock, std::string_view raw) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    ByteSpan remaining{reinterpret_cast<const std::byte*>(raw.data()), raw.size()};
+    while (!remaining.empty()) {
+        const expected<std::size_t> sent = co_await sock.async_send(proactor, remaining);
+        if (!sent || *sent == 0) {
+            co_return false;  // error o par cerrado.
+        }
+        remaining = remaining.subspan(*sent);
+    }
+    co_return true;
+}
 
 /// ¿Coinciden @p a y @p b sin distinguir mayúsculas (ASCII)?
 bool iequals(std::string_view a, std::string_view b) noexcept {
@@ -138,29 +160,56 @@ task<expected<HttpRequest>> read_http_request(Proactor& proactor, const Socket& 
 }
 
 task<void> serve_admin_connection(Proactor& proactor, Socket sock, const AdminRouter& router,
-                                  HttpParseLimits limits) {
+                                  const std::atomic<bool>& draining, HttpParseLimits limits) {
     const expected<HttpRequest> request = co_await read_http_request(proactor, sock, limits);
-    HttpResponse response;
-    if (request) {
-        response = co_await router.handle(*request);
-    } else if (request.error().code() == ErrorCode::Shutdown) {
-        co_return;  // cierre limpio sin datos: nada que responder.
-    } else {
-        response = bad_request();
-    }
-    response.set_header("Connection", "close");
-
-    const std::string raw = response.serialize();
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    ByteSpan remaining{reinterpret_cast<const std::byte*>(raw.data()), raw.size()};
-    while (!remaining.empty()) {
-        const expected<std::size_t> sent = co_await sock.async_send(proactor, remaining);
-        if (!sent || *sent == 0) {
-            break;  // error o par cerrado: abandonamos el envío.
+    if (!request) {
+        if (request.error().code() == ErrorCode::Shutdown) {
+            co_return;  // cierre limpio sin datos: nada que responder.
         }
-        remaining = remaining.subspan(*sent);
+        static_cast<void>(co_await send_all(proactor, sock, bad_request().serialize()));
+        co_return;
     }
+    // La ruta SSE no cabe en el modelo buffered (sin Content-Length, conexión larga): se desvía al
+    // camino streaming ANTES de enrutar por el modelo de una-respuesta-y-cierra (ADR-0038).
+    if (router.is_stream_request(*request)) {
+        co_await serve_admin_sse_connection(proactor, std::move(sock), router, draining);
+        co_return;
+    }
+    HttpResponse response = co_await router.handle(*request);
+    response.set_header("Connection", "close");
+    static_cast<void>(co_await send_all(proactor, sock, response.serialize()));
     co_return;
+}
+
+task<void> serve_admin_sse_connection(Proactor& proactor, Socket sock, const AdminRouter& router,
+                                      const std::atomic<bool>& draining) {
+    // Cabeceras SSE: sin Content-Length (respuesta indefinida), conexión persistente y
+    // anti-buffering de proxies. No se puede usar `HttpResponse` (fuerza Content-Length): se
+    // serializan a mano.
+    constexpr std::string_view kSseHeaders =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/event-stream\r\n"
+        "Cache-Control: no-cache\r\n"
+        "Connection: keep-alive\r\n"
+        "X-Accel-Buffering: no\r\n"
+        "\r\n";
+    if (!co_await send_all(proactor, sock, kSseHeaders)) {
+        co_return;
+    }
+    // Bucle de emisión: un frame por cadencia hasta que el par cierra, hay error o el servidor
+    // drena. Observa `draining` (lo pone `Server::stop`) para no seguir emitiendo durante el
+    // apagado.
+    while (!draining.load(std::memory_order_acquire)) {
+        const std::string frame = format_sse_event("metrics", router.stream_snapshot_json());
+        if (!co_await send_all(proactor, sock, frame)) {
+            co_return;  // el cliente cerró el EventSource o hubo error de envío.
+        }
+        const MonoTime deadline = std::chrono::steady_clock::now() + kSseInterval;
+        if (const expected<void> waited = co_await async_timer(proactor, deadline); !waited) {
+            co_return;  // temporizador cancelado (apagado del proactor).
+        }
+    }
+    co_return;  // drenando: cerramos la conexión (RAII cierra el socket).
 }
 
 }  // namespace nexus

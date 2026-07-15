@@ -40,6 +40,17 @@ public:
     ///   `RestGateway` (que puede propagar cambios de topic a varios núcleos, ADR-0026).
     [[nodiscard]] task<HttpResponse> handle(const HttpRequest& request) const;
 
+    /// Ruta del stream SSE de tiempo real (ADR-0038).
+    static constexpr std::string_view kStreamPath = "/api/v1/stream";
+
+    /// @brief ¿Es @p request la petición del stream SSE? (GET a `kStreamPath`).
+    /// @details El servidor HTTP la desvía al camino **streaming** (sin `Content-Length`, conexión
+    ///   larga) **antes** de caer en el modelo buffered de `handle` (ADR-0038).
+    [[nodiscard]] bool is_stream_request(const HttpRequest& request) const noexcept;
+
+    /// @brief JSON del snapshot de métricas actual (payload de cada frame SSE). THREAD-SAFE.
+    [[nodiscard]] std::string stream_snapshot_json() const;
+
 private:
     // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
     RestGateway& rest_;
