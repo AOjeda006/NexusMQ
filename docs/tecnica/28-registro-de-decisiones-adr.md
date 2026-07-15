@@ -1,6 +1,6 @@
 # 28. Registro de decisiones (ADR)
 
-Este capítulo es la puerta de entrada al **registro de decisiones de arquitectura** (ADR) de NexusMQ: explica qué es un ADR, la regla de inmutabilidad que rige su ciclo de vida, y ofrece el **índice completo** de los 34 ADR del proyecto, agrupados por tema. Las decisiones íntegras viven en el directorio [`../adr/`](../adr/), una por fichero.
+Este capítulo es la puerta de entrada al **registro de decisiones de arquitectura** (ADR) de NexusMQ: explica qué es un ADR, la regla de inmutabilidad que rige su ciclo de vida, y ofrece el **índice completo** de los 38 ADR del proyecto, agrupados por tema. Las decisiones íntegras viven en el directorio [`../adr/`](../adr/), una por fichero.
 
 ## 28.1 Qué es un ADR
 
@@ -20,7 +20,7 @@ En NexusMQ esto produce una **cadena de reemplazo** visible en el backend de I/O
 
 Cada eslabón cae cuando una premisa se demuestra falsa: ADR-0021 asumía que el backend «no era verificable en este entorno»; resultó que el contenedor **sí** podía instalar el cross-compiler MinGW-w64 (ADR-0022), y finalmente se **ejecutó** en una máquina Windows real (ADR-0023). La cadena documenta esa progresión sin reescribir el pasado.
 
-## 28.3 Índice de los 34 ADR
+## 28.3 Índice de los 38 ADR
 
 | ADR | Título | Estado | Fecha |
 |-----|--------|--------|-------|
@@ -61,7 +61,7 @@ Cada eslabón cae cuando una premisa se demuestra falsa: ADR-0021 asumía que el
 
 ## 28.4 ADR agrupados por tema
 
-Los 34 ADR cubren diez áreas. Cada grupo se resume en una frase; los números enlazan al fichero correspondiente en [`../adr/`](../adr/).
+Los 38 ADR cubren diez áreas. Cada grupo se resume en una frase; los números enlazan al fichero correspondiente en [`../adr/`](../adr/).
 
 ### Plataforma e I/O
 
@@ -89,15 +89,15 @@ La tesis arquitectónica: **shared-nothing thread-per-core** (un reactor *pinned
 
 ### Ingress y seguridad
 
-[0006](../adr/adr-0006-ingress-dos-modos.md), [0018](../adr/adr-0018-rest-admin-puerto-adaptador.md), [0019](../adr/adr-0019-tls-opcional-openssl-bios.md), [0027](../adr/adr-0027-modo-proxy-upstream-pool.md), [0031](../adr/adr-0031-cifrado-en-reposo-aes-gcm.md).
+[0006](../adr/adr-0006-ingress-dos-modos.md), [0018](../adr/adr-0018-rest-admin-puerto-adaptador.md), [0019](../adr/adr-0019-tls-opcional-openssl-bios.md), [0027](../adr/adr-0027-modo-proxy-upstream-pool.md), [0031](../adr/adr-0031-cifrado-en-reposo-aes-gcm.md), [0035](../adr/adr-0035-estado-cluster-raft-rest-admin.md), [0037](../adr/adr-0037-config-topic-mutable-cross-core.md).
 
-El borde del sistema y la protección de datos: *ingress* en dos modos (nativo directo y proxy *opt-in*), REST admin desacoplado por **puerto/adaptador** (DIP), TLS/mTLS opcional con puente de BIOs de memoria sobre el proactor, el *pool* de conexiones aguas arriba por reactor que cablea el modo proxy, y el **cifrado en reposo** del log (AES-256-GCM opcional con DEK por segmento y framing AEAD por bloque), que reutiliza la misma dependencia OpenSSL que TLS.
+El borde del sistema y la protección de datos: *ingress* en dos modos (nativo directo y proxy *opt-in*), REST admin desacoplado por **puerto/adaptador** (DIP), TLS/mTLS opcional con puente de BIOs de memoria sobre el proactor, el *pool* de conexiones aguas arriba por reactor que cablea el modo proxy, y el **cifrado en reposo** del log (AES-256-GCM opcional con DEK por segmento y framing AEAD por bloque), que reutiliza la misma dependencia OpenSSL que TLS. Sobre esa superficie REST se enriquece el **backend de la consola web**: el **estado de clúster/Raft** por partición (`GET /api/v1/cluster`) agregado cross-core sin filtrar los tipos internos, y la **config de *topic* mutable en caliente** (`PATCH`) publicada a todos los núcleos —retención mutable, `segment.bytes` de solo-creación—.
 
 ### Almacenamiento
 
-[0032](../adr/adr-0032-tiered-storage-puerto-y-tier-local.md).
+[0032](../adr/adr-0032-tiered-storage-puerto-y-tier-local.md), [0036](../adr/adr-0036-aplicacion-retencion-runtime.md).
 
-La retención larga a bajo coste: el **almacenamiento por niveles** (*tiered storage*) descarga los segmentos sellados fríos a un puerto `StorageTier` (con adaptador local por defecto e interfaz orientada a fichero, lista para un adaptador S3 futuro), reclama el disco local **solo tras confirmar** la subida y **rehidrata** de forma transparente al leer un offset frío, interoperando con el cifrado en reposo (sube el *ciphertext* tal cual).
+La retención larga a bajo coste: el **almacenamiento por niveles** (*tiered storage*) descarga los segmentos sellados fríos a un puerto `StorageTier` (con adaptador local por defecto e interfaz orientada a fichero, lista para un adaptador S3 futuro), reclama el disco local **solo tras confirmar** la subida y **rehidrata** de forma transparente al leer un offset frío, interoperando con el cifrado en reposo (sube el *ciphertext* tal cual). Y la **aplicación de la retención en runtime**: un barrido periódico por núcleo (temporizador holgado en cada reactor) que reclama segmentos sellados enteros de las particiones no replicadas leyendo la config **actual** del *topic* —antes la política existía pero nadie la disparaba—.
 
 ### Transacciones
 
@@ -107,9 +107,9 @@ El **exactly-once multi-partición** (nativo, *effectively-once* honesto): marca
 
 ### Observabilidad
 
-[0017](../adr/adr-0017-nexus-telemetry.md).
+[0017](../adr/adr-0017-nexus-telemetry.md), [0038](../adr/adr-0038-streaming-sse-admin-http.md).
 
-Un target dedicado `nexus-telemetry` que concentra métricas Prometheus y logging estructurado, evitando esparcir la instrumentación por todas las capas.
+Un target dedicado `nexus-telemetry` que concentra métricas Prometheus y logging estructurado, evitando esparcir la instrumentación por todas las capas. Para la consola en tiempo real se suma un **modelo de streaming SSE** en el servidor HTTP admin: un camino de respuesta hermano del *buffered* que emite el snapshot de métricas por `text/event-stream` (sin `Content-Length`, con cadencia) y observa la señal de drenaje para cerrar limpio en el apagado.
 
 ### Windows
 

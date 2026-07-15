@@ -64,7 +64,11 @@ contrato: ver [`docs/protocol.md`](../protocol.md). La **compresión** LZ4/Zstd 
 
 - **Retención por tiempo/tamaño** (`retention.ms` / `retention.bytes`): se borran **segmentos
   sellados enteros** cuando se supera el umbral (nunca registros sueltos ni el segmento
-  activo). Ver el [diagrama 9](../diagramas/09-retencion-compactacion.md).
+  activo). Ver el [diagrama 9](../diagramas/09-retencion-compactacion.md). La política la aplica en
+  runtime un **barrido periódico por núcleo** (un temporizador holgado en cada reactor recorre sus
+  particiones no replicadas y reclama lo que sobra); lee la config **actual** del *topic*, de modo que
+  un `PATCH` posterior surte efecto ([ADR-0036](../adr/adr-0036-aplicacion-retencion-runtime.md)). Las
+  particiones replicadas gestionan su prefijo por **compactación de Raft**, no por retención directa.
 - **Compactación por clave** (`LogCompactor`): política alternativa que conserva el último
   valor por clave, útil para *topics* de estado tipo *changelog*.
 

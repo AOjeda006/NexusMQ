@@ -48,6 +48,10 @@ flowchart LR
   [`18-flujo-rest-jwt.md`](./18-flujo-rest-jwt.md)).
 - **Grafana**: consulta Prometheus por **PromQL** y pinta *dashboards* / dispara alertas; *datasource*
   provisionado desde `grafana/datasources.yml`.
+- **Consola web** (consumidor aparte del *pull* de Prometheus): las **mismas** métricas se sirven en
+  JSON estructurado por `GET /api/v1/metrics/snapshot` y por *push* SSE en `GET /api/v1/stream`
+  (`text/event-stream`, con cadencia), para *dashboards* en tiempo real sin *polling*
+  ([ADR-0038](../adr/adr-0038-streaming-sse-admin-http.md)).
 - **Logs JSON**: estructurados, con niveles y *correlation IDs* para *tracing* de peticiones;
   emitidos a la salida estándar para que el orquestador/colector los agregue.
 

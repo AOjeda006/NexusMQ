@@ -91,7 +91,7 @@ La documentación técnica **final** vive en **[`docs/`](docs/)**:
 - **[`docs/tecnica/`](docs/tecnica/)** — la documentación técnica completa (30 capítulos en 7 partes:
   visión, arquitectura, contratos, implementación, calidad, operación y decisiones). Empieza por su
   [índice de lectura](docs/tecnica/README.md). Es la **fuente de verdad** del *qué* y el *porqué*.
-- **[`docs/adr/`](docs/adr/)** — los 34 *Architecture Decision Records* (**ADR-0001..0034**), uno por
+- **[`docs/adr/`](docs/adr/)** — los 38 *Architecture Decision Records* (**ADR-0001..0038**), uno por
   fichero, con su [índice](docs/adr/README.md).
 - **[`docs/diagramas/`](docs/diagramas/)** — los 25 diagramas (Mermaid) de arquitectura, runtime,
   almacenamiento, consenso, protocolos, ingress y operación.

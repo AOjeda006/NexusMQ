@@ -23,9 +23,12 @@ Bajo `/api/v1`, recursos en plural y verbos HTTP (sin acciones en la URL):
 | ------------- | --------- |
 | `GET /api/v1/topics` | Lista los *topics* (paginado). |
 | `POST /api/v1/topics` | Crea un *topic*; responde `201` con cabecera `Location`. |
-| `GET /api/v1/topics/{name}` | Describe un *topic* (resumen + particiones). |
+| `GET /api/v1/topics/{name}` | Describe un *topic* (resumen + particiones + `config`). |
+| `PATCH /api/v1/topics/{name}` | Ajusta en caliente la config de retención (`retentionMs`/`retentionBytes`) y la publica cross-core ([ADR-0037](../adr/adr-0037-config-topic-mutable-cross-core.md)); `segmentBytes` es de solo-creación → `400`. |
 | `DELETE /api/v1/topics/{name}` | Borra un *topic* **y sus datos en disco** (el `.log`/`.index` de cada partición). |
 | `GET /api/v1/groups` | Lista los grupos de consumidores (paginado). |
+| `GET /api/v1/groups/{id}` | Describe un grupo: miembros, suscripción, offsets confirmados y *lag* por partición. |
+| `GET /api/v1/cluster` | Estado del clúster y de Raft por partición (nodos, rol, *leader*, *commit index*, progreso de *followers*) agregado cross-core ([ADR-0035](../adr/adr-0035-estado-cluster-raft-rest-admin.md)). |
 
 Fuera de `/api/v1` y **sin autenticación**, el plano de salud/observabilidad:
 
@@ -34,6 +37,8 @@ Fuera de `/api/v1` y **sin autenticación**, el plano de salud/observabilidad:
 | `GET /healthz` | *Liveness*: ¿el proceso está vivo? |
 | `GET /readyz` | *Readiness*: ¿puede recibir tráfico? (disco/Raft/*lag*). |
 | `GET /metrics` | Métricas en formato de exposición de Prometheus. |
+| `GET /api/v1/metrics/snapshot` | Snapshot **estructurado** de métricas (JSON) para la consola; mismo recorrido que `/metrics`, servido por el `AdminRouter` sin autenticar. |
+| `GET /api/v1/stream` | Stream **SSE** (`text/event-stream`) que emite el snapshot de métricas por *push* con una cadencia ([ADR-0038](../adr/adr-0038-streaming-sse-admin-http.md)). |
 
 `/healthz` y `/readyz` solo aceptan **`GET`** (y `HEAD`); cualquier otro método responde
 **`405 Method Not Allowed`**, para que una *probe* mal configurada (p. ej. un `POST`) falle de forma
@@ -64,7 +69,27 @@ de TLS y la postura de seguridad están en el [capítulo 27](./27-seguridad.md).
   de modo que el protocolo binario nativo aplica exactamente la misma validación —traducida
   a su código de wire— y ninguna superficie acepta lo que otra rechaza.
 
-## 15.5 Documentación como contrato
+## 15.5 Superficie para la consola web
+
+Sobre el puerto de operación se apoya una **consola de administración** (repositorio aparte). Para
+alimentarla sin acoplar el núcleo, la API añade lecturas ricas y un canal en tiempo real:
+
+- **Snapshot de métricas** (`GET /api/v1/metrics/snapshot`): el mismo recorrido que la exposición
+  Prometheus, pero en JSON estructurado (nombre, tipo, *labels*, valor/percentiles). Lo sirve el
+  `AdminRouter` —que ya tiene el `MetricsRegistry`— y queda **sin autenticar**, como `/metrics`.
+- **Streaming SSE** (`GET /api/v1/stream`): un camino de respuesta hermano del *buffered* (una
+  petición, una respuesta con `Content-Length`). Se desvía **antes** de enrutar por el modelo normal;
+  emite frames `event: metrics` con el snapshot y una cadencia, y observa la señal de **drenaje** para
+  cerrar limpio en el apagado ([ADR-0038](../adr/adr-0038-streaming-sse-admin-http.md)). Es
+  unidireccional (servidor→cliente); los comandos siguen yendo por el REST puntual.
+- **Describe de grupo y estado de clúster** (`GET /api/v1/groups/{id}`, `GET /api/v1/cluster`):
+  agregaciones **cross-core** (`call_on` al núcleo dueño de cada grupo/partición) que exponen *lag*,
+  offsets y el estado de Raft por partición sin filtrar los tipos internos (se copian a DTOs).
+- **Config mutable** (`PATCH /api/v1/topics/{name}`): la retención se ajusta en caliente y se publica a
+  todos los núcleos; el barrido periódico por núcleo la aplica en el siguiente ciclo
+  ([ADR-0036](../adr/adr-0036-aplicacion-retencion-runtime.md), [ADR-0037](../adr/adr-0037-config-topic-mutable-cross-core.md)).
+
+## 15.6 Documentación como contrato
 
 `openapi.yaml` no es solo documentación: es un **artefacto de tooling** (Swagger UI,
 generación de clientes, *contract testing*). Por eso se mantiene como fichero

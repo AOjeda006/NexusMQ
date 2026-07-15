@@ -119,7 +119,8 @@ cuatro señales de oro (ver [capítulo 12](./12-observabilidad.md)).
 
 ## nexus-server
 **Responsabilidad:** *composition root* de `nexusd`; ensambla todo y enruta peticiones.
-**Tipos clave:** `Server`, `Connection`, `AdminApi`/`AdminHttp`/`AdminRouter`, `KafkaAdapter`,
+**Tipos clave:** `Server`, `Connection`, `AdminApi`/`AdminHttp`/`AdminRouter`, `metrics_json`
+(snapshot de métricas en JSON), `sse` (framing `text/event-stream`, [ADR-0038](../adr/adr-0038-streaming-sse-admin-http.md)), `KafkaAdapter`,
 `KafkaConnection`, `main`.
 **Afinidad:** monta el `ReactorPool`; el `RequestRouter` enruta async al reactor dueño.
 **Invariantes:** el cableado de dependencias vive aquí, no en el dominio (ver

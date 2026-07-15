@@ -28,6 +28,12 @@ Las familias del plano de datos (`nexus_broker_requests_total`, `…_request_err
 subconjunto Kafka). Así un operador distingue —o agrega con `sum by (protocol)`— el tráfico de cada
 protocolo aunque compartan el mismo broker y las mismas particiones.
 
+Para la **consola web** el mismo registro se ofrece por dos vías adicionales (sin autenticar, como
+`/metrics`): `GET /api/v1/metrics/snapshot` da un **snapshot JSON** estructurado (mismo recorrido que
+la exposición Prometheus) y `GET /api/v1/stream` lo emite por **SSE** (`text/event-stream`) con una
+cadencia, para *dashboards* en tiempo real sin *polling* (ver
+[capítulo 15](./15-api-rest-administracion.md), [ADR-0038](../adr/adr-0038-streaming-sse-admin-http.md)).
+
 ## 12.3 Logs estructurados
 
 Los logs son **estructurados (JSON)**, con **correlation IDs** que permiten seguir una

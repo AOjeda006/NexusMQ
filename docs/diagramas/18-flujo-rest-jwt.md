@@ -64,6 +64,7 @@ sequenceDiagram
   (no autorizado) para autorización por recurso, aunque el contrato actual detalla `400`/`401`/`404`/`405`.
 - **Códigos por operación** (según `openapi.yaml`): `GET /api/v1/topics` → `200`/`400`/`401`;
   `POST /api/v1/topics` → `201`/`400`/`401`/`405`; `GET /api/v1/topics/{name}` → `200`/`401`/`404`;
-  `DELETE /api/v1/topics/{name}` → `204`/`401`/`404`/`405`; `GET /api/v1/groups` →
-  `200`/`400`/`401`/`405`.
+  `PATCH /api/v1/topics/{name}` → `200`/`400`/`401`/`404`; `DELETE /api/v1/topics/{name}` →
+  `204`/`401`/`404`/`405`; `GET /api/v1/groups` → `200`/`400`/`401`/`405`; `GET /api/v1/groups/{id}`
+  → `200`/`401`/`404`; `GET /api/v1/cluster` → `200`/`401`.
 - **Paginación:** las colecciones aceptan `page` (≥1, def. 1) y `size` (1–100, def. 20).
