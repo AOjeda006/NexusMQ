@@ -7,7 +7,7 @@
 
 ## Contexto
 
-El *two-phase commit* clásico tiene un defecto conocido: si el **coordinador cae** entre la fase de preparación y la de commit, los participantes quedan **bloqueados** esperando la decisión, indefinidamente. Por eso la normativa del proyecto prohíbe el «2PC en memoria bloqueante». Pero el commit atómico multi-partición de [ADR-0033](adr-0033-exactly-once-nativo-transacciones.md) **es** un 2PC (preparar la decisión → escribir marcadores en cada participante). Hay que reconciliar ambas cosas: dar atomicidad multi-partición **sin** que un fallo del coordinador blosquee a los participantes.
+El *two-phase commit* clásico tiene un defecto conocido: si el **coordinador cae** entre la fase de preparación y la de commit, los participantes quedan **bloqueados** esperando la decisión, indefinidamente. Por eso la normativa del proyecto prohíbe el «2PC en memoria bloqueante». Pero el commit atómico multi-partición de [ADR-0033](adr-0033-exactly-once-nativo-transacciones.md) **es** un 2PC (preparar la decisión → escribir marcadores en cada participante). Hay que reconciliar ambas cosas: dar atomicidad multi-partición **sin** que un fallo del coordinador bloquee a los participantes.
 
 ## Decisión
 

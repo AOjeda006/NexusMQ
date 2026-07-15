@@ -13,7 +13,7 @@ Fuentes de verdad del **diseño** (no las contradigas; si hay que ajustar algo
 al implementar, se propone y se decide; un **ADR aceptado no se edita**, se reemplaza):
 
 - `docs/tecnica/` — documentación técnica **final** (30 capítulos en 7 partes): visión, arquitectura, contratos, implementación (mapa de módulos y catálogo por subsistema), calidad, operación y decisiones. Empieza por `docs/tecnica/README.md`.
-- `docs/adr/` — los **ADR-0001..0029**, uno por fichero, con su `README.md` índice (el *qué* y el *porqué* de cada decisión).
+- `docs/adr/` — los **ADR-0001..0038**, uno por fichero, con su `README.md` índice (el *qué* y el *porqué* de cada decisión).
 - `docs/diagramas/` — los diagramas (Mermaid) de arquitectura, runtime, almacenamiento, consenso, protocolos, ingress y operación.
 - `docs/` — contratos **as-built**: `protocol.md`, `kafka.md`, `openapi.yaml`, `benchmarks.md`. El código en `src/` y la suite de pruebas son la referencia última.
 
