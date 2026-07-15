@@ -96,8 +96,9 @@ La documentación técnica **final** vive en **[`docs/`](docs/)**:
 - **[`docs/diagramas/`](docs/diagramas/)** — los 25 diagramas (Mermaid) de arquitectura, runtime,
   almacenamiento, consenso, protocolos, ingress y operación.
 - Contratos **as-built**: [`protocol.md`](docs/protocol.md) (protocolo binario),
-  [`kafka.md`](docs/kafka.md) (subset Kafka), [`openapi.yaml`](docs/openapi.yaml) (REST admin) y
-  [`benchmarks.md`](docs/benchmarks.md) (latencias).
+  [`kafka.md`](docs/kafka.md) (subset Kafka), [`openapi.yaml`](docs/openapi.yaml) (REST admin),
+  [`benchmarks.md`](docs/benchmarks.md) (latencias) y
+  [`validacion-e2e.md`](docs/validacion-e2e.md) (smoke E2E en Linux y Windows).
 - **[Documentación técnica en PDF](docs/pdf/NexusMQ-documentacion-tecnica.pdf)** — todo lo anterior
   (capítulos + diagramas + ADR) compilado en un único documento; ver [`docs/pdf/`](docs/pdf/) para
   regenerarlo.
