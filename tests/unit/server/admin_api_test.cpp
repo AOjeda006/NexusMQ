@@ -4,6 +4,8 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -249,11 +251,19 @@ TEST(AdminApi, DescribeGroup_SinDescriber_NotFound) {
     EXPECT_EQ(description.error().code(), nexus::ErrorCode::NotFound);
 }
 
-TEST(AdminApi, DescribeCluster_SinReplicacion_DevuelveNodoSinParticiones) {
+TEST(AdminApi, DescribeCluster_SingleNode_PueblaParticionesComoLiderEstatico) {
     TempDir dir{"cluster"};
     nexus::TopicManager topics{dir.path()};
     nexus::AdminApi admin{topics, kNodeId};
-    ASSERT_TRUE(run_create(admin, nexus::CreateTopicSpec{.name = "t", .partition_count = 2}));
+    // Topología de la demo: `demo:3` con replication_factor=1 (sin réplicas de Raft).
+    ASSERT_TRUE(run_create(admin, nexus::CreateTopicSpec{.name = "demo", .partition_count = 3}));
+
+    // Escribe 4 records en la partición 1 para que su high-watermark sea != 0 y comprobar
+    // coherencia.
+    nexus::RecordBatchHeader header;
+    header.record_count = 4;
+    const nexus::RecordBatch batch{header, std::vector<std::byte>(4, std::byte{0x7})};
+    ASSERT_TRUE(topics.get("demo")->partition(1)->produce(batch).has_value());
 
     const auto info = nexus::sync_wait(admin.describe_cluster());
     ASSERT_TRUE(info.has_value());
@@ -261,7 +271,26 @@ TEST(AdminApi, DescribeCluster_SinReplicacion_DevuelveNodoSinParticiones) {
     ASSERT_EQ(info->nodes.size(), 1U);  // nodo aislado (sin bind_cluster con peers).
     EXPECT_EQ(info->nodes[0].node_id, kNodeId);
     EXPECT_TRUE(info->nodes[0].is_self);
-    EXPECT_TRUE(info->partitions.empty());  // replication_factor=1: sin réplicas de Raft.
+
+    // Aun sin réplicas, la topología muestra las 3 particiones locales como líder estático
+    // (ADR-0040).
+    ASSERT_EQ(info->partitions.size(), 3U);
+    for (std::int32_t pid = 0; pid < 3; ++pid) {
+        const nexus::PartitionRaftInfo& part = info->partitions[static_cast<std::size_t>(pid)];
+        EXPECT_EQ(part.topic, "demo");
+        EXPECT_EQ(part.partition, pid);  // ordenadas por (topic, partition).
+        EXPECT_EQ(part.leader, kNodeId);
+        EXPECT_EQ(part.role, "leader");
+        EXPECT_EQ(part.term, 0);  // mono-nodo: sin término de elección.
+        EXPECT_TRUE(part.followers.empty());
+    }
+    // La partición 1 refleja el high-watermark del describe (4 records): commit == last == 4.
+    const auto describe = run_describe(admin, "demo");
+    ASSERT_TRUE(describe.has_value());
+    EXPECT_EQ(info->partitions[1].commit_index, describe->partitions[1].high_watermark);
+    EXPECT_EQ(info->partitions[1].commit_index, 4);
+    EXPECT_EQ(info->partitions[1].last_log_index, 4);
+    EXPECT_EQ(info->partitions[0].commit_index, 0);  // p0 vacía.
 }
 
 TEST(AdminApi, CreateTopic_Cableado_FanOutATodosLosNucleos) {

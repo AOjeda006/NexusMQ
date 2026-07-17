@@ -31,11 +31,22 @@ La imagen sigue las buenas prácticas (`deploy/Dockerfile`):
 - **Prometheus** (`:9090`) scrapea `/metrics` de los tres nodos.
 - **Grafana** (`:3000`) con *datasource* Prometheus aprovisionado.
 
-> El cluster de 3 nodos es suficiente para Raft, quórum y *failover*
-> ([ADR-0008](../adr/adr-0008-coste-cero.md)). El runtime de cluster multi-nodo
-> (descubrimiento de líder, replicación entre nodos) llegó en fases posteriores; el compose
-> sirve además para validar el empaquetado, la observabilidad y los *probes* sobre varias
-> instancias.
+> **Topología actual: brokers aislados (single-node), sin *membership*.** Hoy los tres servicios del
+> compose son **brokers independientes**: cada uno arranca su propio `demo:3` local con
+> `replication_factor=1` y **no hay *membership* ni replicación entre ellos**. El daemon `nexusd` no
+> expone ningún flag para configurar peers (el `PeerDirectory` existe en el `Config` pero no se
+> cablea desde la CLI), así que cada nodo se ejecuta solo. Consecuencia observable: `GET
+> /api/v1/cluster` de cada nodo devuelve **ese nodo** y sus particiones como **líder estático**
+> (`role: leader`, `term: 0`, sin *followers*; [ADR-0040](../adr/adr-0040-topologia-raft-single-node.md)),
+> no una vista de clúster con réplicas. El compose sirve para validar el empaquetado, la
+> observabilidad y los *probes* sobre varias instancias.
+>
+> El **clúster multinodo real** —configuración de peers, `replication_factor ≥ 2`, descubrimiento de
+> líder y replicación entre nodos— es un **hito posterior** con su propio ADR y su simulación
+> determinista de N nodos; no forma parte de esta pasada de observabilidad. La maquinaria de consenso
+> por partición (Raft, [ADR-0016](../adr/adr-0016-replicated-partition.md)) ya existe y se valida con
+> clústeres simulados en pruebas (`replicated_partition`, `cluster_e2e`), pero el *runtime* que forma
+> el clúster entre procesos `nexusd` reales aún no está cableado.
 
 ## 25.3 Kubernetes
 

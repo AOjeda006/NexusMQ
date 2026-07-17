@@ -6,9 +6,11 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 #include "broker/partition_base.hpp"
 #include "broker/topic.hpp"
@@ -219,6 +221,57 @@ std::vector<RaftObservation> observe_carriers(TopicManager& manager) {
     return out;
 }
 
+/// @brief Sintetiza el DTO de una partición local **no replicada** (single-node/RF=1). Afinidad:
+///   REACTOR-LOCAL (lee el log de la partición: debe correr en su núcleo dueño).
+/// @details Sin réplicas de Raft no hay elección ni portador: este nodo es el **líder estático** de
+///   la partición. Los índices se derivan del log local, honestos: como el *ack* es local, el
+///   high-watermark es a la vez `commit_index` y `last_log_index` (todo lo escrito está confirmado
+///   y es visible). `term = 0` (no hubo elección de Raft) y `followers` vacío (no hay réplicas).
+///   Así la consola muestra el nodo y sus particiones con datos coherentes con el `describe` del
+///   topic, aunque la topología sea de un solo nodo ([ADR-0040]).
+PartitionRaftInfo to_single_node_info(const std::string& topic, PartitionId pid,
+                                      const PartitionBase& part, NodeId node_id) {
+    const auto high_watermark = static_cast<std::int64_t>(part.high_watermark());
+    PartitionRaftInfo info;
+    info.topic = topic;
+    info.partition = pid;
+    info.leader = node_id;  // único nodo: es el líder de todas sus particiones.
+    info.role = std::string{raft_role_name(RaftRole::Leader)};
+    info.term = 0;                         // mono-nodo: sin término de elección de Raft.
+    info.commit_index = high_watermark;    // ack local: high-watermark == commit index.
+    info.last_log_index = high_watermark;  // todo lo escrito está confirmado y visible.
+    info.leader_epoch = static_cast<std::int64_t>(part.leader_epoch());
+    return info;  // followers vacío: no hay réplicas.
+}
+
+/// @brief Estado Raft de **todas** las particiones locales que atiende @p manager, como DTOs.
+///   Afinidad: REACTOR-LOCAL (debe correr en el núcleo dueño; lee portadores y logs).
+/// @details Unifica los dos casos para que la consola vea la topología completa: las **replicadas**
+///   (RF≥2) desde su portador de Raft y las **no replicadas** (single-node/RF=1) sintetizadas como
+///   líder estático. Se recorren las particiones declaradas de cada topic y se sintetizan solo las
+///   que viven en este núcleo y **no** están respaldadas por Raft (las replicadas ya las da el
+///   portador), evitando duplicados.
+std::vector<PartitionRaftInfo> observe_partitions(TopicManager& manager, NodeId node_id) {
+    std::vector<PartitionRaftInfo> out;
+    for (const RaftObservation& obs : observe_carriers(manager)) {
+        out.push_back(to_raft_info(obs));
+    }
+    for (const TopicMetadata& meta : manager.list_metadata()) {
+        Topic* topic = manager.get(meta.name);
+        if (topic == nullptr) {
+            continue;
+        }
+        for (PartitionId pid = 0; pid < meta.partition_count; ++pid) {
+            const PartitionBase* part = topic->partition(pid);
+            if (part == nullptr || part->is_replicated()) {
+                continue;  // no vive en este núcleo, o ya la cubre el portador de Raft.
+            }
+            out.push_back(to_single_node_info(meta.name, pid, *part, node_id));
+        }
+    }
+    return out;
+}
+
 }  // namespace
 
 task<expected<ClusterInfo>> AdminApi::describe_cluster() {
@@ -232,18 +285,18 @@ task<expected<ClusterInfo>> AdminApi::describe_cluster() {
     }
 
     if (partitions_ == nullptr) {
-        for (const RaftObservation& obs : observe_carriers(topics_)) {  // local (N=1 / tests).
-            info.partitions.push_back(to_raft_info(obs));
-        }
+        info.partitions = observe_partitions(topics_, node_id_);  // local (N=1 / tests).
     } else {
-        // Las réplicas viven en el núcleo dueño de su partición: se observan en su hilo (ADR-0026).
+        // Las particiones viven en el núcleo dueño (ADR-0026): se observan en su hilo, donde se
+        // leen tanto los portadores de Raft (replicadas) como los logs locales (single-node).
+        const NodeId node_id = node_id_;
         for (int core = 0; core < partitions_->core_count(); ++core) {
             TopicManager* manager = topics_by_core_[static_cast<std::size_t>(core)];
-            std::vector<RaftObservation> obs =
-                co_await call_on(*self_, partitions_->reactor(core),
-                                 [manager]() { return observe_carriers(*manager); });
-            for (const RaftObservation& observation : obs) {
-                info.partitions.push_back(to_raft_info(observation));
+            std::vector<PartitionRaftInfo> part = co_await call_on(
+                *self_, partitions_->reactor(core),
+                [manager, node_id]() { return observe_partitions(*manager, node_id); });
+            for (PartitionRaftInfo& entry : part) {
+                info.partitions.push_back(std::move(entry));
             }
         }
     }

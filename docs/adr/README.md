@@ -50,3 +50,4 @@ con las secciones **Contexto · Decisión · Consecuencias · Alternativas consi
 | [0037](adr-0037-config-topic-mutable-cross-core.md) | Config de topic mutable en caliente y publicada cross-core (`PATCH /api/v1/topics/{name}`) | aceptado | 2026-07-13 |
 | [0038](adr-0038-streaming-sse-admin-http.md) | Modelo de streaming del servidor HTTP admin (SSE, `GET /api/v1/stream`) | aceptado | 2026-07-13 |
 | [0039](adr-0039-gauge-conexiones-activas-raii.md) | Gauge de conexiones activas por plano con RAII (`nexus_broker_connections_active`) | aceptado | 2026-07-17 |
+| [0040](adr-0040-topologia-raft-single-node.md) | Topología Raft visible en single-node (`GET /api/v1/cluster` puebla `partitions[]` con RF=1) | aceptado | 2026-07-17 |
