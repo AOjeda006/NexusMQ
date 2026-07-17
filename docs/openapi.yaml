@@ -434,6 +434,12 @@ components:
 
     MetricsSnapshot:
       type: object
+      description: >-
+        Snapshot estructurado del registro de métricas (mismas series que `GET /metrics`).
+        Este esquema fija la **forma** del snapshot, no los **nombres** de las series. El catálogo
+        autoritativo de métricas (nombre, tipo, etiquetas, unidad y HELP de cada familia) es
+        `docs/metrics.md`: la consola debe codificar contra esos nombres. Si se añade o renombra una
+        métrica, ese catálogo se actualiza en el mismo commit.
       properties:
         metrics:
           type: array
