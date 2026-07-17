@@ -289,6 +289,8 @@ TEST(KafkaServerBroker, Metrics_Produce_RegistraProtocoloKafka) {
     EXPECT_EQ(metrics.counter("nexus_broker_request_errors_total", kafka_produce).value(), 0U);
     EXPECT_EQ(metrics.counter("nexus_broker_request_bytes_total", kafka_produce).value(),
               batch.size());
+    // El batch lleva 1 record: `messages` (mensajes) sube 1, distinto de la RPC.
+    EXPECT_EQ(metrics.counter("nexus_broker_messages_total", kafka_produce).value(), 1U);
     // El plano nativo no se ha tocado: su serie `protocol="native"` no existe aún.
     const nexus::Labels native_produce{{"api", "produce"}, {"protocol", "native"}};
     EXPECT_EQ(metrics.counter("nexus_broker_requests_total", native_produce).value(), 0U);

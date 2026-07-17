@@ -81,9 +81,9 @@ private:
     [[nodiscard]] TopicManager& owner_manager(PartitionId partition) noexcept;
 
     /// Contabiliza una RPC Kafka en `nexus_broker_*{api,protocol="kafka"}` (P5e). No-op sin
-    /// registro.
-    void record_request(std::string_view api, std::uint64_t bytes, bool had_error,
-                        std::chrono::steady_clock::time_point start) const;
+    /// registro. @p records es el nº de records del batch (mensajes), distinto de la RPC.
+    void record_request(std::string_view api, std::uint64_t bytes, std::uint64_t records,
+                        bool had_error, std::chrono::steady_clock::time_point start) const;
 
     TopicManager& topics_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     NodeId node_id_;

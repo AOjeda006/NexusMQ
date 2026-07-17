@@ -37,6 +37,25 @@ namespace {
 /// Tope de lectura por defecto cuando el cliente no acota `max_bytes` (anti-respuesta-gigante).
 constexpr std::size_t kDefaultFetchBytes = 1UL * 1024 * 1024;
 
+/// @brief Suma los records de los `RecordBatch` concatenados en @p blob (solo las cabeceras, sin
+///   copiar ni validar CRC): `RecordBatch::peek` da `record_count` y `encoded_size` para avanzar.
+/// @details Alimenta `nexus_broker_messages_total`. Un blob de produce nativo lleva un único batch;
+///   una respuesta de fetch puede concatenar varios. Ante una cola truncada/corrupta se detiene y
+///   devuelve lo contado (defensivo: nunca cuenta más de lo legible).
+[[nodiscard]] std::uint64_t count_batch_records(ByteSpan blob) {
+    std::uint64_t total = 0;
+    std::size_t pos = 0;
+    while (pos < blob.size()) {
+        const expected<RecordBatchView> view = RecordBatch::peek(blob.subspan(pos));
+        if (!view || view->encoded_size == 0) {
+            break;  // cabecera truncada o inconsistente: paramos sin contar de más.
+        }
+        total += static_cast<std::uint64_t>(view->record_count);
+        pos += view->encoded_size;
+    }
+    return total;
+}
+
 /// @brief Ejecuta @p fn sobre el shard (`GroupCoordinator`/`OffsetManager`) del **núcleo
 ///   coordinador** de @p group (= `fnv1a_64(group) % N`, ADR-0026) por paso de mensajes y reanuda
 ///   al llamante con la respuesta que devuelve. Sin cablear (@p partitions `nullptr`, tests)
@@ -258,6 +277,7 @@ RequestRouter::DataPlaneMetrics RequestRouter::resolve_metrics(MetricsRegistry& 
         .requests = &metrics.counter("nexus_broker_requests_total", labels),
         .errors = &metrics.counter("nexus_broker_request_errors_total", labels),
         .bytes = &metrics.counter("nexus_broker_request_bytes_total", labels),
+        .messages = &metrics.counter("nexus_broker_messages_total", labels),
         .duration = &metrics.histogram("nexus_broker_request_duration_seconds", labels),
     };
 }
@@ -272,6 +292,10 @@ void RequestRouter::set_metrics(MetricsRegistry& metrics) {
     metrics.describe(
         "nexus_broker_request_bytes_total",
         "Bytes de payload del plano de datos (producido/servido), por tipo (api) y protocolo.");
+    metrics.describe(
+        "nexus_broker_messages_total",
+        "Records (mensajes) del plano de datos producidos/servidos, por tipo (api) y protocolo; un "
+        "request agrupa N records en un batch.");
     metrics.describe("nexus_broker_request_duration_seconds",
                      "Latencia de servicio del plano de datos en segundos, por tipo (api) y "
                      "protocolo.");
@@ -281,12 +305,13 @@ void RequestRouter::set_metrics(MetricsRegistry& metrics) {
 }
 
 void RequestRouter::record_request(const DataPlaneMetrics& series, WireError error, MonoTime start,
-                                   std::uint64_t bytes) const {
+                                   std::uint64_t bytes, std::uint64_t records) const {
     if (metrics_ == nullptr) {
         return;  // sin cablear (tests unitarios): no se registra nada.
     }
     series.requests->inc();
     series.bytes->inc(bytes);
+    series.messages->inc(records);
     if (error != WireError::None) {
         series.errors->inc();
     }
@@ -403,10 +428,12 @@ task<expected<void>> RequestRouter::dispatch_produce(Decoder& body, Encoder& enc
     const expected<ProduceRequest> req = ProduceRequest::decode(body);
     ProduceResponse resp;
     std::uint64_t bytes = 0;
+    std::uint64_t records = 0;
     if (!req) {
         resp.error_code = WireError::InvalidRequest;
     } else {
-        bytes = req->batch.size();  // volumen producido (tráfico de entrada).
+        bytes = req->batch.size();                  // volumen producido (tráfico de entrada).
+        records = count_batch_records(req->batch);  // nº de records del batch (mensajes).
         if (partitions_ != nullptr) {
             // Enruta al reactor dueño de la partición; opera sobre su `TopicManager`.
             const int owner = partitions_->owner_core(req->partition);
@@ -418,7 +445,7 @@ task<expected<void>> RequestRouter::dispatch_produce(Decoder& body, Encoder& enc
         }
     }
     resp.encode(enc);
-    record_request(produce_metrics_, resp.error_code, start, bytes);
+    record_request(produce_metrics_, resp.error_code, start, bytes, records);
     co_return expected<void>{};
 }
 
@@ -428,6 +455,7 @@ task<expected<void>> RequestRouter::dispatch_fetch(Decoder& body, Encoder& enc) 
     FetchResponse resp;
     FetchOutcome outcome;  // posee los bytes; debe vivir hasta el encode (vista zero-copy).
     std::uint64_t bytes = 0;
+    std::uint64_t records = 0;
     if (!req) {
         resp.error_code = WireError::InvalidRequest;
     } else if (partitions_ != nullptr) {
@@ -442,12 +470,13 @@ task<expected<void>> RequestRouter::dispatch_fetch(Decoder& body, Encoder& enc) 
         resp.batches = outcome.result.batches.as_span();
         resp.high_watermark = outcome.high_watermark;
         resp.log_start_offset = outcome.log_start_offset;
-        bytes = resp.batches.size();  // volumen servido (tráfico de salida).
+        bytes = resp.batches.size();                  // volumen servido (tráfico de salida).
+        records = count_batch_records(resp.batches);  // nº de records servidos (mensajes).
     } else if (req) {
         resp.error_code = outcome.error;
     }
     resp.encode(enc);
-    record_request(fetch_metrics_, resp.error_code, start, bytes);
+    record_request(fetch_metrics_, resp.error_code, start, bytes, records);
     co_return expected<void>{};
 }
 

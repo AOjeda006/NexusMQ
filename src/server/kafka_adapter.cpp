@@ -232,7 +232,8 @@ TopicManager& KafkaServerBroker::owner_manager(PartitionId partition) noexcept {
     return *topics_by_core_[static_cast<std::size_t>(owner)];
 }
 
-void KafkaServerBroker::record_request(std::string_view api, std::uint64_t bytes, bool had_error,
+void KafkaServerBroker::record_request(std::string_view api, std::uint64_t bytes,
+                                       std::uint64_t records, bool had_error,
                                        std::chrono::steady_clock::time_point start) const {
     if (metrics_ == nullptr) {
         return;  // sin cablear (tests que no inyectan métricas): no se registra nada.
@@ -243,6 +244,7 @@ void KafkaServerBroker::record_request(std::string_view api, std::uint64_t bytes
     const Labels labels{{"api", std::string{api}}, {"protocol", "kafka"}};
     metrics_->counter("nexus_broker_requests_total", labels).inc();
     metrics_->counter("nexus_broker_request_bytes_total", labels).inc(bytes);
+    metrics_->counter("nexus_broker_messages_total", labels).inc(records);
     if (had_error) {
         metrics_->counter("nexus_broker_request_errors_total", labels).inc();
     }
@@ -289,12 +291,16 @@ task<kafka::ProduceResponse> KafkaServerBroker::produce(const kafka::ProduceRequ
     kafka::ProduceResponse resp;
     resp.topics.reserve(req.topics.size());
     std::uint64_t bytes = 0;
+    std::uint64_t records = 0;
     bool had_error = false;
     for (const kafka::ProduceTopicData& topic : req.topics) {
         kafka::ProduceTopicResponse topic_resp;
         topic_resp.name = topic.name;
         for (const kafka::ProducePartitionData& data : topic.partitions) {
             bytes += data.records.size();
+            // Records recibidos (mensajes), distinto de la RPC; un blob corrupto lo rechaza el
+            // append, así que aquí solo contamos lo legible (`value_or(0)`).
+            records += static_cast<std::uint64_t>(count_records(data.records).value_or(0));
             kafka::ProducePartitionResponse part_resp;
             if (partitions_ == nullptr) {
                 part_resp = produce_partition(topics_, topic.name, data);
@@ -310,7 +316,7 @@ task<kafka::ProduceResponse> KafkaServerBroker::produce(const kafka::ProduceRequ
         }
         resp.topics.push_back(std::move(topic_resp));
     }
-    record_request("produce", bytes, had_error, start);
+    record_request("produce", bytes, records, had_error, start);
     co_return resp;
 }
 
@@ -344,6 +350,7 @@ task<kafka::FetchResponse> KafkaServerBroker::fetch(const kafka::FetchRequest& r
     kafka::FetchResponse resp;
     resp.topics.reserve(req.topics.size());
     std::uint64_t bytes = 0;
+    std::uint64_t records = 0;
     bool had_error = false;
     for (const kafka::FetchTopicRequest& topic : req.topics) {
         kafka::FetchTopicResponse topic_resp;
@@ -359,13 +366,14 @@ task<kafka::FetchResponse> KafkaServerBroker::fetch(const kafka::FetchRequest& r
                     [&owner, &topic, &part] { return fetch_partition(owner, topic.topic, part); });
             }
             bytes += part_resp.records.size();
+            records += static_cast<std::uint64_t>(count_records(part_resp.records).value_or(0));
             had_error =
                 had_error || part_resp.error_code != kafka::to_wire(kafka::KafkaError::None);
             topic_resp.partitions.push_back(std::move(part_resp));
         }
         resp.topics.push_back(std::move(topic_resp));
     }
-    record_request("fetch", bytes, had_error, start);
+    record_request("fetch", bytes, records, had_error, start);
     co_return resp;
 }
 

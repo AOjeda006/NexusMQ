@@ -135,9 +135,10 @@ private:
     /// @details Punteros a series **estables** del `MetricsRegistry` (no propietarios); `nullptr`
     ///   hasta `set_metrics`. Cachearlas evita buscar series y asignar `Labels` por petición.
     struct DataPlaneMetrics {
-        Counter* requests = nullptr;    ///< Tráfico: peticiones servidas.
-        Counter* errors = nullptr;      ///< Errores: peticiones con `WireError != None`.
-        Counter* bytes = nullptr;       ///< Volumen: bytes de payload (batch producido / servido).
+        Counter* requests = nullptr;  ///< Tráfico: peticiones servidas.
+        Counter* errors = nullptr;    ///< Errores: peticiones con `WireError != None`.
+        Counter* bytes = nullptr;     ///< Volumen: bytes de payload (batch producido / servido).
+        Counter* messages = nullptr;  ///< Volumen: nº de records del batch (distinto de requests).
         Histogram* duration = nullptr;  ///< Latencia de servicio (segundos).
     };
 
@@ -145,10 +146,12 @@ private:
     [[nodiscard]] static DataPlaneMetrics resolve_metrics(MetricsRegistry& metrics,
                                                           std::string_view api);
 
-    /// @brief Registra una petición servida en @p series: tráfico, bytes, error (si lo hubo) y
-    ///   latencia (`now() - start`). No-op si las métricas no están cableadas (`metrics_ == null`).
+    /// @brief Registra una petición servida en @p series: tráfico, bytes, records, error (si lo
+    ///   hubo) y latencia (`now() - start`). No-op si las métricas no están cableadas (`metrics_ ==
+    ///   null`).
+    /// @param records Número de records del batch producido/servido (un request agrupa N records).
     void record_request(const DataPlaneMetrics& series, WireError error, MonoTime start,
-                        std::uint64_t bytes) const;
+                        std::uint64_t bytes, std::uint64_t records) const;
 
     TopicManager& topics_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     NodeId node_id_;

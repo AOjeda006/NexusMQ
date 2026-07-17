@@ -591,6 +591,8 @@ TEST(RequestRouter, Metrics_ProduceConExito_RegistraTraficoBytesYLatencia) {
     EXPECT_EQ(metrics.counter("nexus_broker_requests_total", api).value(), 1U);
     EXPECT_EQ(metrics.counter("nexus_broker_request_errors_total", api).value(), 0U);
     EXPECT_EQ(metrics.counter("nexus_broker_request_bytes_total", api).value(), batch.size());
+    // Un request agrupa N records: `messages` sube por el nº de records del batch, no por 1.
+    EXPECT_EQ(metrics.counter("nexus_broker_messages_total", api).value(), 3U);
     EXPECT_EQ(metrics.histogram("nexus_broker_request_duration_seconds", api).count(), 1U);
 }
 
@@ -647,6 +649,8 @@ TEST(RequestRouter, Metrics_Fetch_RegistraTraficoYBytesServidos) {
     EXPECT_EQ(metrics.counter("nexus_broker_requests_total", fetch).value(), 1U);
     EXPECT_EQ(metrics.counter("nexus_broker_request_errors_total", fetch).value(), 0U);
     EXPECT_GT(metrics.counter("nexus_broker_request_bytes_total", fetch).value(), 0U);
+    // Se produjo un batch de 2 records: el fetch los sirve todos, así que `messages` sube 2.
+    EXPECT_EQ(metrics.counter("nexus_broker_messages_total", fetch).value(), 2U);
 }
 
 }  // namespace
