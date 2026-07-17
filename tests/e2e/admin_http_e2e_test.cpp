@@ -7,6 +7,7 @@
 #include <sys/time.h>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -177,6 +178,58 @@ TEST(AdminHttpE2E, PuertoDeOperacion_HealthMetricsYRest) {
     EXPECT_NE(stream.find("event: metrics"), std::string::npos);
     EXPECT_NE(stream.find("data: {"), std::string::npos);  // payload JSON del snapshot.
 
+    server->stop();
+    server_thread.join();
+}
+
+TEST(AdminHttpE2E, ConexionesActivas_ReflejaConexionNativaAbierta) {
+    TempDir dir{"conns"};
+    nexus::Server::Config config;
+    config.host = "127.0.0.1";
+    config.port = 0;        // plano de datos nativo, efímero.
+    config.admin_port = 0;  // plano de operación, efímero.
+    config.data_dir = dir.path();
+
+    std::optional<nexus::Server> server;
+    try {
+        server.emplace(std::move(config));
+    } catch (const std::system_error& ex) {
+        GTEST_SKIP() << "io_uring no disponible en este entorno: " << ex.what();
+    }
+    ASSERT_TRUE(server->bind().has_value());
+    const std::uint16_t data_port = server->port();
+    const std::uint16_t admin = server->admin_port();
+    ASSERT_NE(data_port, 0);
+    ASSERT_NE(admin, 0);
+    std::thread server_thread{[&server] { server->run(); }};
+
+    // Abre una conexión al plano de datos nativo y la mantiene viva (sin enviar nada: el servicio
+    // se suspende leyendo la trama). El `GaugeGuard` de la conexión sube el gauge del plano
+    // `native`.
+    nexus::expected<nexus::Socket> conn = nexus::Socket::connect("127.0.0.1", data_port);
+    ASSERT_TRUE(conn.has_value());
+    std::optional<nexus::Socket> native_conn{std::move(*conn)};  // mantiene el socket vivo (RAII).
+
+    // El *accept* + *spawn* del servicio es asíncrono: sondeamos /metrics hasta ver la conexión
+    // nativa reflejada (o agotar el plazo). Determinista en la práctica: una sola conexión → 1.
+    bool native_seen = false;
+    for (int attempt = 0; attempt < 100 && !native_seen; ++attempt) {
+        const std::string metrics = http_request(admin, "GET", "/metrics");
+        if (metrics.find(R"(nexus_broker_connections_active{plane="native"} 1)") !=
+            std::string::npos) {
+            native_seen = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_TRUE(native_seen);  // la conexión nativa abierta se cuenta en el plano `native`.
+
+    // El propio scrape de /metrics es una conexión del plano admin: su gauge existe y es >= 1.
+    const std::string metrics = http_request(admin, "GET", "/metrics");
+    EXPECT_NE(metrics.find(R"(# TYPE nexus_broker_connections_active gauge)"), std::string::npos);
+    EXPECT_NE(metrics.find(R"(nexus_broker_connections_active{plane="admin"})"), std::string::npos);
+
+    native_conn.reset();  // cierra la conexión nativa (RAII); el servicio termina y el gauge baja.
     server->stop();
     server_thread.join();
 }

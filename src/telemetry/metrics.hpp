@@ -49,6 +49,41 @@ private:
     std::atomic<std::int64_t> value_{0};
 };
 
+/// @brief Guarda RAII que mantiene "una unidad" en un `Gauge` mientras vive: **incrementa al
+///   construir y decrementa al destruir**. Afinidad: hereda la del `Gauge` (THREAD-SAFE).
+/// @details Ata el conteo al **ciclo de vida de un objeto** (p. ej. una conexión activa): aunque el
+///   camino salga por excepción o por un cierre abrupto, el decremento ocurre en el destructor y el
+///   contador **no se fuga**. Movible (transfiere la responsabilidad; el origen queda inerte) pero
+///   **no copiable** (evitaría el doble decremento). Por defecto queda inerte (sin `Gauge`
+///   asociado), útil cuando las métricas no están cableadas.
+class GaugeGuard {
+public:
+    GaugeGuard() noexcept = default;
+    explicit GaugeGuard(Gauge& gauge) noexcept : gauge_(&gauge) { gauge_->inc(); }
+    GaugeGuard(GaugeGuard&& other) noexcept : gauge_(std::exchange(other.gauge_, nullptr)) {}
+    GaugeGuard& operator=(GaugeGuard&& other) noexcept {
+        if (this != &other) {
+            release();
+            gauge_ = std::exchange(other.gauge_, nullptr);
+        }
+        return *this;
+    }
+    GaugeGuard(const GaugeGuard&) = delete;
+    GaugeGuard& operator=(const GaugeGuard&) = delete;
+    ~GaugeGuard() { release(); }
+
+private:
+    /// Decrementa (una sola vez) y se vuelve inerte; idempotente ante move y destrucción.
+    void release() noexcept {
+        if (gauge_ != nullptr) {
+            gauge_->dec();
+            gauge_ = nullptr;
+        }
+    }
+
+    Gauge* gauge_ = nullptr;  ///< No propietario; `nullptr` = guarda inerte.
+};
+
 /// @brief Histograma de cubos acumulativos (estilo Prometheus). Afinidad: THREAD-SAFE.
 /// @details Los `bounds` son los límites superiores (`le`) en orden ascendente; el cubo `+Inf` es
 ///   implícito (todas las observaciones). Cada observación cae en el menor cubo con `bound >= v`;

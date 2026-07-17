@@ -6,7 +6,10 @@
 
 #include <gtest/gtest.h>
 
+#include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -144,6 +147,56 @@ TEST(MetricsRegistry, DefaultLatencyBounds_AscendenteYNoVacio) {
     for (std::size_t i = 1; i < bounds.size(); ++i) {
         EXPECT_LT(bounds[i - 1], bounds[i]);
     }
+}
+
+// --- GaugeGuard (RAII para el gauge de conexiones activas, ADR-0039) ---
+
+TEST(GaugeGuard, KConexionesActivas_GaugeEsK_YVuelveACeroAlCerrar) {
+    // Modela `nexus_broker_connections_active`: cada guarda es una conexión viva. Abrir K guardas
+    // sube el gauge a K; cerrarlas (fin de ámbito, como el cierre de la conexión) lo devuelve a 0.
+    nexus::MetricsRegistry reg;
+    nexus::Gauge& active = reg.gauge("nexus_broker_connections_active", {{"plane", "native"}});
+    constexpr int kConnections = 5;
+    {
+        std::vector<nexus::GaugeGuard> conns;
+        for (int i = 0; i < kConnections; ++i) {
+            conns.emplace_back(active);
+            EXPECT_EQ(active.value(), i + 1);  // sube 1 por conexión aceptada.
+        }
+        EXPECT_EQ(active.value(), kConnections);
+    }
+    EXPECT_EQ(active.value(), 0);  // todas cerradas: sin fuga.
+}
+
+TEST(GaugeGuard, CierreParcial_DecrementaSoloLoCerrado) {
+    nexus::MetricsRegistry reg;
+    nexus::Gauge& active = reg.gauge("nexus_broker_connections_active", {{"plane", "kafka"}});
+    auto outer = std::make_optional<nexus::GaugeGuard>(active);
+    EXPECT_EQ(active.value(), 1);
+    {
+        const nexus::GaugeGuard inner{active};
+        EXPECT_EQ(active.value(), 2);
+    }
+    EXPECT_EQ(active.value(), 1);  // solo la interna se cerró.
+    outer.reset();
+    EXPECT_EQ(active.value(), 0);
+}
+
+TEST(GaugeGuard, Move_TransfiereLaResponsabilidad_SinDobleDecremento) {
+    nexus::MetricsRegistry reg;
+    nexus::Gauge& active = reg.gauge("nexus_broker_connections_active", {{"plane", "admin"}});
+    {
+        nexus::GaugeGuard first{active};
+        EXPECT_EQ(active.value(), 1);
+        const nexus::GaugeGuard second{std::move(first)};  // el origen queda inerte.
+        EXPECT_EQ(active.value(), 1);                      // el move no incrementa ni decrementa.
+    }
+    EXPECT_EQ(active.value(), 0);  // un único decremento pese al move.
+}
+
+TEST(GaugeGuard, GuardaInerte_NoTocaNingunGauge) {
+    const nexus::GaugeGuard inert;  // sin gauge asociado: no-op en construcción y destrucción.
+    SUCCEED();                      // no debe desreferenciar un puntero nulo.
 }
 
 }  // namespace

@@ -81,6 +81,17 @@ Server::Config resolve_config(Server::Config config) {
     return std::make_unique<LocalStorageTier>(config.tier_dir);
 }
 
+/// @brief Envuelve la corrutina de servicio @p serve de una conexión para **contarla como activa**
+///   en `nexus_broker_connections_active{plane}` mientras dura. Afinidad: REACTOR-LOCAL.
+/// @details El `GaugeGuard` incrementa al entrar y decrementa cuando @p serve completa —cierre
+///   normal del par, error de E/S o excepción—, así el gauge **no se fuga** aunque la conexión
+///   muera de forma abrupta (RAII atado al *frame* de esta corrutina, que vive lo que el servicio).
+///   La `@p active` (serie del `MetricsRegistry`) es estable y vive más que la conexión.
+task<void> serve_counting_connection(Gauge& active, task<void> serve) {
+    const GaugeGuard guard{active};
+    co_await std::move(serve);
+}
+
 #ifdef NEXUS_HAVE_OPENSSL
 /// @brief Sirve una conexión **cifrada**: envuelve el socket aceptado en una `TlsConnection`,
 ///   completa el handshake TLS y entra en el bucle de servicio sobre el flujo cifrado.
@@ -101,7 +112,7 @@ task<void> serve_tls_connection(Proactor& proactor, const TlsContext& tls, Socke
 
 /// Bucle de aceptación del plano de datos: una corrutina de servicio por conexión. Si @p tls no es
 /// nulo, cada conexión se termina con TLS antes de servirla (ADR-0019); si es nulo, texto plano.
-task<void> accept_loop(Reactor& reactor, Listener& listener, RequestRouter& router,
+task<void> accept_loop(Reactor& reactor, Listener& listener, RequestRouter& router, Gauge& active,
                        [[maybe_unused]] const TlsContext* tls) {
     while (true) {
         expected<Socket> client = co_await listener.async_accept(reactor.proactor());
@@ -111,12 +122,14 @@ task<void> accept_loop(Reactor& reactor, Listener& listener, RequestRouter& rout
         client->set_nodelay(true);  // plano de datos petición/respuesta: sin Nagle (baja latencia).
 #ifdef NEXUS_HAVE_OPENSSL
         if (tls != nullptr) {
-            reactor.spawn(
-                serve_tls_connection(reactor.proactor(), *tls, std::move(*client), router));
+            reactor.spawn(serve_counting_connection(
+                active,
+                serve_tls_connection(reactor.proactor(), *tls, std::move(*client), router)));
             continue;
         }
 #endif
-        reactor.spawn(serve_connection(reactor.proactor(), std::move(*client), router));
+        reactor.spawn(serve_counting_connection(
+            active, serve_connection(reactor.proactor(), std::move(*client), router)));
     }
 }
 
@@ -151,42 +164,46 @@ task<void> serve_proxy_connection(Proactor& proactor, Proxy& proxy, UpstreamPool
 
 /// Bucle de aceptación del plano de datos en **modo proxy**: una corrutina de relevo por conexión,
 /// con una clave de enrutado monótona por conexión (consistent-hashing del nodo aguas arriba).
-task<void> proxy_accept_loop(Reactor& reactor, Listener& listener, Proxy& proxy,
-                             UpstreamPool& pool) {
+task<void> proxy_accept_loop(Reactor& reactor, Listener& listener, Proxy& proxy, UpstreamPool& pool,
+                             Gauge& active) {
     std::uint64_t next_conn_id = 0;
     while (true) {
         expected<Socket> client = co_await listener.async_accept(reactor.proactor());
         if (!client) {
             co_return;  // listener cerrado o error: dejamos de aceptar.
         }
-        reactor.spawn(serve_proxy_connection(reactor.proactor(), proxy, pool, std::move(*client),
-                                             next_conn_id++));
+        reactor.spawn(serve_counting_connection(
+            active, serve_proxy_connection(reactor.proactor(), proxy, pool, std::move(*client),
+                                           next_conn_id++)));
     }
 }
 
 /// Bucle de aceptación del plano de operación: una corrutina HTTP por conexión. @p draining se pasa
 /// a cada conexión para que las SSE largas cierren al apagar (ADR-0038).
 task<void> admin_accept_loop(Reactor& reactor, Listener& listener, const AdminRouter& router,
-                             const std::atomic<bool>& draining) {
+                             const std::atomic<bool>& draining, Gauge& active) {
     while (true) {
         expected<Socket> client = co_await listener.async_accept(reactor.proactor());
         if (!client) {
             co_return;
         }
-        reactor.spawn(
-            serve_admin_connection(reactor.proactor(), std::move(*client), router, draining));
+        reactor.spawn(serve_counting_connection(
+            active,
+            serve_admin_connection(reactor.proactor(), std::move(*client), router, draining)));
     }
 }
 
 /// Bucle de aceptación del listener Kafka: una corrutina de servicio por conexión (F7f).
-task<void> kafka_accept_loop(Reactor& reactor, Listener& listener, kafka::KafkaGateway& gateway) {
+task<void> kafka_accept_loop(Reactor& reactor, Listener& listener, kafka::KafkaGateway& gateway,
+                             Gauge& active) {
     while (true) {
         expected<Socket> client = co_await listener.async_accept(reactor.proactor());
         if (!client) {
             co_return;  // listener cerrado o error: dejamos de aceptar.
         }
         client->set_nodelay(true);  // petición/respuesta de baja latencia: sin Nagle.
-        reactor.spawn(serve_kafka_connection(reactor.proactor(), std::move(*client), gateway));
+        reactor.spawn(serve_counting_connection(
+            active, serve_kafka_connection(reactor.proactor(), std::move(*client), gateway)));
     }
 }
 
@@ -587,13 +604,23 @@ void Server::run() {
     start_raft_ticks(main);
     start_retention_maintenance(main);
 
+    // Gauges de conexiones activas por plano (ADR-0039). Se describen y resuelven una vez aquí; las
+    // series son estables (viven en el `MetricsRegistry`, que vive más que los reactores), así que
+    // cada bucle de aceptación captura su referencia y el `GaugeGuard` de cada conexión la usa.
+    metrics_.describe("nexus_broker_connections_active",
+                      "Conexiones de cliente activas por plano (plane: native|kafka|admin); RAII "
+                      "las cuenta durante su vida.");
+    Gauge& native_conns = metrics_.gauge("nexus_broker_connections_active", {{"plane", "native"}});
+    Gauge& kafka_conns = metrics_.gauge("nexus_broker_connections_active", {{"plane", "kafka"}});
+    Gauge& admin_conns = metrics_.gauge("nexus_broker_connections_active", {{"plane", "admin"}});
+
     // listener_/router_ siempre presentes en start(); la guarda satisface a clang-tidy y es más
     // segura que derefar el `optional` a ciegas.
     if (listener_ && router_) {
         if (proxy_ && upstream_pool_) {
             // Modo proxy (opt-in, ADR-0006/0027): el núcleo 0 releva cada conexión a un nodo aguas
             // arriba en vez de servirla local. El relevo es en claro (no se cablea TLS en proxy).
-            main.spawn(proxy_accept_loop(main, *listener_, *proxy_, *upstream_pool_));
+            main.spawn(proxy_accept_loop(main, *listener_, *proxy_, *upstream_pool_, native_conns));
         } else {
             const TlsContext* tls_ptr = nullptr;
 #ifdef NEXUS_HAVE_OPENSSL
@@ -601,11 +628,12 @@ void Server::run() {
                 tls_ptr = &*tls_;  // contexto TLS compartido por el bucle de aceptación (núcleo 0).
             }
 #endif
-            main.spawn(accept_loop(main, *listener_, *router_, tls_ptr));
+            main.spawn(accept_loop(main, *listener_, *router_, native_conns, tls_ptr));
         }
     }
     if (admin_listener_ && admin_router_) {
-        main.spawn(admin_accept_loop(main, *admin_listener_, *admin_router_, admin_draining_));
+        main.spawn(admin_accept_loop(main, *admin_listener_, *admin_router_, admin_draining_,
+                                     admin_conns));
     }
     if (cluster_listener_) {
         main.spawn(cluster_accept_loop(main, *cluster_listener_));
@@ -620,7 +648,7 @@ void Server::run() {
         kafka_broker_->bind_cluster(main, *partition_router_, catalog_.managers());
         kafka_broker_->set_metrics(metrics_);  // P5e: métricas Kafka con protocol="kafka".
         kafka_gateway_.emplace(*kafka_broker_);
-        main.spawn(kafka_accept_loop(main, *kafka_listener_, *kafka_gateway_));
+        main.spawn(kafka_accept_loop(main, *kafka_listener_, *kafka_gateway_, kafka_conns));
     }
     health_.set_started(true);  // ya servimos: `/readyz` puede dar 200.
     main.run();                 // bloquea el hilo llamante hasta `stop()`.

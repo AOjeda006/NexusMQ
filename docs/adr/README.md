@@ -49,3 +49,4 @@ con las secciones **Contexto · Decisión · Consecuencias · Alternativas consi
 | [0036](adr-0036-aplicacion-retencion-runtime.md) | Aplicación de la retención en runtime (barrido periódico por núcleo) | aceptado | 2026-07-13 |
 | [0037](adr-0037-config-topic-mutable-cross-core.md) | Config de topic mutable en caliente y publicada cross-core (`PATCH /api/v1/topics/{name}`) | aceptado | 2026-07-13 |
 | [0038](adr-0038-streaming-sse-admin-http.md) | Modelo de streaming del servidor HTTP admin (SSE, `GET /api/v1/stream`) | aceptado | 2026-07-13 |
+| [0039](adr-0039-gauge-conexiones-activas-raii.md) | Gauge de conexiones activas por plano con RAII (`nexus_broker_connections_active`) | aceptado | 2026-07-17 |
