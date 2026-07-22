@@ -253,10 +253,12 @@ paths:
       tags: [operación]
       summary: Estado del clúster y del consenso (Raft) por partición.
       description: >-
-        Nodos conocidos (este nodo + peers) y estado Raft de las particiones replicadas de este
-        nodo: líder, rol, término, commitIndex (= high-watermark), lastLogIndex, época y retraso
-        de cada seguidor. Sin particiones replicadas (`replicationFactor == 1`), `partitions` va
-        vacío.
+        Nodos conocidos (este nodo + peers) y estado de **todas** las particiones que este nodo
+        atiende: líder, rol, término, commitIndex (= high-watermark), lastLogIndex, época y retraso
+        de cada seguidor. Las **replicadas** (`replicationFactor >= 2`) reportan el estado real de
+        su réplica de Raft. Las **no replicadas** (`replicationFactor == 1`, el caso single-node) no
+        tienen portador de Raft y se sintetizan como líder estático de este nodo, con datos honestos
+        del log local (ADR-0040).
       responses:
         "200":
           description: Estado del clúster.
@@ -497,6 +499,12 @@ components:
 
     PartitionRaftInfo:
       type: object
+      description: >-
+        Estado de una partición de este nodo. Si está **replicada** (`replicationFactor >= 2`) los
+        campos vienen de su réplica de Raft. Si **no** lo está (single-node/RF=1) se sintetizan como
+        líder estático: `leader` = este nodo, `role: leader`, `term: 0` (no hubo elección de Raft),
+        `commitIndex == lastLogIndex ==` high-watermark del log local (el ack es local, así que todo
+        lo escrito está confirmado y es visible) y `followers` vacío (ADR-0040).
       properties:
         topic: { type: string }
         partition: { type: integer }
@@ -504,13 +512,15 @@ components:
         role:
           type: string
           enum: [follower, pre_candidate, candidate, leader, unknown]
-        term: { type: integer, format: int64 }
+        term: { type: integer, format: int64, description: "0 en particiones no replicadas (sin elección de Raft)." }
         commitIndex: { type: integer, format: int64, description: "= high-watermark de la réplica." }
         lastLogIndex: { type: integer, format: int64 }
         leaderEpoch: { type: integer, format: int64 }
         followers:
           type: array
-          description: "Progreso por seguidor (solo poblado si esta réplica es líder)."
+          description: >-
+            Progreso por seguidor (solo poblado si esta réplica es líder de una partición
+            replicada; vacío en single-node/RF=1, donde no hay réplicas).
           items: { $ref: "#/components/schemas/FollowerProgress" }
       required: [topic, partition, leader, role, term, commitIndex, lastLogIndex, leaderEpoch, followers]
 

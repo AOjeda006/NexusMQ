@@ -28,7 +28,7 @@ Bajo `/api/v1`, recursos en plural y verbos HTTP (sin acciones en la URL):
 | `DELETE /api/v1/topics/{name}` | Borra un *topic* **y sus datos en disco** (el `.log`/`.index` de cada partición). |
 | `GET /api/v1/groups` | Lista los grupos de consumidores (paginado). |
 | `GET /api/v1/groups/{id}` | Describe un grupo: miembros, suscripción, offsets confirmados y *lag* por partición. |
-| `GET /api/v1/cluster` | Estado del clúster y de Raft por partición (nodos, rol, *leader*, *commit index*, progreso de *followers*) agregado cross-core ([ADR-0035](../adr/adr-0035-estado-cluster-raft-rest-admin.md)). |
+| `GET /api/v1/cluster` | Estado del clúster y de Raft por partición (nodos, rol, *leader*, *commit index*, progreso de *followers*) agregado cross-core ([ADR-0035](../adr/adr-0035-estado-cluster-raft-rest-admin.md)); las particiones **no replicadas** se sintetizan como líder estático ([ADR-0040](../adr/adr-0040-topologia-raft-single-node.md)). |
 
 Fuera de `/api/v1` y **sin autenticación**, el plano de salud/observabilidad:
 
@@ -84,7 +84,13 @@ alimentarla sin acoplar el núcleo, la API añade lecturas ricas y un canal en t
   unidireccional (servidor→cliente); los comandos siguen yendo por el REST puntual.
 - **Describe de grupo y estado de clúster** (`GET /api/v1/groups/{id}`, `GET /api/v1/cluster`):
   agregaciones **cross-core** (`call_on` al núcleo dueño de cada grupo/partición) que exponen *lag*,
-  offsets y el estado de Raft por partición sin filtrar los tipos internos (se copian a DTOs).
+  offsets y el estado de Raft por partición sin filtrar los tipos internos (se copian a DTOs). El
+  recorrido de `/cluster` unifica los dos casos para que la vista de topología nunca salga vacía: las
+  particiones **replicadas** (RF≥2) se leen de su portador de Raft y las **no replicadas** (RF=1, la
+  única topología hoy arrancable) se sintetizan como **líder estático** de este nodo —`role: leader`,
+  `term: 0`, `commitIndex == lastLogIndex ==` *high-watermark* del log local, sin *followers*— con
+  datos coherentes con el `describe` del *topic*
+  ([ADR-0040](../adr/adr-0040-topologia-raft-single-node.md)).
 - **Config mutable** (`PATCH /api/v1/topics/{name}`): la retención se ajusta en caliente y se publica a
   todos los núcleos; el barrido periódico por núcleo la aplica en el siguiente ciclo
   ([ADR-0036](../adr/adr-0036-aplicacion-retencion-runtime.md), [ADR-0037](../adr/adr-0037-config-topic-mutable-cross-core.md)).
