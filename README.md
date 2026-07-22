@@ -91,12 +91,13 @@ La documentación técnica **final** vive en **[`docs/`](docs/)**:
 - **[`docs/tecnica/`](docs/tecnica/)** — la documentación técnica completa (30 capítulos en 7 partes:
   visión, arquitectura, contratos, implementación, calidad, operación y decisiones). Empieza por su
   [índice de lectura](docs/tecnica/README.md). Es la **fuente de verdad** del *qué* y el *porqué*.
-- **[`docs/adr/`](docs/adr/)** — los 38 *Architecture Decision Records* (**ADR-0001..0038**), uno por
+- **[`docs/adr/`](docs/adr/)** — los 40 *Architecture Decision Records* (**ADR-0001..0040**), uno por
   fichero, con su [índice](docs/adr/README.md).
 - **[`docs/diagramas/`](docs/diagramas/)** — los 25 diagramas (Mermaid) de arquitectura, runtime,
   almacenamiento, consenso, protocolos, ingress y operación.
 - Contratos **as-built**: [`protocol.md`](docs/protocol.md) (protocolo binario),
   [`kafka.md`](docs/kafka.md) (subset Kafka), [`openapi.yaml`](docs/openapi.yaml) (REST admin),
+  [`metrics.md`](docs/metrics.md) (catálogo de métricas: nombres, tipos, etiquetas y HELP),
   [`benchmarks.md`](docs/benchmarks.md) (latencias) y
   [`validacion-e2e.md`](docs/validacion-e2e.md) (smoke E2E en Linux y Windows).
 - **[Documentación técnica en PDF](docs/pdf/NexusMQ-documentacion-tecnica.pdf)** — todo lo anterior

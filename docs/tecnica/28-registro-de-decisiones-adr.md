@@ -1,6 +1,6 @@
 # 28. Registro de decisiones (ADR)
 
-Este capítulo es la puerta de entrada al **registro de decisiones de arquitectura** (ADR) de NexusMQ: explica qué es un ADR, la regla de inmutabilidad que rige su ciclo de vida, y ofrece el **índice completo** de los 38 ADR del proyecto, agrupados por tema. Las decisiones íntegras viven en el directorio [`../adr/`](../adr/), una por fichero.
+Este capítulo es la puerta de entrada al **registro de decisiones de arquitectura** (ADR) de NexusMQ: explica qué es un ADR, la regla de inmutabilidad que rige su ciclo de vida, y ofrece el **índice completo** de los 40 ADR del proyecto, agrupados por tema. Las decisiones íntegras viven en el directorio [`../adr/`](../adr/), una por fichero.
 
 ## 28.1 Qué es un ADR
 
@@ -20,7 +20,7 @@ En NexusMQ esto produce una **cadena de reemplazo** visible en el backend de I/O
 
 Cada eslabón cae cuando una premisa se demuestra falsa: ADR-0021 asumía que el backend «no era verificable en este entorno»; resultó que el contenedor **sí** podía instalar el cross-compiler MinGW-w64 (ADR-0022), y finalmente se **ejecutó** en una máquina Windows real (ADR-0023). La cadena documenta esa progresión sin reescribir el pasado.
 
-## 28.3 Índice de los 38 ADR
+## 28.3 Índice de los 40 ADR
 
 | ADR | Título | Estado | Fecha |
 |-----|--------|--------|-------|
@@ -58,10 +58,16 @@ Cada eslabón cae cuando una premisa se demuestra falsa: ADR-0021 asumía que el
 | [0032](../adr/adr-0032-tiered-storage-puerto-y-tier-local.md) | Almacenamiento por niveles — puerto `StorageTier` y tier local | aceptado | 2026-07-12 |
 | [0033](../adr/adr-0033-exactly-once-nativo-transacciones.md) | Exactly-once multi-partición nativo (transacciones, coordinador y `read_committed`) | aceptado | 2026-07-12 |
 | [0034](../adr/adr-0034-2pc-logueado-recuperable.md) | 2PC logueado y recuperable (reconciliación con la prohibición del 2PC bloqueante) | aceptado | 2026-07-12 |
+| [0035](../adr/adr-0035-estado-cluster-raft-rest-admin.md) | Estado de clúster/Raft por la superficie REST admin (`GET /api/v1/cluster`) | aceptado | 2026-07-13 |
+| [0036](../adr/adr-0036-aplicacion-retencion-runtime.md) | Aplicación de la retención en runtime (barrido periódico por núcleo) | aceptado | 2026-07-13 |
+| [0037](../adr/adr-0037-config-topic-mutable-cross-core.md) | Config de topic mutable en caliente y publicada cross-core (`PATCH /api/v1/topics/{name}`) | aceptado | 2026-07-13 |
+| [0038](../adr/adr-0038-streaming-sse-admin-http.md) | Modelo de streaming del servidor HTTP admin (SSE, `GET /api/v1/stream`) | aceptado | 2026-07-13 |
+| [0039](../adr/adr-0039-gauge-conexiones-activas-raii.md) | Gauge de conexiones activas por plano con RAII (`nexus_broker_connections_active`) | aceptado | 2026-07-17 |
+| [0040](../adr/adr-0040-topologia-raft-single-node.md) | Topología Raft visible en single-node (`GET /api/v1/cluster` puebla `partitions[]` con RF=1) | aceptado | 2026-07-17 |
 
 ## 28.4 ADR agrupados por tema
 
-Los 38 ADR cubren diez áreas. Cada grupo se resume en una frase; los números enlazan al fichero correspondiente en [`../adr/`](../adr/).
+Los 40 ADR cubren diez áreas. Cada grupo se resume en una frase; los números enlazan al fichero correspondiente en [`../adr/`](../adr/).
 
 ### Plataforma e I/O
 
@@ -89,9 +95,9 @@ La tesis arquitectónica: **shared-nothing thread-per-core** (un reactor *pinned
 
 ### Ingress y seguridad
 
-[0006](../adr/adr-0006-ingress-dos-modos.md), [0018](../adr/adr-0018-rest-admin-puerto-adaptador.md), [0019](../adr/adr-0019-tls-opcional-openssl-bios.md), [0027](../adr/adr-0027-modo-proxy-upstream-pool.md), [0031](../adr/adr-0031-cifrado-en-reposo-aes-gcm.md), [0035](../adr/adr-0035-estado-cluster-raft-rest-admin.md), [0037](../adr/adr-0037-config-topic-mutable-cross-core.md).
+[0006](../adr/adr-0006-ingress-dos-modos.md), [0018](../adr/adr-0018-rest-admin-puerto-adaptador.md), [0019](../adr/adr-0019-tls-opcional-openssl-bios.md), [0027](../adr/adr-0027-modo-proxy-upstream-pool.md), [0031](../adr/adr-0031-cifrado-en-reposo-aes-gcm.md), [0035](../adr/adr-0035-estado-cluster-raft-rest-admin.md), [0037](../adr/adr-0037-config-topic-mutable-cross-core.md), [0040](../adr/adr-0040-topologia-raft-single-node.md).
 
-El borde del sistema y la protección de datos: *ingress* en dos modos (nativo directo y proxy *opt-in*), REST admin desacoplado por **puerto/adaptador** (DIP), TLS/mTLS opcional con puente de BIOs de memoria sobre el proactor, el *pool* de conexiones aguas arriba por reactor que cablea el modo proxy, y el **cifrado en reposo** del log (AES-256-GCM opcional con DEK por segmento y framing AEAD por bloque), que reutiliza la misma dependencia OpenSSL que TLS. Sobre esa superficie REST se enriquece el **backend de la consola web**: el **estado de clúster/Raft** por partición (`GET /api/v1/cluster`) agregado cross-core sin filtrar los tipos internos, y la **config de *topic* mutable en caliente** (`PATCH`) publicada a todos los núcleos —retención mutable, `segment.bytes` de solo-creación—.
+El borde del sistema y la protección de datos: *ingress* en dos modos (nativo directo y proxy *opt-in*), REST admin desacoplado por **puerto/adaptador** (DIP), TLS/mTLS opcional con puente de BIOs de memoria sobre el proactor, el *pool* de conexiones aguas arriba por reactor que cablea el modo proxy, y el **cifrado en reposo** del log (AES-256-GCM opcional con DEK por segmento y framing AEAD por bloque), que reutiliza la misma dependencia OpenSSL que TLS. Sobre esa superficie REST se enriquece el **backend de la consola web**: el **estado de clúster/Raft** por partición (`GET /api/v1/cluster`) agregado cross-core sin filtrar los tipos internos, y la **config de *topic* mutable en caliente** (`PATCH`) publicada a todos los núcleos —retención mutable, `segment.bytes` de solo-creación—. Ese mismo `/cluster` puebla además las particiones **no replicadas** (RF=1) como **líder estático** con datos honestos del log local, para que la vista de topología no salga vacía en la única topología hoy arrancable.
 
 ### Almacenamiento
 
@@ -107,9 +113,9 @@ El **exactly-once multi-partición** (nativo, *effectively-once* honesto): marca
 
 ### Observabilidad
 
-[0017](../adr/adr-0017-nexus-telemetry.md), [0038](../adr/adr-0038-streaming-sse-admin-http.md).
+[0017](../adr/adr-0017-nexus-telemetry.md), [0038](../adr/adr-0038-streaming-sse-admin-http.md), [0039](../adr/adr-0039-gauge-conexiones-activas-raii.md).
 
-Un target dedicado `nexus-telemetry` que concentra métricas Prometheus y logging estructurado, evitando esparcir la instrumentación por todas las capas. Para la consola en tiempo real se suma un **modelo de streaming SSE** en el servidor HTTP admin: un camino de respuesta hermano del *buffered* que emite el snapshot de métricas por `text/event-stream` (sin `Content-Length`, con cadencia) y observa la señal de drenaje para cerrar limpio en el apagado.
+Un target dedicado `nexus-telemetry` que concentra métricas Prometheus y logging estructurado, evitando esparcir la instrumentación por todas las capas. Para la consola en tiempo real se suma un **modelo de streaming SSE** en el servidor HTTP admin: un camino de respuesta hermano del *buffered* que emite el snapshot de métricas por `text/event-stream` (sin `Content-Length`, con cadencia) y observa la señal de drenaje para cerrar limpio en el apagado. Y la señal de **saturación** que faltaba: el gauge de conexiones vivas por plano (`nexus_broker_connections_active{plane}`), cuyo recuento se ata por **RAII** al ciclo de vida de la corrutina de servicio, de modo que no puede fugarse ante un cierre abrupto, un error de E/S o una excepción.
 
 ### Windows
 
