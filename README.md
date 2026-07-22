@@ -104,6 +104,19 @@ La documentación técnica **final** vive en **[`docs/`](docs/)**:
   (capítulos + diagramas + ADR) compilado en un único documento; ver [`docs/pdf/`](docs/pdf/) para
   regenerarlo.
 
+## Proyecto complementario
+
+- **[NexusMQ Console](https://github.com/AOjeda006/NexusMQ-Console)** — la **consola web de
+  administración y monitorización** del broker (SPA React + BFF NestJS). Es un cliente **externo**,
+  en su propio repositorio: no toca el núcleo, consume el **plano REST de operación** de este broker
+  —*topics* (incluido el `PATCH` de retención en caliente), grupos, particiones, topología de
+  clúster/Raft y el *dashboard* en vivo por SSE—. Sus tipos y su cliente se **generan** desde
+  [`docs/openapi.yaml`](docs/openapi.yaml) y sus gráficas codifican contra los nombres de
+  [`docs/metrics.md`](docs/metrics.md), que son por eso contratos de verdad y no solo documentación.
+
+El broker **no sirve UI** a propósito: mantener la consola fuera evita acoplar el núcleo a un ciclo
+de vida de *frontend* (ver [capítulo 30](docs/tecnica/30-limitaciones-y-trabajo-futuro.md)).
+
 ## Licencia
 
 **PolyForm Noncommercial License 1.0.0** — ver [`LICENSE.md`](LICENSE.md). Provisional/revisable,
