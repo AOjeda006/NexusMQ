@@ -190,6 +190,38 @@ std::optional<std::int64_t> try_fetch_hwm(int fd, const std::string& topic, std:
     return resp->high_watermark;
 }
 
+// Sonda de disponibilidad del relevo: **no muta** el log, a diferencia de un Produce, así que
+// reintentarla es idempotente. Un Fetch sobre el log vacío que vuelve con `errorCode == None`
+// prueba el lazo completo accept -> route -> acquire -> forward contra el backend; exigir el
+// código de éxito (y no una respuesta cualquiera) evita dar por listo el relevo cuando el proxy
+// aún responde con error porque el nodo aguas arriba no está en pie.
+bool relay_ready(int fd, const std::string& topic) {
+    return try_fetch_hwm(fd, topic, /*offset=*/0).has_value();
+}
+
+// Corre un `Server` en su hilo y, al salir del ámbito, lo para y une el hilo —también si un ASSERT
+// corta el test—. Un `std::thread` unible destruido llama a `std::terminate`, que convertiría un
+// fallo de aserción legible en un opaco "Subprocess aborted".
+class ServerRunner {
+public:
+    explicit ServerRunner(nexus::Server& server)
+        : server_(&server), thread_([srv = &server] { srv->run(); }) {}
+    ~ServerRunner() {
+        server_->stop();
+        if (thread_.joinable()) {
+            thread_.join();
+        }
+    }
+    ServerRunner(const ServerRunner&) = delete;
+    ServerRunner& operator=(const ServerRunner&) = delete;
+    ServerRunner(ServerRunner&&) = delete;
+    ServerRunner& operator=(ServerRunner&&) = delete;
+
+private:
+    nexus::Server* server_;
+    std::thread thread_;
+};
+
 // Config de un nodo de un reactor (RF=1: el Produce confirma de inmediato) sobre loopback.
 nexus::Server::Config make_node_config(const TempDir& dir, nexus::NodeId node_id) {
     nexus::Server::Config config;
@@ -243,44 +275,53 @@ TEST(ProxyServerE2E, RelevaProduceYFetchAlNodoAguasArriba) {
     const std::uint16_t proxy_port = proxy->port();
     ASSERT_GT(proxy_port, 0);
 
-    std::thread backend_thread{[srv = &*backend] { srv->run(); }};
-    std::thread proxy_thread{[srv = &*proxy] { srv->run(); }};
+    // Los hilos se paran y se unen solos al salir del ámbito (orden inverso: primero el proxy).
+    ServerRunner backend_runner{*backend};
+    ServerRunner proxy_runner{*proxy};
 
-    // Espera a que el relevo esté operativo: conecta al PROXY (no al backend) y produce hasta
-    // confirmar (ambos servidores arrancando en paralelo). Un timeout de recv evita colgarse.
+    // Espera a que el relevo esté operativo (ambos servidores arrancan en paralelo) sondeando con
+    // una operación de **solo lectura**: conecta al PROXY (no al backend) y reintenta un Fetch.
+    // Sondear con el propio Produce era incorrecto: si la respuesta se perdía —el `recv` vence a
+    // los 2 s mientras el relevo aún calienta— el batch ya estaba escrito en el backend y el
+    // reintento añadía otros 5 records, dejando el log en 10 y `base_offset` en 5. El plazo es
+    // holgado porque bajo sanitizers el arranque de los dos servidores es mucho más lento; en el
+    // camino feliz se sale en el primer intento.
     std::optional<nexus::Socket> client;
-    std::int64_t base_offset = -1;
-    std::optional<nexus::WireError> produce_err;
-    const auto deadline = std::chrono::steady_clock::now() + 10s;
+    bool ready = false;
+    const auto deadline = std::chrono::steady_clock::now() + 60s;
     while (std::chrono::steady_clock::now() < deadline) {
         nexus::expected<nexus::Socket> connected = nexus::Socket::connect("127.0.0.1", proxy_port);
         if (connected) {
             client = std::move(*connected);
             const timeval timeout{.tv_sec = 2, .tv_usec = 0};
             ::setsockopt(client->fd(), SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-            produce_err = try_produce(client->fd(), "orders", 5, &base_offset);
-            if (produce_err == nexus::WireError::None) {
+            if (relay_ready(client->fd(), "orders")) {
+                ready = true;
                 break;
             }
         }
         std::this_thread::sleep_for(50ms);
     }
+    ASSERT_TRUE(ready) << "el relevo del proxy no quedó operativo a tiempo";
+    ASSERT_TRUE(client.has_value());
+
+    // Con el relevo ya en pie, **una sola** escritura: el log del backend arranca vacío, así que
+    // los offsets son deterministas.
+    std::int64_t base_offset = -1;
+    const std::optional<nexus::WireError> produce_err =
+        try_produce(client->fd(), "orders", 5, &base_offset);
     ASSERT_TRUE(produce_err.has_value() && *produce_err == nexus::WireError::None)
-        << "el proxy no relevó el Produce al backend a tiempo";
+        << "el proxy no relevó el Produce al backend";
     EXPECT_EQ(base_offset, 0);  // primera escritura del log del backend.
 
     // Fetch por el MISMO canal de proxy: con RF=1 la escritura está confirmada → high_watermark
     // = 5.
-    ASSERT_TRUE(client.has_value());
     const std::optional<std::int64_t> hwm = try_fetch_hwm(client->fd(), "orders", 0);
     ASSERT_TRUE(hwm.has_value());
     EXPECT_EQ(*hwm, 5);
 
     client.reset();  // cierra el cliente: el relevo ve EOF y devuelve la conexión al pool.
-    proxy->stop();
-    backend->stop();
-    proxy_thread.join();
-    backend_thread.join();
+    // `proxy_runner`/`backend_runner` paran y unen al destruirse, tras este `client`.
 }
 
 }  // namespace
