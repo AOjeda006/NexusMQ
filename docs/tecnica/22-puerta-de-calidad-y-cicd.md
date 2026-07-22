@@ -36,12 +36,17 @@ El CI (GitHub Actions, `.github/workflows/ci.yml`) replica la puerta en varios *
   *warnings-as-errors* → `ctest`).
 - **sanitizers** (ASan/UBSan, `linux-gcc-asan`).
 - **ThreadSanitizer** (`linux-gcc-tsan`) para las colas lock-free.
+- **formato & análisis estático**: `clang-format --dry-run --Werror` sobre todos los `.hpp`/`.cpp`
+  versionados y `clang-tidy` sobre `src/*.cpp` con el `compile_commands.json` del preset
+  Clang/libc++.
 
 El gate de CI **no es solo build+test**: incluye lint, formato y sanitizers; todo debe pasar.
+Dispara en *push* y *pull request* contra `main`, con `concurrency` que **cancela** la ejecución
+anterior de la misma referencia si llega un *push* nuevo.
 
-> **Estado actual:** las GitHub Actions están **desactivadas temporalmente** (cuota); el
-> workflow está versionado como `ci.yml.disabled` y se reactivará al publicar. Mientras tanto,
-> la puerta de calidad se ejecuta **en local** antes de cada *push*.
+> **Estado actual:** las GitHub Actions están **activas** (`.github/workflows/ci.yml`); el estado
+> de la última ejecución se ve en el *badge* del [README](../../README.md). La puerta de calidad
+> se ejecuta igualmente **en local** antes de cada *push*: el CI confirma, no sustituye.
 
 ## 22.4 Build-once, promote
 

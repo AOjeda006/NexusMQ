@@ -32,16 +32,23 @@
   implementado (AES-256-GCM opcional, [ADR-0031](../adr/adr-0031-cifrado-en-reposo-aes-gcm.md)); lo
   que queda como trabajo futuro es la **rotación** de la KEK (re-cifrado en caliente). El formato ya
   reserva *salt* e identificadores por segmento para soportarla.
-- **Dashboard gráfico propio**: la observabilidad se expone vía Prometheus/CLI; un panel
-  Grafana es opcional y *self-hosted*.
+- **Interfaz gráfica dentro del broker**: el broker **no sirve UI**. Expone la observabilidad por
+  Prometheus/CLI y, para la consola, el snapshot JSON y el *stream* SSE del plano REST de operación
+  (ver [capítulo 15](./15-api-rest-administracion.md)); un panel Grafana es opcional y *self-hosted*.
+  La consola web vive en un **repositorio aparte** (*NexusMQ Console*), que consume esa API como
+  cliente externo: mantener la UI fuera del broker evita acoplar el núcleo a un ciclo de vida de
+  *frontend*.
 - **HLC y ordenación causal entre particiones.** El orden es por **offset** dentro de una
   partición; no hay relojes lógicos híbridos entre particiones.
 
 ## 30.2 Deudas acotadas
 
-- **CI desactivado temporalmente.** Las GitHub Actions están en pausa por cuota; la puerta
-  de calidad se ejecuta en local y se reactivará el CI al publicar (ver
-  [capítulo 22](./22-puerta-de-calidad-y-cicd.md)).
+- **Clúster multinodo entre procesos.** La maquinaria de consenso por partición existe y se valida
+  con clústeres **simulados** (`replicated_partition`, `cluster_e2e`), pero `nexusd` no expone aún
+  flags para configurar *peers*: cada proceso arranca aislado con `replication_factor=1` (incluidos
+  los tres servicios del *compose*). El clúster real —*membership*, RF≥2, replicación entre
+  procesos— es un hito posterior con su propio ADR (ver
+  [capítulo 25](./25-despliegue.md), [ADR-0040](../adr/adr-0040-topologia-raft-single-node.md)).
 - **Madurez del modo proxy.** El modo nativo (*smart-client* al líder) es el primario y el
   más optimizado; el modo proxy con *upstream pool*
   ([ADR-0027](../adr/adr-0027-modo-proxy-upstream-pool.md)) es secundario y opt-in.
