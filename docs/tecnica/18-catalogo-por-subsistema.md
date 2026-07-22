@@ -112,10 +112,14 @@ los códigos se mapean a los de Kafka en el borde (ver [capítulo 14](./14-subco
 
 ## nexus-telemetry
 **Responsabilidad:** observabilidad: métricas, logs y *tracing*.
-**Tipos clave:** `metrics` (exposición Prometheus), `logging` (JSON estructurado), `tracing`.
+**Tipos clave:** `metrics` (`MetricsRegistry`, `Counter`, `Gauge`, `Histogram` y `GaugeGuard`, la
+guarda RAII que cuenta un recurso vivo mientras existe, [ADR-0039](../adr/adr-0039-gauge-conexiones-activas-raii.md)),
+`logging` (JSON estructurado), `tracing`.
 **Afinidad:** **THREAD-SAFE** en la agregación/exposición de métricas.
 **Invariantes:** sin *logging* síncrono caro en el camino caliente; las métricas cubren las
-cuatro señales de oro (ver [capítulo 12](./12-observabilidad.md)).
+cuatro señales de oro (ver [capítulo 12](./12-observabilidad.md)); el catálogo de nombres as-built
+es [`docs/metrics.md`](../metrics.md). `GaugeGuard` es movible pero **no copiable** (evita el doble
+decremento) e inerte por defecto.
 
 ## nexus-server
 **Responsabilidad:** *composition root* de `nexusd`; ensambla todo y enruta peticiones.

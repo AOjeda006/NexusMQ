@@ -47,4 +47,6 @@
 
 > Las convenciones de proyecto (naming, errores, testing, concurrencia, memoria,
 > rendimiento, redes, datos distribuidos, seguridad, CI/CD) están normalizadas en la
-> `BibliotecaDocumentacion`, que es la autoridad de estilo importada por el `CLAUDE.md`.
+> `BibliotecaDocumentacion`, la autoridad de estilo que este proyecto sigue; lo que de ella se
+> aplica aquí queda recogido en el [capítulo 6](./06-principios-de-diseno.md) y en la
+> [puerta de calidad](./22-puerta-de-calidad-y-cicd.md).
