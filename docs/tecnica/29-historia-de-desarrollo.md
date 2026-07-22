@@ -91,9 +91,45 @@ ABI C ([ADR-0020](../adr/adr-0020-binding-python-abi-c.md)); y el **port a Windo
 (`__cpuid` + intrínsecos SSE4.2), lo que evidencia que las *CPU features* se detectan y
 usan distinto según el compilador.
 
-## 29.7 Estado actual
+## 29.7 Cierre a v1.0 — las tres features de "trabajo futuro"
 
-Fases 1→4 implementadas; el árbol compila y pasa la suite con GCC/libstdc++ y Clang/libc++,
-y el backend Windows está verificado en runtime con MSVC. Las **GitHub Actions** están
-desactivadas temporalmente (cuota) y se reactivan al publicar; la puerta de calidad se
-mantiene en local. La documentación se está consolidando en su forma final (esta misma).
+Cerradas las cuatro fases, se acometieron como **hitos secuenciales** las tres capacidades que
+este mismo documento listaba como trabajo futuro, cada una **opcional con degradación limpia**
+(sin configurar, el broker se comporta igual que antes):
+
+- **Cifrado en reposo** del log con AES-256-GCM
+  ([ADR-0031](../adr/adr-0031-cifrado-en-reposo-aes-gcm.md)): AEAD **por bloque de escritura**, DEK
+  **por segmento** derivada por HKDF de una KEK de entorno, y cabecera de segmento que permite
+  autodetectar logs cifrados y planos.
+- **Almacenamiento por niveles** ([ADR-0032](../adr/adr-0032-tiered-storage-puerto-y-tier-local.md)):
+  puerto `StorageTier` con adaptador local, *offload* de segmentos **sellados**, reclamación del
+  disco **solo tras confirmar** la subida y rehidratación transparente.
+- ***Exactly-once* multi-partición nativo**
+  ([ADR-0033](../adr/adr-0033-exactly-once-nativo-transacciones.md) /
+  [ADR-0034](../adr/adr-0034-2pc-logueado-recuperable.md)): coordinador de transacciones como FSM
+  sin E/S, marcadores de control COMMIT/ABORT, LSO y `read_committed`, sobre un 2PC **logueado y
+  recuperable**.
+
+Después, una pasada de **operación y observabilidad** enriqueció el plano REST hasta hacer viable
+la consola web como cliente externo: estado de clúster/Raft
+([ADR-0035](../adr/adr-0035-estado-cluster-raft-rest-admin.md)), aplicación de la retención en
+runtime ([ADR-0036](../adr/adr-0036-aplicacion-retencion-runtime.md)), config de *topic* mutable
+en caliente ([ADR-0037](../adr/adr-0037-config-topic-mutable-cross-core.md)), *streaming* SSE
+([ADR-0038](../adr/adr-0038-streaming-sse-admin-http.md)), el gauge de conexiones activas por plano
+([ADR-0039](../adr/adr-0039-gauge-conexiones-activas-raii.md)) y la topología visible en single-node
+([ADR-0040](../adr/adr-0040-topologia-raft-single-node.md)).
+
+**Aprendizajes:** la **simulación determinista** (reloj y red virtuales, RNG sembrado) fue lo que
+destapó un fallo real de *fencing* en el coordinador de transacciones —un fallo que la suite
+convencional no alcanzaba—, confirmando que en sistemas distribuidos el caos **reproducible** vale
+más que el volumen de tests. Y que ofrecer cada capacidad como **opt-in con degradación limpia**
+mantiene el camino por defecto byte-idéntico, lo que hace de las regresiones un contraste barato.
+
+## 29.8 Estado actual
+
+Fases 1→4 implementadas y **cierre a v1.0** con las tres features anteriores; el árbol compila y
+pasa la suite con GCC/libstdc++ y Clang/libc++, y el backend Windows está verificado en runtime
+con MSVC. Las **GitHub Actions** están activas y replican la puerta de calidad (ambos compiladores,
+sanitizers, formato y `clang-tidy`), que se ejecuta igualmente en local antes de cada *push* (ver
+[capítulo 22](./22-puerta-de-calidad-y-cicd.md)). La documentación técnica está en su forma
+**final**: estos 30 capítulos, los diagramas, los 40 ADR y los contratos as-built de `docs/`.
